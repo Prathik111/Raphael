@@ -1,0 +1,43 @@
+"""Public error API."""
+
+from ai_ecosystem.core.errors.exceptions import (
+    AiEcosystemError,
+    AuthorizationDeniedError,
+    ContextSerializationError,
+    DomainValidationError,
+    EventBusError,
+    InvalidStateTransitionError,
+    ModelError,
+    ModelMalformedError,
+    ModelTimeoutError,
+    ModelUnavailableError,
+    NoSuitableModelError,
+    PersistenceError,
+    PlanValidationError,
+    ResourceNotFoundError,
+    SubscriberError,
+    ToolError,
+    ToolExecutionError,
+    ToolTimeoutError,
+)
+
+__all__ = [
+    "AiEcosystemError",
+    "AuthorizationDeniedError",
+    "ContextSerializationError",
+    "DomainValidationError",
+    "EventBusError",
+    "InvalidStateTransitionError",
+    "ModelError",
+    "ModelMalformedError",
+    "ModelTimeoutError",
+    "ModelUnavailableError",
+    "NoSuitableModelError",
+    "PersistenceError",
+    "PlanValidationError",
+    "ResourceNotFoundError",
+    "SubscriberError",
+    "ToolError",
+    "ToolExecutionError",
+    "ToolTimeoutError",
+]

@@ -1,0 +1,31 @@
+[project]
+name = "ai-ecosystem"
+version = "0.1.0"
+description = "AI Ecosystem - personal AI operating layer (Part 1: architecture + contracts)"
+readme = "docs/VISION.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+ai-ecosystem-serve = "ai_ecosystem.interface.serve:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["src"]
+asyncio_mode = "auto"

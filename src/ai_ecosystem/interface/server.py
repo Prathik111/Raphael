@@ -1,0 +1,211 @@
+"""Local HTTP transport for the runtime API (Gate 20).
+
+Stdlib only (no new dependencies). Binds 127.0.0.1: every route maps
+1:1 onto RuntimeAPI; there is deliberately NO route that executes
+tools, mutates policy, or returns secrets. JSON in/out, 1 MB cap.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Optional
+from urllib.parse import parse_qs, urlparse
+
+from ai_ecosystem.core.errors.exceptions import (
+    AiEcosystemError,
+    ResourceNotFoundError,
+)
+from ai_ecosystem.interface.api import ApiError, RuntimeAPI
+
+MAX_BODY_BYTES = 1_000_000
+
+
+class ApiUnavailableError(AiEcosystemError):
+    """The runtime could not be reached (client-side)."""
+
+
+def _error_code(exc: Exception) -> tuple[int, str]:
+    if isinstance(exc, ApiError):
+        table = {"malformed_request": 400, "invalid_transition": 409,
+                 "unsupported": 501, "unavailable": 503}
+        return table.get(exc.code, 400), exc.code
+    if isinstance(exc, ResourceNotFoundError):
+        return 404, "not_found"
+    return 500, "internal_error"
+
+
+class _Handler(BaseHTTPRequestHandler):
+    api: RuntimeAPI
+    # HTTP/1.0 + explicit close: avoids half-open keep-alive resets
+    # (Windows loopback RST / WinError 10053 under rapid test traffic).
+    protocol_version = "HTTP/1.0"
+
+    def log_message(self, *args: Any) -> None:  # quieter test output
+        pass
+
+    def _send(self, status: int, payload: Any) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        # The Tauri webview serves the UI from a custom scheme
+        # (tauri://localhost), so every API call is cross-origin.
+        # The API is loopback-only with no credentials, so a wildcard
+        # origin is safe and required for fetch() to read responses.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+        if self.command.upper() != "OPTIONS":
+            self.wfile.write(body)
+        self.close_connection = True
+
+    def _read_json(self) -> Any:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_BODY_BYTES:
+            raise ApiError("malformed_request", "request body too large")
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ApiError("malformed_request", f"invalid JSON: {exc}") from exc
+
+    def _route(self) -> None:
+        if self.command.upper() == "OPTIONS":
+            self._send(204, {})  # CORS preflight: headers carry the grant
+            return
+        parsed = urlparse(self.path)
+        parts = [p for p in parsed.path.split("/") if p]
+        query = parse_qs(parsed.query)
+        method = self.command.upper()
+        try:
+            if method == "GET" and parts == ["health"]:
+                self._send(200, {"status": "ok"})
+            elif method == "POST" and parts == ["tasks"]:
+                body = self._read_json()
+                goal = body.get("goal") if isinstance(body, dict) else None
+                self._send(201, self.api.create_task(goal))
+            elif method == "GET" and parts == ["tasks"]:
+                self._send(200, self.api.list_tasks())
+            elif method == "GET" and len(parts) == 2 and parts[0] == "tasks":
+                self._send(200, self.api.get_task(parts[1]))
+            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" \
+                    and parts[2] == "status":
+                self._send(200, self.api.get_task_status(parts[1]))
+            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" \
+                    and parts[2] == "result":
+                self._send(200, self.api.get_task_result(parts[1]))
+            elif method == "POST" and len(parts) == 3 and parts[0] == "tasks" \
+                    and parts[2] == "cancel":
+                self._send(200, self.api.cancel_task(parts[1]))
+            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" \
+                    and parts[2] == "events":
+                try:
+                    since = int(query.get("since", ["0"])[0] or 0)
+                except (TypeError, ValueError):
+                    raise ApiError("malformed_request",
+                                   "'since' must be an integer") from None
+                if since < 0:
+                    raise ApiError("malformed_request",
+                                   "'since' must be >= 0")
+                self._send(200, self.api.get_task_events(parts[1], since))
+            elif method == "GET" and parts == ["agents", "status"]:
+                self._send(200, self.api.get_agent_status())
+            elif method == "GET" and parts == ["awareness"]:
+                self._send(200, self.api.get_system_awareness())
+            elif method == "GET" and parts == ["models"]:
+                self._send(200, self.api.get_models())
+            elif method == "GET" and parts == ["skills"]:
+                self._send(200, self.api.get_skills())
+            else:
+                self._send(404, {"code": "not_found", "message": "unknown route"})
+        except Exception as exc:  # noqa: BLE001 -- mapped, never leaks
+            status, code = _error_code(exc)
+            self._send(status, {"code": code, "message": str(exc)})
+
+    do_GET = _route
+    do_POST = _route
+    do_OPTIONS = _route
+
+
+class LocalHttpServer:
+    """Threaded localhost server exposing RuntimeAPI over HTTP."""
+
+    def __init__(self, api: RuntimeAPI, host: str = "127.0.0.1", port: int = 0,
+                 allow_remote: bool = False) -> None:
+        if not allow_remote and host not in ("127.0.0.1", "localhost", "::1"):
+            raise ApiError("malformed_request",
+                           f"refusing non-loopback bind {host!r} without "
+                           "allow_remote=True (the API has no auth layer)")
+        handler = type("BoundHandler", (_Handler,), {"api": api})
+        self._server = ThreadingHTTPServer((host, port), handler)
+        self._thread: Optional[threading.Thread] = None
+
+    @property
+    def url(self) -> str:
+        """Base URL (port assigned by the OS when 0 was requested)."""
+        host, port = self._server.server_address
+        return f"http://{host}:{port}"
+
+    def start(self) -> "LocalHttpServer":
+        """Serve in a background thread."""
+        self._thread = threading.Thread(target=self._server.serve_forever,
+                                        daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        """Shut down cleanly."""
+        self._server.shutdown()
+        self._server.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+
+
+class ApiClient:
+    """Minimal test/operator client for the local API."""
+
+    def __init__(self, base_url: str, timeout_s: float = 5.0) -> None:
+        self._base = base_url.rstrip("/")
+        self._timeout = timeout_s
+
+    def _call(self, method: str, path: str, body: Any = None) -> Any:
+        import urllib.error
+        import urllib.request
+
+        data = json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(
+            self._base + path, data=data, method=method,
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")
+            try:
+                payload = json.loads(detail)
+                raise ApiError(payload.get("code", "http_error"),
+                               payload.get("message", detail)) from exc
+            except (ValueError, AttributeError):
+                raise ApiError("http_error", f"{exc.code}: {detail}") from exc
+        except OSError as exc:
+            raise ApiUnavailableError(f"runtime unreachable: {exc}") from exc
+
+    def health(self) -> Any:
+        """Liveness probe."""
+        return self._call("GET", "/health")
+
+    def submit(self, goal: str) -> Any:
+        """Submit a goal (returns task identity)."""
+        return self._call("POST", "/tasks", {"goal": goal})
+
+    def get(self, path: str) -> Any:
+        """Raw GET helper for tests."""
+        return self._call("GET", path)
+
+    def post(self, path: str, body: Any = None) -> Any:
+        """Raw POST helper for tests."""
+        return self._call("POST", path, body)

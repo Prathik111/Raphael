@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime state (STRUCTURE.md: data/ is local-only, git-ignored)
+data/*
+*.db
+workspace/
+
+# Secrets / local env
+.env
+*.pem
+*.key
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node / Tauri (desktop/, Gates 20+)
+node_modules/
+desktop/dist/
+desktop/src-tauri/target/
