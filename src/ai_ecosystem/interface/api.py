@@ -105,14 +105,18 @@ class RuntimeAPI:
                 "next": sorted(s.value for s in sm.next_states(task.state))}
 
     def get_task_events(self, task_id: str, since: int = 0) -> list[dict[str, Any]]:
-        """Event Store entries for one task (polling fallback for the UI)."""
+        """Event Store entries for one task (polling fallback for the UI).
+
+        ``since`` is a cursor: the last sequence the caller has seen
+        (0 = nothing seen yet). Sequences are the store's durable
+        append numbers, so polling never duplicates or misses entries.
+        """
         self._require(task_id)
         return [
             {"seq": seq, "type": event.event_type.value,
              "task_id": event.task_id, "payload": _redacted(event),
              "created_at": event.created_at.isoformat()}
-            for seq, event in enumerate(self._events_for(task_id))
-            if seq >= since
+            for seq, event in self._events_for_since(task_id, since)
         ]
 
     def get_task_result(self, task_id: str) -> dict[str, Any]:
@@ -199,12 +203,31 @@ class RuntimeAPI:
             return []
         return [e for e in self._event_store.list() if e.task_id == task_id]
 
+    def _events_for_since(self, task_id: str,
+                          since: int) -> list[tuple[int, Event]]:
+        """(durable sequence, event) for one task newer than ``since``."""
+        if self._event_store is None:
+            return []
+        events_since = getattr(self._event_store, "events_since", None)
+        if callable(events_since):
+            return [(seq, event) for seq, event in events_since(since - 1)
+                    if event.task_id == task_id]
+        return [(seq, event)
+                for seq, event in enumerate(self._event_store.list())
+                if event.task_id == task_id and seq >= since]
+
 
 def _redacted(event: Event) -> dict[str, Any]:
-    """Event payloads pass through (they never hold secrets by design)."""
-    payload = dict(event.payload)
-    for key in list(payload):
-        lowered = key.lower()
-        if any(word in lowered for word in ("key", "token", "secret", "password")):
-            payload[key] = "***"
-    return payload
+    """Event payloads pass through the CENTRAL redactor.
+
+    Review fix 08/25: one redaction service everywhere. secrets.redact
+    masks secret-smelling keys AND known credential formats at any
+    depth -- strictly stronger than the old substring list, and the
+    same function the runner, logs, and audit path use.
+    """
+    from ai_ecosystem.core.secrets import redact
+
+    try:
+        return redact(dict(event.payload))
+    except Exception:  # noqa: BLE001 -- redaction degrades, never fails
+        return {"redacted": True}

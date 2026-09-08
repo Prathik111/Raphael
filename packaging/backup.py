@@ -26,21 +26,38 @@ USER_TABLES = ["tasks", "contexts", "events", "memories", "skills", "agents",
 
 def backup_user_data(db_path: str, out_path: str,
                      extra_dirs: Optional[list[str]] = None) -> str:
-    """Copy the database file + metadata manifest into a backup path."""
+    """Copy the database file + metadata manifest into a backup path.
+
+    Uses the SQLite online-backup API into a temp file first, so the
+    archive is a consistent single file however the live database is
+    journaled (WAL sidecars included, no partial writes).
+    """
+    import tempfile
     import zipfile
 
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     manifest = {"db": Path(db_path).name, "extra_dirs": extra_dirs or []}
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.write(db_path, manifest["db"])
-        for extra in extra_dirs or []:
-            root = Path(extra)
-            if root.is_dir():
-                for path in sorted(root.rglob("*")):
-                    if path.is_file():
-                        archive.write(path, f"extra/{root.name}/{path.name}")
-        archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+    with tempfile.TemporaryDirectory() as tmp:
+        snapshot = str(Path(tmp) / manifest["db"])
+        origin = sqlite3.connect(db_path)
+        try:
+            target = sqlite3.connect(snapshot)
+            try:
+                origin.backup(target)
+            finally:
+                target.close()
+        finally:
+            origin.close()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.write(snapshot, manifest["db"])
+            for extra in extra_dirs or []:
+                root = Path(extra)
+                if root.is_dir():
+                    for path in sorted(root.rglob("*")):
+                        if path.is_file():
+                            archive.write(path, f"extra/{root.name}/{path.name}")
+            archive.writestr("manifest.json", json.dumps(manifest, indent=2))
     return str(out)
 
 
@@ -52,10 +69,33 @@ def restore_user_data(backup_path: str, db_path: str,
     with zipfile.ZipFile(backup_path) as archive:
         manifest = json.loads(archive.read("manifest.json"))
         if tables is None:
-            archive.extract(manifest["db"], Path(db_path).parent)
-            extracted = Path(db_path).parent / manifest["db"]
-            if str(extracted) != str(db_path):
-                shutil.move(str(extracted), db_path)
+            # Write aside first, then replace: the operator's live file
+            # is never deleted or half-written, even if archived and
+            # live names collide.
+            staging = Path(db_path).parent / (manifest["db"] + ".incoming")
+            staging.write_bytes(archive.read(manifest["db"]))
+            shutil.move(str(staging), db_path)
+            # Drop WAL sidecars of the pre-restore database: they
+            # describe the file we just replaced and would shadow the
+            # restored content on the next open.
+            import gc as _gc
+            import time as _time
+
+            for suffix in ("-wal", "-shm", "-journal"):
+                sidecar = Path(str(db_path) + suffix)
+                for _ in range(100):
+                    try:
+                        sidecar.unlink(missing_ok=True)
+                        break
+                    except PermissionError:
+                        # A live connection (often an unclosed handle in
+                        # this process) still owns it; collect and retry.
+                        _gc.collect()
+                        _time.sleep(0.05)
+                else:
+                    raise RuntimeError(
+                        f"restore blocked: {sidecar.name} is locked by a "
+                        "live database connection; close it and retry")
             return db_path
         # Selective restore: copy table rows from a temp extraction.
         tmp = Path(db_path).parent / "_restore_tmp.db"

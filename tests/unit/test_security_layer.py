@@ -16,6 +16,7 @@ from ai_ecosystem.security import (
     RiskEngine,
 )
 from ai_ecosystem.tools import (
+    GrantAllAuthorizer,
     ToolRegistry,
     ToolRunner,
     filesystem_tools,
@@ -156,3 +157,49 @@ def test_no_path_from_intention_to_tool_without_policy(registry, tmp_path):
     result = runner.run(forged)
     assert result.success is False
     assert "denied" in result.error
+
+
+def test_shell_interpreters_blocked_by_default(registry):
+    runner = ToolRunner(registry, AuthorizationManager(registry))
+    for shell in (["cmd", "/c", "echo hi"],
+                  ["powershell", "-Command", "echo hi"],
+                  ["bash", "-c", "echo hi"]):
+        result = runner.run(
+            registry.build_call("t", "terminal.execute", {"command": shell}))
+        assert result.success is False, shell
+        assert "shell interpreter" in result.error, shell
+
+
+def test_shell_interpreters_allowed_with_opt_in(registry):
+    manager = AuthorizationManager(
+        registry, allow_shells=True,
+        policy_engine=PolicyEngine(
+            Policy(name="shells-ok", auto_grant_up_to=RiskLevel.HIGH)))
+    permission = manager.authorize(
+        "t", registry.get("terminal.execute"),
+        registry.build_call("t", "terminal.execute",
+                            {"command": ["cmd", "/c", "echo hi"]}))
+    assert permission.decision is PermissionDecision.GRANTED
+    assert "shell interpreter" not in permission.reason
+
+
+def test_task_id_mismatch_denied(registry):
+    manager = AuthorizationManager(registry)
+    call = registry.build_call("task-a", "filesystem.read", {"path": "x"})
+    denied = manager.authorize("task-b", registry.get("filesystem.read"), call)
+    assert denied.decision is PermissionDecision.DENIED
+    assert "mismatch" in denied.reason
+
+
+def test_git_cwd_jailed_to_root(tmp_path):
+    from ai_ecosystem.tools import ToolRegistry, ToolRunner, git_tools
+
+    reg = ToolRegistry()
+    for tool, handler in git_tools(tmp_path):
+        reg.register(tool, handler)
+    runner = ToolRunner(reg, GrantAllAuthorizer())
+    outside = str(tmp_path.parent)
+    escaped = runner.run(
+        reg.build_call("t", "git.status", {"cwd": outside}))
+    assert escaped.success is False
+    assert "escapes" in escaped.error

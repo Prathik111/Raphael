@@ -34,6 +34,7 @@ from ai_ecosystem.core.models.enums import (
 )
 from ai_ecosystem.core.secrets import looks_like_secret_value, redact
 from ai_ecosystem.tools.registry.registry import ToolRegistry
+from ai_ecosystem.tools.registry.validation import check_arguments
 
 
 def _safe_payload(arguments: dict) -> dict:
@@ -186,10 +187,9 @@ class ToolRunner:
         )
 
     def _validate(self, tool: Tool, call: ToolCall) -> Optional[str]:
-        required = tool.input_schema.get("required", [])
-        missing = [name for name in required if name not in call.arguments]
-        if missing:
-            return f"missing required arguments: {', '.join(missing)}"
+        problems = check_arguments(tool, dict(call.arguments))
+        if problems:
+            return "; ".join(problems)
         return None
 
     def _deny(self, call: ToolCall, tool: Tool, reason: str) -> ToolResult:
@@ -209,8 +209,18 @@ class ToolRunner:
             error=reason,
         )
 
-    def run(self, call: ToolCall) -> ToolResult:
-        """Execute one call; always returns a ToolResult (never raises)."""
+    def run(self, call: ToolCall, cancel_token: Any = None) -> ToolResult:
+        """Execute one call; always returns a ToolResult (never raises).
+
+        A cancelled token fails fast before touching the handler: steps
+        cancelled while queued never start work.
+        """
+        if cancel_token is not None and getattr(
+                cancel_token, "cancelled", False):
+            call.status = ToolCallStatus.FAILED
+            return ToolResult(
+                task_id=call.task_id, tool_call_id=call.id, success=False,
+                error="cancelled before execution")
         tool = self._registry.get(call.tool)
         if tool is None:
             return self._fail(

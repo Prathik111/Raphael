@@ -27,6 +27,9 @@ class AppConfig(BaseModel):
     max_retries: int = 3
     sync_max_retries: int = 3
     scheduler_workers: int = 4
+    allow_shells: bool = False
+    max_workers: int = 2
+    max_queued_tasks: int = 16
 
     @model_validator(mode="after")
     def _production_bind_loopback(self) -> "AppConfig":
@@ -45,7 +48,8 @@ class AppConfig(BaseModel):
         values: dict[str, str] = {}
         fields = ("environment", "db_path", "api_host", "api_port",
                   "log_level", "lease_timeout_s", "max_retries",
-                  "sync_max_retries", "scheduler_workers")
+                  "sync_max_retries", "scheduler_workers", "allow_shells",
+                  "max_workers", "max_queued_tasks")
         for field in fields:
             raw = os.environ.get(f"{prefix}{field.upper()}")
             if raw is not None:

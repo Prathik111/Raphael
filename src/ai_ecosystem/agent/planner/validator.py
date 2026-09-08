@@ -7,9 +7,12 @@ step ``id`` values, which model output must therefore state explicitly.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from ai_ecosystem.core.errors.exceptions import PlanValidationError
 from ai_ecosystem.core.models.domain import Plan, PlanStep
 from ai_ecosystem.core.models.enums import RiskLevel
+from ai_ecosystem.tools.registry.validation import check_arguments
 
 
 class DependencyResolver:
@@ -51,10 +54,6 @@ class DependencyResolver:
 
 class PlanValidator:
     """Strict structural gate every plan must pass before execution."""
-
-    #: JSON-schema type names the validator understands.
-    _TYPES = {"string": str, "array": list, "object": dict,
-              "boolean": bool, "number": (int, float)}
 
     def __init__(self, known_tools: set[str] | None = None,
                  required_args: dict[str, set[str]] | None = None,
@@ -114,24 +113,26 @@ class PlanValidator:
                     f"step {step.id!r} tool {name!r} is missing required "
                     f"arguments: {', '.join(missing)}"
                 )
+            # Same canonical contract check the runner enforces at the
+            # final boundary (presence + JSON types), adapted from the
+            # registry contract into the validator's dict-based inputs.
             properties = {}
             schema = self._schemas.get(name)
             if isinstance(schema, dict):
                 props = schema.get("properties")
                 if isinstance(props, dict):
                     properties = props
-            given = step.arguments or {}
-            for param, want in properties.items():
-                if param not in given:
-                    continue
-                want_type = self._TYPES.get(want)
-                if want_type is not None and not isinstance(
-                        given[param], want_type):
-                    raise PlanValidationError(
-                        f"step {step.id!r} tool {name!r} argument {param!r} "
-                        f"must be {want}, got "
-                        f"{type(given[param]).__name__}"
-                    )
+            contract = SimpleNamespace(input_schema={
+                "required": sorted(required), "properties": properties})
+            problems = check_arguments(contract, dict(step.arguments or {}))
+            # Presence errors already raised above with step context.
+            type_problems = [p for p in problems
+                             if not p.startswith("missing required")]
+            if type_problems:
+                raise PlanValidationError(
+                    f"step {step.id!r} tool {name!r}: "
+                    f"{'; '.join(type_problems)}"
+                )
         if step.risk is RiskLevel.CRITICAL:
             raise PlanValidationError(
                 f"step {step.id!r} is CRITICAL risk and cannot be auto-planned"

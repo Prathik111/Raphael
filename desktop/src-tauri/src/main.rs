@@ -59,6 +59,34 @@ fn backend_status(state: State<BackendState>) -> BackendStatus {
     }
 }
 
+/// Bearer credential for the local API, read from the backend's file.
+///
+/// Same-process IPC only (never leaves the machine): the UI needs this
+/// because the backend requires `Authorization: Bearer` on every route.
+/// Retries briefly -- the backend writes the file before binding, but a
+/// slow first start can lag the UI's first poll.
+#[tauri::command]
+fn backend_api_credential() -> Result<String, String> {
+    let path = data_dir().join("api_credential");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match std::fs::read_to_string(&path) {
+            Ok(cred) if !cred.trim().is_empty() => {
+                return Ok(cred.trim().to_string())
+            }
+            _ => {
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "no API credential at {} (is the backend running?)",
+                        path.display()
+                    ));
+                }
+                std::thread::sleep(POLL_STEP);
+            }
+        }
+    }
+}
+
 fn backend_addr() -> SocketAddr {
     format!("{}:{}", BACKEND_HOST, BACKEND_PORT)
         .parse()
@@ -417,7 +445,10 @@ fn main() {
 
     tauri::Builder::default()
         .manage(BackendState(shared))
-        .invoke_handler(tauri::generate_handler![backend_status])
+        .invoke_handler(tauri::generate_handler![
+            backend_status,
+            backend_api_credential
+        ])
         .setup(|app| {
             // Keep a handle so windows can resolve app state normally.
             let _ = app.handle();

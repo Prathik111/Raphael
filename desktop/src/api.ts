@@ -107,6 +107,45 @@ export async function backendStatus(): Promise<BackendStatus | null> {
   }
 }
 
+const CRED_KEY = "ai-eco-backend-credential";
+let apiCredential: string | null = null;
+
+export function setApiCredential(credential: string | null): void {
+  apiCredential =
+    credential && credential.trim() ? credential.trim() : null;
+  try {
+    if (apiCredential) window.localStorage.setItem(CRED_KEY, apiCredential);
+    else window.localStorage.removeItem(CRED_KEY);
+  } catch {
+    // Private mode: memory-only credential still works for the session.
+  }
+}
+
+export function loadApiCredential(): string | null {
+  if (apiCredential) return apiCredential;
+  try {
+    apiCredential = window.localStorage.getItem(CRED_KEY);
+  } catch {
+    apiCredential = null;
+  }
+  return apiCredential;
+}
+
+/** Bearer credential minted by the backend; the shell reads it from the
+ *  credential file so the UI never asks the operator for it. Manual entry
+ *  (Settings) covers externally-run backends. */
+export async function fetchBackendCredential(): Promise<string | null> {
+  try {
+    const core = window.__TAURI__?.core;
+    if (!core) return loadApiCredential();
+    const credential = await core.invoke<string>("backend_api_credential");
+    setApiCredential(credential);
+    return credential;
+  } catch {
+    return loadApiCredential();
+  }
+}
+
 export class BackendError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -120,11 +159,16 @@ async function request<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const credential = loadApiCredential();
+  if (credential) headers["Authorization"] = `Bearer ${credential}`;
   let response: Response;
   try {
     response = await fetch(`${base}${path}`, {
-      headers: { "Content-Type": "application/json" },
       ...init,
+      headers: { ...headers, ...((init?.headers as Record<string, string>) ?? {}) },
     });
   } catch (err) {
     throw new Error(

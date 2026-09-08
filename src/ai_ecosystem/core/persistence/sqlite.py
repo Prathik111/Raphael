@@ -51,7 +51,7 @@ from ai_ecosystem.learning.models import (
 )
 from ai_ecosystem.system.monitor.models import SystemSnapshot
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DDL = [
     "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -83,6 +83,16 @@ _DDL = [
     "CREATE TABLE IF NOT EXISTS scheduler_jobs (id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, updated_at TEXT NOT NULL)",
 ]
 
+#: Numbered forward migrations (review fix 09/36): each entry is the
+#: DDL batch for that version. migrate() applies every version newer
+#: than the journal, in order, and journals each one -- so upgrades
+#: are sequential, idempotent, and auditable.
+_MIGRATIONS: dict[int, list[str]] = {
+    1: _DDL,
+    2: ["CREATE TABLE IF NOT EXISTS schema_migrations "
+        "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"],
+}
+
 T = TypeVar("T", bound=Entity)
 
 
@@ -98,13 +108,34 @@ class Database:
             raise PersistenceError(f"cannot open database {path!r}: {exc}") from exc
         self._lock = threading.RLock()
         self._tx_depth = 0
-
-    def migrate(self) -> int:
-        """Create/upgrade schema idempotently; return schema version."""
+        # Concurrency posture (review fix 09/38): WAL lets readers run
+        # alongside the writer thread pool; busy_timeout turns "database
+        # is locked" crashes into bounded waits. Best-effort: :memory:
+        # and exotic filesystems may refuse WAL; the DB still works.
         try:
             with self._lock:
-                for stmt in _DDL:
-                    self._conn.execute(stmt)
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA busy_timeout=5000")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.Error:
+            pass
+
+    def migrate(self) -> int:
+        """Apply pending numbered migrations in order; return version."""
+        try:
+            with self._lock:
+                # The journal itself is bootstrap, not a version: it must
+                # exist before v1 can record into it.
+                self._conn.execute(
+                    "CREATE TABLE IF NOT EXISTS schema_migrations "
+                    "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+                applied = self._applied_versions()
+                for version in sorted(_MIGRATIONS):
+                    if version in applied:
+                        continue
+                    for stmt in _MIGRATIONS[version]:
+                        self._conn.execute(stmt)
+                    self._record_version(version)
                 self._conn.execute(
                     "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                     (str(SCHEMA_VERSION),),
@@ -112,6 +143,28 @@ class Database:
         except sqlite3.Error as exc:
             raise PersistenceError(f"migration failed: {exc}") from exc
         return SCHEMA_VERSION
+
+    def _applied_versions(self) -> set[int]:
+        """Journaled versions; legacy v1 DBs backfill from meta."""
+        try:
+            rows = self._conn.execute(
+                "SELECT version FROM schema_migrations").fetchall()
+            return {int(r[0]) for r in rows}
+        except sqlite3.Error:
+            pass  # pre-v2 database: no journal yet
+        try:
+            rows = self._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_version'").fetchall()
+            if rows:
+                return set(range(1, int(rows[0][0]) + 1))
+        except sqlite3.Error:
+            pass
+        return set()
+
+    def _record_version(self, version: int) -> None:
+        self._conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at)"
+            " VALUES (?, ?)", (version, utcnow().isoformat()))
 
     def schema_version(self) -> Optional[int]:
         """Current schema version, or None before the first migrate()."""
@@ -171,12 +224,40 @@ class Database:
                 raise PersistenceError(f"database error: {exc}") from exc
 
     def close(self) -> None:
-        """Close the connection (idempotent)."""
+        """Checkpoint (WAL) and close the connection (idempotent)."""
         with self._lock:
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass  # non-WAL databases have nothing to checkpoint
             try:
                 self._conn.close()
             except sqlite3.Error:
                 pass
+
+    def __del__(self) -> None:  # noqa: D105 -- deterministic resource release
+        """Final safety net: never leave a connection open implicitly.
+
+        Fire-and-forget uses (``Database(path).migrate()``) rely on
+        refcounting to drop the temporary; without this, the raw
+        sqlite3 handle can outlive its owner (cached references keep
+        the Connection object alive), leaving WAL sidecars locked on
+        Windows and breaking restore/replace flows. Explicit close()
+        remains the primary contract; this only covers abandonment.
+        """
+        try:
+            conn = getattr(self, "_conn", None)
+            if conn is not None:
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except Exception:  # noqa: BLE001 -- best effort at GC time
+                    pass
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001 -- __del__ must never raise
+            pass
 
     def backup_to(self, path: str) -> str:
         """Consistent online backup to a new file (SQLite backup API)."""
@@ -592,6 +673,13 @@ class SqliteEventRepository(EventRepository):
         rows = self._db.query("SELECT snapshot FROM events ORDER BY seq")
         return [r[0] for r in rows]
 
+    def list_snapshots_since(self, seq: int) -> list[tuple[int, str]]:
+        """(seq, snapshot) rows newer than ``seq`` (durable cursor)."""
+        rows = self._db.query(
+            "SELECT seq, snapshot FROM events WHERE seq > ? ORDER BY seq",
+            (seq,))
+        return [(int(r[0]), r[1]) for r in rows]
+
 
 class DbEventStore(EventStore):
     """EventStore backed by the relational event log."""
@@ -604,6 +692,11 @@ class DbEventStore(EventStore):
 
     def list(self) -> list[Event]:
         return [Event.model_validate_json(s) for s in self._repo.list_snapshots()]
+
+    def events_since(self, seq: int) -> list[tuple[int, Event]]:
+        rows = self._repo.list_snapshots_since(seq)
+        return [(row_seq, Event.model_validate_json(snapshot))
+                for row_seq, snapshot in rows]
 
     def replay(self, handler: Any) -> int:
         count = 0

@@ -172,7 +172,8 @@ class ParallelExecutor:
                 if (token.cancelled or halting) and in_flight is not None:
                     self._stop_unstarted(graph, task_id, token, halting)
                 if not token.cancelled and not halting:
-                    self._submit_ready(graph, task_id, args, pool, in_flight)
+                    self._submit_ready(graph, task_id, args, pool, in_flight,
+                                       token)
                 if not in_flight:
                     if not self._drain_stuck(graph, task_id):
                         break
@@ -223,6 +224,7 @@ class ParallelExecutor:
         args: dict[str, dict],
         pool: ThreadPoolExecutor,
         in_flight: dict[Future, GraphNode],
+        token: Optional[CancellationToken] = None,
     ) -> None:
         for node in graph.ready():
             if len(in_flight) >= self._max_concurrency:
@@ -242,19 +244,20 @@ class ParallelExecutor:
             merged = {**(node.step.arguments or {}),
                       **args.get(node.step.id, {})}
             future = pool.submit(
-                self._run_node, task_id, node, merged
+                self._run_node, task_id, node, merged, token
             )
             in_flight[future] = node
 
     def _run_node(
-        self, task_id: str, node: GraphNode, arguments: dict
+        self, task_id: str, node: GraphNode, arguments: dict,
+        token: Optional[CancellationToken] = None,
     ) -> tuple[bool, list[ToolResult], str]:
         """Run one step's tools sequentially via ToolRunner (never direct)."""
         try:
             results: list[ToolResult] = []
             for tool_name in node.step.tools:
                 call = self._registry.build_call(task_id, tool_name, arguments)
-                result = self._runner.run(call)
+                result = self._runner.run(call, cancel_token=token)
                 results.append(result)
                 if not result.success:
                     return False, results, result.error or f"{tool_name} failed"

@@ -159,9 +159,9 @@ def test_backup_and_restore(tmp_path):
 
 def test_migration_safety(tmp_path):
     db = Database(str(tmp_path / "m.db"))
-    assert db.migrate() == 1
-    assert db.migrate() == 1  # idempotent re-run is safe
-    assert db.schema_version() == 1
+    assert db.migrate() == 2
+    assert db.migrate() == 2  # idempotent re-run is safe
+    assert db.schema_version() == 2
     db.close()
 
 

@@ -123,6 +123,15 @@ class EventStore(ABC):
         """Re-deliver every stored event to ``handler``; return count."""
         raise NotImplementedError
 
+    @abstractmethod
+    def events_since(self, seq: int) -> list[tuple[int, Event]]:
+        """(sequence, event) pairs with sequence strictly greater than ``seq``.
+
+        Sequences come from append() and are stable: a consumer can poll
+        with the last seen sequence and never duplicate or miss entries.
+        """
+        raise NotImplementedError
+
 
 class InMemoryEventStore(EventStore):
     """In-process store used by tests and the pre-database runtime."""
@@ -148,6 +157,11 @@ class InMemoryEventStore(EventStore):
             handler(event)
             count += 1
         return count
+
+    def events_since(self, seq: int) -> list[tuple[int, Event]]:
+        with self._lock:
+            return [(index, event) for index, event in enumerate(self._events)
+                    if index > seq]
 
     def attach(self, bus: EventBus, event_type: Optional[EventType] = None) -> None:
         """Persist everything (or one type) published on ``bus``."""

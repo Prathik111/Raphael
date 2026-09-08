@@ -137,7 +137,7 @@ def test_terminal_rejects_string_command(registry):
         registry.build_call("t", "terminal.execute", {"command": "rm -rf /"})
     )
     assert result.success is False
-    assert "argv list" in result.error
+    assert "must be array" in result.error
 
 
 def test_terminal_shell_metachars_are_literal(registry):

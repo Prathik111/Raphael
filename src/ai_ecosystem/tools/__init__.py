@@ -14,6 +14,7 @@ from ai_ecosystem.tools.registry import (
     ToolHandler,
     ToolRegistry,
     ToolRunner,
+    check_arguments,
 )
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "ToolRegistry",
     "ToolRunner",
     "adapt_tool",
+    "check_arguments",
     "connect_server",
     "filesystem_tools",
     "git_tools",

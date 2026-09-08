@@ -15,9 +15,12 @@ import {
   TaskView,
   backendStatus,
   defaultBase,
+  fetchBackendCredential,
+  loadApiCredential,
   loadBase,
   makeApi,
   saveBase,
+  setApiCredential,
 } from "./api";
 
 type ConnState = "connecting" | "online" | "offline";
@@ -419,6 +422,7 @@ export function App() {
   const [backend, setBackend] = useState<BackendStatus | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [draftBase, setDraftBase] = useState(base);
+  const [draftCredential, setDraftCredential] = useState("");
   const [showTools, setShowTools] = useState(true);
   const [showRaw, setShowRaw] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -428,6 +432,9 @@ export function App() {
   const refreshMeta = useCallback(
     async (client: Api) => {
       try {
+        // Bearer credential first: the shell reads it from the backend's
+        // credential file; manual entry (Settings) covers external backends.
+        await fetchBackendCredential();
         await client.health();
         setConn("online");
         client
@@ -435,8 +442,14 @@ export function App() {
           .then(setModels)
           .catch(() => setModels([]));
         backendStatus().then(setBackend);
-      } catch {
+      } catch (err) {
         setConn("offline");
+        if (err instanceof BackendError && err.status === 401) {
+          setError(
+            "The backend rejected the API credential. Enter the current one " +
+              "in Settings (backend log shows its file location).",
+          );
+        }
       }
     },
     [],
@@ -668,11 +681,27 @@ export function App() {
                   placeholder={defaultBase()}
                   aria-label="Backend URL"
                 />
-                <div style={{ marginTop: 6, ...css.muted }}>
-                  Start it with <code style={css.mono}>ai-ecosystem-serve</code>
-                </div>
+                <input
+                  style={{ ...css.input, marginTop: 6 }}
+                  type="password"
+                  value={draftCredential}
+                  onChange={(e) => setDraftCredential(e.target.value)}
+                  placeholder={
+                    loadApiCredential()
+                      ? "API credential saved (enter to replace)"
+                      : "API credential (for external backends)"
+                  }
+                  aria-label="API credential"
+                />
                 <div style={{ marginTop: 6 }}>
-                  <button style={css.ghost} onClick={applyBase}>
+                  <button
+                    style={css.ghost}
+                    onClick={() => {
+                      if (draftCredential.trim()) setApiCredential(draftCredential);
+                      setDraftCredential("");
+                      applyBase();
+                    }}
+                  >
                     Connect
                   </button>
                 </div>

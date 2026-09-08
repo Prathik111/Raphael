@@ -29,6 +29,7 @@ from ai_ecosystem.core.models.domain import (
 )
 from ai_ecosystem.core.models.enums import PermissionDecision, RiskLevel
 from ai_ecosystem.tools.registry.registry import ToolRegistry
+from ai_ecosystem.tools.registry.validation import check_arguments
 
 _LEVEL_ORDER = {
     RiskLevel.LOW: 0,
@@ -38,6 +39,16 @@ _LEVEL_ORDER = {
 }
 
 _SHELL_TOKENS = (";", "&&", "||", "$(", "`", "|")
+
+#: Executables that interpret their arguments as a scripting language.
+#: Launched through the argv API they still hand the model a full
+#: shell, so they are CRITICAL unless the operator opted in.
+SHELL_BINARIES = frozenset({
+    "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+    "bash", "sh", "zsh", "fish", "dash", "wsl", "wsl.exe",
+    "cscript", "cscript.exe", "wscript", "wscript.exe",
+    "mshta", "mshta.exe", "rundll32", "rundll32.exe",
+})
 
 
 class RiskContext(BaseModel):
@@ -50,6 +61,9 @@ class RiskContext(BaseModel):
 
 class RiskEngine:
     """Scores a proposed call; pure function of call + context."""
+
+    def __init__(self, allow_shells: bool = False) -> None:
+        self._allow_shells = allow_shells
 
     def assess(
         self, task_id: str, tool: Tool, call: ToolCall, context: RiskContext
@@ -72,6 +86,9 @@ class RiskEngine:
         elif any(word in name for word in ("write", "modify", "install", "overwrite")):
             escalate(RiskLevel.HIGH, f"mutating tool name: {tool.name}")
 
+        if "subprocess" in (tool.capabilities or []):
+            self._assess_executable(call, escalate, note)
+
         for key, value in call.arguments.items():
             self._scan_value(value, key, tool, context, escalate, note)
 
@@ -82,6 +99,31 @@ class RiskEngine:
             factors=factors or [f"base level for {tool.name}"],
             rationale=f"assessed {tool.name} for agent {context.agent_id or 'default'}",
         )
+
+    def _assess_executable(self, call: ToolCall, escalate, note) -> None:
+        """Shell interpreters are a separate capability, not argv data.
+
+        ``terminal.execute`` never invokes a shell itself, but launching
+        cmd/powershell/bash *through* it hands the model one anyway.
+        Blocked (CRITICAL) unless the operator opted in.
+        """
+        import os
+
+        command = call.arguments.get("command")
+        if not isinstance(command, list) or not command:
+            return
+        first = command[0]
+        if not isinstance(first, str):
+            return
+        binary = os.path.basename(first).lower()
+        if binary not in SHELL_BINARIES:
+            return
+        if self._allow_shells:
+            note(f"shell interpreter {first!r} explicitly allowed by operator")
+        else:
+            escalate(RiskLevel.CRITICAL,
+                      f"shell interpreter {first!r} requires explicit "
+                      "operator opt-in")
 
     def _scan_value(
         self, value: object, key: str, tool: Tool, context: RiskContext,
@@ -218,14 +260,45 @@ class AuthorizationManager:
         policy_engine: PolicyEngine | None = None,
         permission_engine: PermissionEngine | None = None,
         context: RiskContext | None = None,
+        allow_shells: bool = False,
     ) -> None:
         self._registry = registry
-        self._risk = risk_engine or RiskEngine()
+        self._risk = risk_engine or RiskEngine(allow_shells=allow_shells)
         self._policy = policy_engine or PolicyEngine()
         self._permissions = permission_engine or PermissionEngine(
             self._policy.policy.name
         )
         self._context = context or RiskContext()
+
+    def _decide(self, task_id: str, tool: Tool, call: ToolCall,
+                agent_id: str = "") -> tuple[Tool, Permission]:
+        """The ONE authorization pipeline (review fix 02/11).
+
+        Both authorize() and enforce() run exactly this: registry
+        contract lookup -> canonical argument validation -> risk ->
+        policy -> permission record. No second path, no drift.
+        """
+        known = self._registry.get(tool.name)
+        if known is None:
+            return tool, self._permissions.decide(
+                task_id, call, False, f"unknown tool {tool.name!r}")
+        if call.task_id != task_id:
+            return known, self._permissions.decide(
+                task_id, call, False,
+                "task_id mismatch between call and request")
+        problems = check_arguments(known, dict(call.arguments))
+        if problems:
+            raise DomainValidationError("; ".join(problems))
+        context = self._context
+        if agent_id:
+            context = RiskContext(
+                agent_id=agent_id,
+                environment=self._context.environment,
+                root=self._context.root)
+        assessment = self._risk.assess(task_id, known, call, context)
+        granted, reason = self._policy.evaluate(
+            assessment, known.name, agent_id or self._context.agent_id)
+        return known, self._permissions.decide(task_id, call, granted, reason)
 
     def authorize(self, task_id: str, tool: Tool, call: ToolCall) -> Permission:
         """Validate -> risk -> policy -> permission record.
@@ -234,41 +307,20 @@ class AuthorizationManager:
         Tool object is never trusted for schema or risk, only its name
         is used to look the authoritative contract up.
         """
-        known = self._registry.get(tool.name)
-        if known is None:
-            return self._permissions.decide(
-                task_id, call, False, f"unknown tool {tool.name!r}"
-            )
-        required = known.input_schema.get("required", [])
-        missing = [name for name in required if name not in call.arguments]
-        if missing:
-            raise DomainValidationError(
-                f"missing required arguments: {', '.join(missing)}"
-            )
-        assessment = self._risk.assess(task_id, known, call, self._context)
-        granted, reason = self._policy.evaluate(
-            assessment, known.name, self._context.agent_id
-        )
-        return self._permissions.decide(task_id, call, granted, reason)
+        _, permission = self._decide(
+            task_id, tool, call, self._context.agent_id)
+        return permission
 
     def enforce(
         self, task_id: str, tool: Tool, call: ToolCall, agent_id: str = ""
     ) -> Permission:
         """Like authorize, but raise AuthorizationDeniedError on denial."""
-        known = self._registry.get(tool.name)
-        if known is None:
+        _, permission = self._decide(task_id, tool, call, agent_id)
+        if permission.decision is not PermissionDecision.GRANTED:
+            known = self._registry.get(tool.name)
             raise AuthorizationDeniedError(
-                task_id, tool.name, f"unknown tool {tool.name!r}")
-        context = self._context if not agent_id else RiskContext(
-            agent_id=agent_id,
-            environment=self._context.environment,
-            root=self._context.root,
-        )
-        assessment = self._risk.assess(task_id, known, call, context)
-        granted, reason = self._policy.evaluate(assessment, known.name, agent_id)
-        permission = self._permissions.decide(task_id, call, granted, reason)
-        if not granted:
-            raise AuthorizationDeniedError(task_id, known.name, reason)
+                task_id, known.name if known else tool.name,
+                permission.reason)
         return permission
 
     @property

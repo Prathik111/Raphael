@@ -7,6 +7,7 @@ from ai_ecosystem.tools.registry.runner import (
     GrantAllAuthorizer,
     ToolRunner,
 )
+from ai_ecosystem.tools.registry.validation import check_arguments
 
 __all__ = [
     "Authorizer",
@@ -15,4 +16,5 @@ __all__ = [
     "ToolHandler",
     "ToolRegistry",
     "ToolRunner",
+    "check_arguments",
 ]

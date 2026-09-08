@@ -53,7 +53,7 @@ def test_clean_installation(tmp_path):
     db_path = str(data_dir / "ai_ecosystem.db")
     Database(db_path).migrate()
     assert (app_dir / "bin" / "ai-ecosystem.exe").is_file()
-    assert Database(db_path).schema_version() == 1
+    assert Database(db_path).schema_version() == 2
 
 
 def test_first_launch(tmp_path):
@@ -134,7 +134,7 @@ def test_downgrade_handling():
 def test_migration(tmp_path):
     db_path = str(tmp_path / "old.db")
     Database(db_path).migrate()
-    assert Database(db_path).schema_version() == 1
+    assert Database(db_path).schema_version() == 2
 
 
 def test_existing_data_preservation(tmp_path):
@@ -170,7 +170,7 @@ def test_uninstall_keeps_data_by_default(tmp_path):
 def test_reinstall(tmp_path):
     db_path = str(tmp_path / "data.db")
     Database(db_path).migrate()
-    assert Database(db_path).schema_version() == 1  # reinstall re-migrates safely
+    assert Database(db_path).schema_version() == 2  # reinstall re-migrates safely
 
 
 def test_backup_restore(tmp_path):
@@ -227,8 +227,19 @@ def test_desktop_startup_files():
     root = __import__("pathlib").Path(__file__).resolve().parents[2]
     assert (root / "desktop" / "package.json").is_file()
     assert (root / "desktop" / "src-tauri" / "tauri.conf.json").is_file()
-    assert (root / "packaging" / "windows" / "build.ps1").is_file()
-    assert (root / "packaging" / "windows" / "installer.iss").is_file()
+    build = root / "packaging" / "windows" / "build.ps1"
+    installer = root / "packaging" / "windows" / "installer.iss"
+    assert build.is_file()
+    assert installer.is_file()
+    # Build/installer contract (review fix 10): reproducible installs,
+    # verified staging, and matching artifact names -- no silent drift.
+    build_text = build.read_text(encoding="utf-8", errors="replace")
+    assert "npm ci" in build_text
+    assert "dist" in build_text and "BUILD-INFO" in build_text
+    installer_text = installer.read_text(encoding="utf-8", errors="replace")
+    assert "ai-ecosystem-desktop.exe" in installer_text
+    assert "ai-ecosystem.exe" not in installer_text.replace(
+        "ai-ecosystem-desktop.exe", "")
 
 
 def test_model_configuration(tmp_path, monkeypatch):

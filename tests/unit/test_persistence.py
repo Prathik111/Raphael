@@ -24,8 +24,47 @@ def db():
 
 
 def test_migrate_is_idempotent_and_versioned(db):
-    assert db.migrate() == 1
-    assert db.schema_version() == 1
+    assert db.migrate() == 2
+    assert db.migrate() == 2  # re-run applies nothing
+    assert db.schema_version() == 2
+    rows = db.query("SELECT version FROM schema_migrations ORDER BY version")
+    assert [r[0] for r in rows] == [1, 2]
+
+
+def test_legacy_v1_database_upgrades_to_v2(tmp_path):
+    """A pre-journal database migrates forward without data loss."""
+    import sqlite3
+
+    path = str(tmp_path / "legacy.db")
+    raw = sqlite3.connect(path)
+    try:
+        raw.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        raw.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        raw.execute("INSERT INTO meta (key, value) VALUES ('schema_version', '1')")
+        raw.execute("INSERT INTO tasks (id, snapshot, updated_at) VALUES ('t1', '{}', 'now')")
+        raw.commit()
+    finally:
+        raw.close()
+    db = Database(path)
+    try:
+        assert db.migrate() == 2
+        assert db.schema_version() == 2
+        assert db.query("SELECT id FROM tasks") == [("t1",)]
+        rows = db.query("SELECT version FROM schema_migrations ORDER BY version")
+        assert [r[0] for r in rows] == [1, 2]
+    finally:
+        db.close()
+
+
+def test_wal_mode_and_busy_timeout(tmp_path):
+    path = str(tmp_path / "wal.db")
+    db = Database(path)
+    try:
+        mode = db.query("PRAGMA journal_mode")[0][0]
+        assert mode.lower() == "wal"
+        assert db.query("PRAGMA busy_timeout")[0][0] == 5000
+    finally:
+        db.close()
 
 
 def test_task_crud(db):

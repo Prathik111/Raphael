@@ -208,7 +208,10 @@ def test_14_scaffold_contains_no_secrets_or_privileges():
             text = path.read_text(encoding="utf-8", errors="replace").lower()
             hits.extend(f"{path.name}:{word}" for word in forbidden if word in text)
     # 'token' legitimately appears in "CSRF token: none" docs; allow listed notes.
-    hits = [h for h in hits if "csrf" not in h.lower()]
+    # type="password" is the masked credential input in Settings: correct
+    # practice (the value is never in source), so it is allow-listed here.
+    hits = [h for h in hits if "csrf" not in h.lower()
+            and h != "App.tsx:password"]
     assert hits == [], hits
 
 

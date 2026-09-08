@@ -214,7 +214,8 @@ class SingleAgent:
             self._check_cancelled(task.id, cancel_token)
             verifications = self._verify(task, ctx, plan, execution, clock)
             recovery = self._recover_if_needed(
-                task, ctx, plan, execution, verifications, clock)
+                task, ctx, plan, execution, verifications, clock,
+                cancel_token)
             if recovery is not None:
                 verifications = self._reverify(recovery)
             memory_ids = self._memorize(task, ctx, clock)
@@ -355,7 +356,9 @@ class SingleAgent:
     def _recover_if_needed(self, task: Task, ctx: ExecutionContext, plan: Plan,
                            execution: ExecutionResult,
                            verifications: dict[str, VerificationResult],
-                           clock: _Clock) -> Optional[RecoveryOutcome]:
+                           clock: _Clock,
+                           cancel_token: Optional[CancellationToken] = None,
+                           ) -> Optional[RecoveryOutcome]:
         started = time.monotonic()
         try:
             if execution.status is OverallStatus.COMPLETED and all(
@@ -376,6 +379,7 @@ class SingleAgent:
                     task.id, TaskGraph.from_plan(current),
                     arguments=args or self._config.arguments, context=ctx,
                     contexts_repo=self._runtime.contexts_repo,
+                    cancel=cancel_token,
                 )
 
             def verify_fn(task_id: str, current: Plan,
