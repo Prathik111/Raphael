@@ -209,7 +209,9 @@ class SingleAgent:
             if spec.needs_research:
                 self._research_phase(task, ctx, goal_text, clock)
             self._check_cancelled(task.id, cancel_token)
-            plan = self._plan(task, ctx, goal_text, clock)
+            plan = self._plan(task, ctx, goal_text, clock,
+                              context=self._recall(task, ctx, goal_text,
+                                                   clock))
             execution = self._execute(task, ctx, plan, clock, cancel_token)
             self._check_cancelled(task.id, cancel_token)
             verifications = self._verify(task, ctx, plan, execution, clock)
@@ -313,14 +315,56 @@ class SingleAgent:
         self._runtime.contexts_repo.save(ctx)
         clock.mark("research_s", started)
 
+    def _recall(self, task: Task, ctx: ExecutionContext,
+                goal_text: str, clock: _Clock) -> str:
+        """Load relevant memories from previous tasks (session continuity).
+
+        Retrieval is scoped (GLOBAL + configured PROJECT/AGENT) and the
+        hits land in the context observations AND the returned text, so
+        both the audit trail and the planner see them. Without this,
+        every conversation starts blank.
+        """
+        started = time.monotonic()
+        try:
+            if self._memories is None:
+                return ""
+            project_id = self._config.project_id
+            recalled = self._memories.retrieve(
+                MemoryScope.GLOBAL, query=goal_text, limit=5)
+            if project_id:
+                recalled = (recalled + self._memories.retrieve(
+                    MemoryScope.PROJECT, project_id, query=goal_text,
+                    project_id=project_id, limit=5))
+            if self._config.agent_id:
+                recalled = (recalled + self._memories.retrieve(
+                    MemoryScope.AGENT, self._config.agent_id,
+                    query=goal_text, limit=5))
+            seen: set[str] = set()
+            unique = []
+            for memory in recalled:
+                if memory.id not in seen:
+                    seen.add(memory.id)
+                    unique.append(memory)
+            lines = []
+            for memory in unique[:8]:
+                line = f"recalled memory [{memory.scope.value}]: {memory.content}"
+                ctx.observations.append(line)
+                lines.append(line)
+            self._runtime.contexts_repo.save(ctx)
+            self._emit(EventType.MEMORY_RECALLED, task.id,
+                       {"count": len(lines)})
+            return "\n".join(lines)
+        finally:
+            clock.mark("recall_s", started)
+
     def _plan(self, task: Task, ctx: ExecutionContext,
-              goal_text: str, clock: _Clock) -> Plan:
+              goal_text: str, clock: _Clock, context: str = "") -> Plan:
         started = time.monotonic()
         current = self._runtime.manager.get_task(task.id).state
         if current is not TaskState.PLANNING:
             self._runtime.manager.transition(task.id, TaskState.PLANNING)
         known = [tool.name for tool in self._registry.list_tools()]
-        plan = self._planner.plan(goal_text, known)
+        plan = self._planner.plan(goal_text, known, context=context)
         ctx.plan = plan
         self._runtime.contexts_repo.save(ctx)
         self._emit(EventType.PLAN_CREATED, task.id,
@@ -420,13 +464,21 @@ class SingleAgent:
                     continue
             if self._config.remember_summary and ctx.plan is not None:
                 try:
+                    # Project-scoped when the run belongs to a project so
+                    # LATER tasks can recall it; task-scoped otherwise
+                    # (visible only to this task, preserving isolation).
+                    project_id = self._config.project_id
+                    if project_id:
+                        scope, scope_id = MemoryScope.PROJECT, project_id
+                    else:
+                        scope, scope_id = MemoryScope.TASK, task.id
                     summary = MemoryCandidate(
-                        content=(f"Task '{task.title}' ended; "
+                        content=(f"Task '{task.title}' (goal: {ctx.goal}); "
                                  f"{len(ctx.tool_results)} tool results recorded."),
                         type=MemoryType.EPISODIC,
                         source=f"task:{task.id}", confidence=0.9, importance=0.6,
-                        scope=MemoryScope.TASK,
-                        scope_id=task.id, reason="automatic task summary",
+                        scope=scope, scope_id=scope_id,
+                        reason="automatic task summary",
                     )
                     ids.append(self._memories.store(summary).id)
                 except Exception:  # noqa: BLE001

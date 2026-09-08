@@ -644,3 +644,71 @@ def test_18_respond_step_becomes_task_reply(tmp_path):
     assert result.status == "COMPLETED"
     assert result.reply == "Hello! How can I help?"
     assert stored.get("reply") == "Hello! How can I help?"
+
+
+def test_19_second_task_recalls_first_task(tmp_path):
+    """Session continuity: memories from task 1 reach task 2's planner."""
+    from ai_ecosystem.core.models.enums import EventType, MemoryScope
+
+    tools = [_ok_tool("work")]
+    spec = {"title": "Work", "constraints": [], "desired_outcome": "ok",
+            "needs_research": False}
+    plan = {"goal": "Work",
+            "steps": [_step("s1", [], ["work"])],
+            "final_verification": "done"}
+    prompts: list[str] = []
+
+    def handle(req: ModelRequest):
+        prompts.append(req.prompt)
+        if req.prompt.startswith("UNDERSTAND:"):
+            return ModelResponse(structured=dict(spec))
+        return ModelResponse(structured=json.loads(json.dumps(plan)))
+
+    provider = MockModelProvider("mock", handler=handle)
+    agent, runtime, registry, bus = _kit(tmp_path, tools, provider)
+    seen: list[Event] = []
+    bus.subscribe_all(seen.append)
+    try:
+        first = agent.run_goal("Alpha project kickoff.",
+                               AgentConfig(project_id="p1"))
+        assert first.status == "COMPLETED"
+        second = agent.run_goal("Continue the alpha work.",
+                                AgentConfig(project_id="p1"))
+        assert second.status == "COMPLETED"
+        kinds = [e.event_type for e in seen]
+        assert EventType.MEMORY_RECALLED in kinds
+        recalls = [e for e in seen
+                   if e.event_type is EventType.MEMORY_RECALLED]
+        assert any(r.payload.get("count", 0) > 0 for r in recalls)
+    finally:
+        runtime.shutdown()
+    # The second plan prompt carries the first task's goal.
+    plan_prompts = [p for p in prompts if not p.startswith("UNDERSTAND:")]
+    assert len(plan_prompts) == 2
+    assert "Alpha project kickoff" in plan_prompts[1]
+
+
+def test_20_summary_scope_follows_project(tmp_path):
+    """Auto-summaries persist at PROJECT scope when set, TASK otherwise."""
+    from ai_ecosystem.core.models.enums import MemoryScope
+    from ai_ecosystem.personalization.memory import MemoryStore
+    from ai_ecosystem.core.persistence import SqliteMemoryRepository
+
+    tools = [_ok_tool("work")]
+    spec = {"title": "Work", "constraints": [], "desired_outcome": "ok",
+            "needs_research": False}
+    plan = {"goal": "Work",
+            "steps": [_step("s1", [], ["work"])],
+            "final_verification": "done"}
+    agent, runtime, registry, bus = _kit(tmp_path, tools, _scripted_provider(spec, plan))
+    try:
+        with_project = agent.run_goal(
+            "Scoped job.", AgentConfig(project_id="p9"))
+        assert with_project.status == "COMPLETED"
+        memories = MemoryStore(SqliteMemoryRepository(runtime.db))
+        summaries = [m for m in memories.retrieve(
+            MemoryScope.PROJECT, "p9", project_id="p9") if m.source.startswith("task:")]
+        assert len(summaries) == 1
+        assert "Scoped job" in summaries[0].content
+    finally:
+        runtime.shutdown()

@@ -365,7 +365,13 @@ def build_stack(config: Optional[AppConfig] = None,
         def work() -> None:
             try:
                 agent_factory().run_task(
-                    task_id, AgentConfig(workspace=workspace),
+                    task_id,
+                    AgentConfig(
+                        workspace=workspace,
+                        # Stable project scope: memories (task summaries,
+                        # preferences) persist across conversations
+                        # instead of dying per task.
+                        project_id="default"),
                     cancel_token=token)
             except Exception as exc:  # noqa: BLE001 -- agent terminates tasks
                 log.error("dispatch for task %s failed: %s", task_id, exc)

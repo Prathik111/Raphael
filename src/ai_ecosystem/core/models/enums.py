@@ -193,6 +193,7 @@ class EventType(str, Enum):
     MEMORY_UPDATED = "MemoryUpdated"
     MEMORY_ARCHIVED = "MemoryArchived"
     MEMORY_DELETED = "MemoryDeleted"
+    MEMORY_RECALLED = "MemoryRecalled"
     PERSONALITY_UPDATED = "PersonalityUpdated"
     PREFERENCE_UPDATED = "PreferenceUpdated"
     PERSONALIZATION_APPLIED = "PersonalizationApplied"

@@ -567,6 +567,16 @@ export function App() {
   }, [draftBase, newChat]);
 
   const toolCalls = useMemo(() => buildToolCalls(events), [events]);
+  const recalled = useMemo(
+    () =>
+      events
+        .filter((e) => e.type === "MemoryRecalled")
+        .reduce((n, e) => {
+          const c = (e.payload as Record<string, unknown>).count;
+          return typeof c === "number" ? Math.max(n, c) : n;
+        }, 0),
+    [events],
+  );
   const running = detail !== null && !detail.completed;
   const sorted = useMemo(() => [...tasks].reverse(), [tasks]);
   const veredicts = useMemo(
@@ -826,6 +836,13 @@ export function App() {
                         <div style={css.thinking}>
                           <span style={css.spin} />
                           {PHASE_LABEL[detail.state] ?? detail.state}…
+                        </div>
+                      )}
+
+                      {recalled > 0 && (
+                        <div style={{ ...css.muted, marginTop: 6 }}>
+                          🧠 remembered {recalled} memor
+                          {recalled === 1 ? "y" : "ies"} from previous chats
                         </div>
                       )}
 

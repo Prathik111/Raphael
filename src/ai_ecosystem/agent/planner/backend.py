@@ -53,7 +53,9 @@ class ModelReasoningBackend(ReasoningBackend):
         "When the goal needs no tools at all (greetings, explanations, "
         "questions you can answer directly), plan exactly one step using "
         "only agent.respond with the full answer in its text argument -- "
-        "never invent files to read or commands to run for such goals."
+        "never invent files to read or commands to run for such goals. "
+        "A context field may carry recalled memories from previous tasks: "
+        "use them and never redo completed work."
     )
 
     def __init__(
@@ -90,7 +92,7 @@ class ModelReasoningBackend(ReasoningBackend):
         return required, schemas
 
     def _prompt_body(self, goal: str, available_tools: list[str],
-                     error: str = "") -> dict:
+                     error: str = "", context: str = "") -> dict:
         """Plan request payload: goal, tools, and their contracts."""
         body: dict = {"goal": goal, "available_tools": available_tools}
         if self._tool_docs:
@@ -99,6 +101,10 @@ class ModelReasoningBackend(ReasoningBackend):
                 if name in self._tool_docs}
         if self._platform_hint:
             body["platform"] = self._platform_hint
+        if context.strip():
+            # Recalled memories from previous tasks (session continuity):
+            # ground the plan in what already happened.
+            body["context"] = context.strip()[:4000]
         if error:
             body["previous_draft_rejected"] = error[:800]
             body["instruction"] = (
@@ -107,15 +113,18 @@ class ModelReasoningBackend(ReasoningBackend):
                 "of LOW, MEDIUM, HIGH.")
         return body
 
-    def draft(self, goal: str, available_tools: list[str]) -> Plan:
+    def draft(self, goal: str, available_tools: list[str],
+              context: str = "") -> Plan:
         """Request a plan from the model (may raise ModelMalformedError)."""
         request = ModelRequest(
-            prompt=json.dumps(self._prompt_body(goal, available_tools)),
+            prompt=json.dumps(self._prompt_body(goal, available_tools,
+                                                context=context)),
             system=self.SYSTEM,
         )
         return request_structured(self._provider, request, Plan)
 
-    def plan(self, goal: str, available_tools: list[str]) -> Plan:
+    def plan(self, goal: str, available_tools: list[str],
+             context: str = "") -> Plan:
         """Draft *and* validate; only runnable plans are returned.
 
         A rejected draft gets up to ``max_repair_attempts`` repair
@@ -131,7 +140,8 @@ class ModelReasoningBackend(ReasoningBackend):
         validator = PlanValidator(
             set(available_tools), *self._contracts())
         try:
-            return validator.validate(self.draft(goal, available_tools))
+            return validator.validate(
+                self.draft(goal, available_tools, context=context))
         except (ModelError, AiEcosystemError, ValueError) as first_error:
             last_error = first_error
         for _ in range(self._max_repairs):
