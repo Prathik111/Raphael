@@ -6,6 +6,7 @@ reasoning, planning, execution, or LLM logic may live here.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import Field
@@ -78,24 +79,13 @@ class Tool(Entity):
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
     risk_level: RiskLevel = RiskLevel.LOW
-    timeout_s: float = 60.0
     capabilities: list[str] = Field(default_factory=list)
-    execution_policy: str = "default"
-    requires_sandbox: bool = False
-    sandbox_profile: str = "default"
-
-
-class ToolCall(Entity):
-    """A request to execute a tool within a task."""
-
-    task_id: str = ""
-    tool: str = ""
-    arguments: dict[str, Any] = Field(default_factory=dict)
-    status: ToolCallStatus = ToolCallStatus.REQUESTED
+    isolation: str = "none"
+    timeout_seconds: Optional[float] = None
 
 
 class ToolResult(Entity):
-    """Observed outcome of a tool call."""
+    """Observed result of a tool call."""
 
     task_id: str = ""
     tool_call_id: str = ""
@@ -141,6 +131,10 @@ class Memory(Entity):
 
     DATA only: memory never influences authorization or policy. Scope is
     a str-enum so pre-Gate-12 snapshots (scope ``"global"``) still load.
+
+    Trust metadata is intentionally separate from confidence/importance.
+    A memory can be highly relevant yet still be untrusted model/data
+    input. Callers must never treat these fields as authorization.
     """
 
     type: MemoryType = MemoryType.SEMANTIC
@@ -153,6 +147,10 @@ class Memory(Entity):
     status: MemoryStatus = MemoryStatus.ACTIVE
     retention_days: Optional[int] = None
     cloud_eligible: bool = False
+    provenance: str = "unknown"
+    created_by: str = "unknown"
+    verified: bool = False
+    expires_at: Optional[datetime] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -178,111 +176,3 @@ class Skill(Entity):
     risk_class: RiskLevel = RiskLevel.LOW
     workflow: list[dict[str, Any]] = Field(default_factory=list)
     verification: list[dict[str, Any]] = Field(default_factory=list)
-    author: str = ""
-    scope: MemoryScope = MemoryScope.GLOBAL
-    scope_id: str = ""
-
-
-class ModelProvider(Entity):
-    """An interchangeable model backend (Gate 4 wires these up)."""
-
-    name: str = ""
-    kind: str = "local"
-
-
-class Model(Entity):
-    """A selectable reasoning model behind the abstraction."""
-
-    name: str = ""
-    provider_id: Optional[str] = None
-    capabilities: list[str] = Field(default_factory=list)
-    context_length: int = 0
-
-
-class Device(Entity):
-    """A known ecosystem node (Gate 35 standardizes the protocol)."""
-
-    name: str = ""
-    node_type: NodeType = NodeType.PC
-    capabilities: list[str] = Field(default_factory=list)
-    online: bool = False
-
-
-class ComputeNode(Entity):
-    """A schedulable compute target (Gate 25 routes to these)."""
-
-    device_id: Optional[str] = None
-    kind: str = "local"
-    available: bool = True
-    resources: dict[str, Any] = Field(default_factory=dict)
-
-
-class VerificationResult(Entity):
-    """Structured verification outcome (Gate 9 engine produces these).
-
-    Never a bare boolean: status plus strategy, evidence, and reason
-    explain *why* the verifier decided. Extra fields default so Gate 1
-    era records still validate.
-    """
-
-    task_id: str = ""
-    step_id: str = ""
-    status: VerificationStatus = VerificationStatus.PENDING
-    level: int = 1
-    strategy: str = ""
-    checks: list[str] = Field(default_factory=list)
-    evidence: list[str] = Field(default_factory=list)
-    reason: str = ""
-    message: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class Agent(Entity):
-    """An agent identity (orchestrator or subagent)."""
-
-    name: str = ""
-    role: str = "general"
-    capabilities: list[str] = Field(default_factory=list)
-    model_id: Optional[str] = None
-    permission_scope: str = "default"
-
-
-class ExecutionContext(Entity):
-    """All durable state for one running task (Gate 1's key object).
-
-    Must survive process restarts via :meth:`snapshot` / :meth:`restore`
-    (Gate 3 persistence builds on this).
-    """
-
-    task_id: str = ""
-    goal: str = ""
-    current_state: TaskState = TaskState.CREATED
-    plan: Optional[Plan] = None
-    current_step: Optional[str] = None
-    variables: dict[str, Any] = Field(default_factory=dict)
-    tool_results: list[ToolResult] = Field(default_factory=list)
-    artifacts: list[Artifact] = Field(default_factory=list)
-    observations: list[str] = Field(default_factory=list)
-    permissions: list[Permission] = Field(default_factory=list)
-    risk_assessments: list[RiskAssessment] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    def snapshot(self) -> str:
-        """Serialize the whole context to a JSON string."""
-        try:
-            return self.model_dump_json()
-        except Exception as exc:
-            raise ContextSerializationError(
-                f"cannot serialize context {self.id}: {exc}"
-            ) from exc
-
-    @classmethod
-    def restore(cls, data: str) -> ExecutionContext:
-        """Restore a context previously produced by :meth:`snapshot`."""
-        try:
-            return cls.model_validate_json(data)
-        except Exception as exc:
-            raise ContextSerializationError(
-                f"cannot restore context: {exc}"
-            ) from exc
