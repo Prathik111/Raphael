@@ -1,7 +1,7 @@
 // Typed client for the local Python runtime API.
 // The UI never executes tools, decides permissions, or holds credentials:
 // every function below is a plain fetch against the loopback backend.
-// The backend is loopback-only (no auth); the base URL is configurable
+// The backend is loopback-only and authenticated; the base URL is configurable
 // so operators can point at a non-default port.
 
 const DEFAULT_BASE = "http://127.0.0.1:8765";
@@ -79,8 +79,6 @@ export interface SkillInfo {
 }
 
 export interface BackendStatus {
-  /** "managed" (spawned by the app), "external" (already running),
-   *  "failed" (auto-start failed), "unknown" (browser dev / old shell). */
   state: "managed" | "external" | "failed" | "unknown";
   url: string;
   detail: string;
@@ -96,7 +94,6 @@ declare global {
   }
 }
 
-/** Ask the Tauri shell how the backend is running (null outside Tauri). */
 export async function backendStatus(): Promise<BackendStatus | null> {
   try {
     const core = window.__TAURI__?.core;
@@ -107,33 +104,22 @@ export async function backendStatus(): Promise<BackendStatus | null> {
   }
 }
 
-const CRED_KEY = "ai-eco-backend-credential";
+// The API credential is deliberately session-only. Never persist a bearer
+// credential in renderer storage (localStorage/sessionStorage/indexedDB):
+// renderer compromise must not become durable backend access.
 let apiCredential: string | null = null;
 
 export function setApiCredential(credential: string | null): void {
-  apiCredential =
-    credential && credential.trim() ? credential.trim() : null;
-  try {
-    if (apiCredential) window.localStorage.setItem(CRED_KEY, apiCredential);
-    else window.localStorage.removeItem(CRED_KEY);
-  } catch {
-    // Private mode: memory-only credential still works for the session.
-  }
+  apiCredential = credential && credential.trim() ? credential.trim() : null;
 }
 
 export function loadApiCredential(): string | null {
-  if (apiCredential) return apiCredential;
-  try {
-    apiCredential = window.localStorage.getItem(CRED_KEY);
-  } catch {
-    apiCredential = null;
-  }
   return apiCredential;
 }
 
-/** Bearer credential minted by the backend; the shell reads it from the
- *  credential file so the UI never asks the operator for it. Manual entry
- *  (Settings) covers externally-run backends. */
+/** Obtain the credential from the Tauri sidecar for the current session.
+ * Manual entry (Settings) remains available for externally-run backends.
+ */
 export async function fetchBackendCredential(): Promise<string | null> {
   try {
     const core = window.__TAURI__?.core;
