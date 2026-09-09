@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from ai_ecosystem.core.events.bus import Event, EventHandler, EventStore
@@ -16,11 +15,11 @@ class SqliteEventStore(EventStore):
         self._db = db
 
     def append(self, event: Event) -> int:
-        cursor = self._db.execute(
+        _, lastrowid = self._db.write(
             "INSERT INTO events (snapshot) VALUES (?)",
             (event.model_dump_json(),),
         )
-        return int(cursor.lastrowid)
+        return lastrowid
 
     def list(self) -> list[Event]:
         rows = self._db.query("SELECT snapshot FROM events ORDER BY seq")
