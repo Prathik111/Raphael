@@ -1,11 +1,22 @@
-// Typed client for the local Python runtime API.
-// The UI never executes tools, decides permissions, or holds credentials:
-// every function below is a plain fetch against the loopback backend.
-// The backend is loopback-only and authenticated; the base URL is configurable
-// so operators can point at a non-default port.
-
 const DEFAULT_BASE = "http://127.0.0.1:8765";
 const STORAGE_KEY = "ai-eco-backend-url";
+
+function sanitizeBase(raw: string): string {
+  const value = raw.trim().replace(/\/$/, "");
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Backend URL is invalid");
+  }
+  const host = url.hostname.toLowerCase();
+  const loopback = host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+  if (url.protocol !== "https:" && !loopback) {
+    throw new Error("Remote backends must use HTTPS");
+  }
+  if (!loopback && !url.hostname) throw new Error("Backend host is required");
+  return url.toString().replace(/\/$/, "");
+}
 
 export function defaultBase(): string {
   return DEFAULT_BASE;
@@ -15,20 +26,21 @@ export function loadBase(): string {
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get("api");
-    if (fromQuery) return fromQuery.replace(/\/$/, "");
+    if (fromQuery) return sanitizeBase(fromQuery);
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored) return stored.replace(/\/$/, "");
+    if (stored) return sanitizeBase(stored);
   } catch {
-    // Storage/query unavailable (privacy mode): fall back to default.
+    // Invalid or unavailable persistence falls back to the safe loopback default.
   }
   return DEFAULT_BASE;
 }
 
 export function saveBase(url: string): void {
+  const safe = sanitizeBase(url);
   try {
-    window.localStorage.setItem(STORAGE_KEY, url.replace(/\/$/, ""));
+    window.localStorage.setItem(STORAGE_KEY, safe);
   } catch {
-    // Non-fatal: the session simply keeps using the edited value.
+    // The current runtime keeps using the edited value even without storage.
   }
 }
 
@@ -104,9 +116,7 @@ export async function backendStatus(): Promise<BackendStatus | null> {
   }
 }
 
-// The API credential is deliberately session-only. Never persist a bearer
-// credential in renderer storage (localStorage/sessionStorage/indexedDB):
-// renderer compromise must not become durable backend access.
+// Session-only credential. Prefer Tauri IPC; never persist bearer tokens in renderer storage.
 let apiCredential: string | null = null;
 
 export function setApiCredential(credential: string | null): void {
@@ -117,9 +127,6 @@ export function loadApiCredential(): string | null {
   return apiCredential;
 }
 
-/** Obtain the credential from the Tauri sidecar for the current session.
- * Manual entry (Settings) remains available for externally-run backends.
- */
 export async function fetchBackendCredential(): Promise<string | null> {
   try {
     const core = window.__TAURI__?.core;
@@ -140,27 +147,20 @@ export class BackendError extends Error {
   }
 }
 
-async function request<T>(
-  base: string,
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
+async function request<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+  const safeBase = sanitizeBase(base);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
   const credential = loadApiCredential();
-  if (credential) headers["Authorization"] = `Bearer ${credential}`;
+  if (credential) headers.Authorization = `Bearer ${credential}`;
+
   let response: Response;
   try {
-    response = await fetch(`${base}${path}`, {
+    response = await fetch(`${safeBase}${path}`, {
       ...init,
       headers: { ...headers, ...((init?.headers as Record<string, string>) ?? {}) },
     });
   } catch (err) {
-    throw new Error(
-      `cannot reach the backend at ${base} — is ai-ecosystem-serve running?`,
-      { cause: err },
-    );
+    throw new Error(`Cannot reach the backend at ${safeBase}.`, { cause: err });
   }
   if (!response.ok) {
     const detail = await response.text();
@@ -170,29 +170,23 @@ async function request<T>(
 }
 
 export function makeApi(base: string) {
+  const safeBase = sanitizeBase(base);
   return {
-    base,
-    health: () => request<{ status: string }>(base, "/health"),
-    submitGoal: (goal: string) =>
-      request<TaskView>(base, "/tasks", {
-        method: "POST",
-        body: JSON.stringify({ goal }),
-      }),
-    listTasks: () => request<TaskView[]>(base, "/tasks"),
-    getTask: (id: string) => request<TaskView>(base, `/tasks/${id}`),
-    getTaskStatus: (id: string) =>
-      request<TaskStatus>(base, `/tasks/${id}/status`),
-    taskResult: (id: string) =>
-      request<TaskResult>(base, `/tasks/${id}/result`),
-    cancelTask: (id: string) =>
-      request<TaskView>(base, `/tasks/${id}/cancel`, { method: "POST" }),
-    taskEvents: (id: string, since = 0) =>
-      request<TaskEvent[]>(base, `/tasks/${id}/events?since=${since}`),
-    agentStatus: () =>
-      request<{ tasks: Record<string, number> }>(base, "/agents/status"),
-    awareness: () => request<Record<string, unknown>>(base, "/awareness"),
-    models: () => request<ModelInfo[]>(base, "/models"),
-    skills: () => request<SkillInfo[]>(base, "/skills"),
+    base: safeBase,
+    health: () => request<{ status: string }>(safeBase, "/health"),
+    submitGoal: (goal: string) => request<TaskView>(safeBase, "/tasks", {
+      method: "POST", body: JSON.stringify({ goal }),
+    }),
+    listTasks: () => request<TaskView[]>(safeBase, "/tasks"),
+    getTask: (id: string) => request<TaskView>(safeBase, `/tasks/${id}`),
+    getTaskStatus: (id: string) => request<TaskStatus>(safeBase, `/tasks/${id}/status`),
+    taskResult: (id: string) => request<TaskResult>(safeBase, `/tasks/${id}/result`),
+    cancelTask: (id: string) => request<TaskView>(safeBase, `/tasks/${id}/cancel`, { method: "POST" }),
+    taskEvents: (id: string, since = 0) => request<TaskEvent[]>(safeBase, `/tasks/${id}/events?since=${since}`),
+    agentStatus: () => request<{ tasks: Record<string, number> }>(safeBase, "/agents/status"),
+    awareness: () => request<Record<string, unknown>>(safeBase, "/awareness"),
+    models: () => request<ModelInfo[]>(safeBase, "/models"),
+    skills: () => request<SkillInfo[]>(safeBase, "/skills"),
   };
 }
 
