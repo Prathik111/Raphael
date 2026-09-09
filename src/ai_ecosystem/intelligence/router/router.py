@@ -1,9 +1,4 @@
-"""Model routing (Gate 4): pick a provider from task requirements.
-
-Deterministic and explainable: filter by hard constraints (privacy,
-capabilities, context), then prefer cheapest and fastest. Fallback walks
-the ranked list until one provider answers or all fail.
-"""
+"""Model routing: deterministic selection plus failover for all request types."""
 
 from __future__ import annotations
 
@@ -14,12 +9,11 @@ from ai_ecosystem.intelligence.models.providers import (
     ModelProvider,
     ModelRequest,
     ModelResponse,
+    request_structured,
 )
 
 
 class ProviderProfile(BaseModel):
-    """Static deployment facts the router may consider."""
-
     provider_id: str = ""
     local: bool = False
     cost_per_1k: float = 0.0
@@ -27,29 +21,25 @@ class ProviderProfile(BaseModel):
 
 
 class RoutingRequirements(BaseModel):
-    """What the task needs from its model."""
-
-    privacy: str = "any"  # "any" | "local-only"
+    privacy: str = "any"
     min_context: int = 0
     need_capabilities: list[str] = Field(default_factory=list)
     require_streaming: bool = False
 
 
 class ModelRouter:
-    """Selects and calls providers; the agent never picks one directly."""
+    """Select and fail over providers; callers never bypass routing policy."""
 
     def __init__(self) -> None:
         self._providers: dict[str, ModelProvider] = {}
         self._profiles: dict[str, ProviderProfile] = {}
 
     def register(self, provider: ModelProvider, profile: ProviderProfile) -> None:
-        """Add (or replace) a provider and its deployment facts."""
         self._providers[provider.provider_id] = provider
         self._profiles[provider.provider_id] = profile
 
     def candidates(self, requirements: RoutingRequirements) -> list[ModelProvider]:
-        """Providers satisfying the requirements, cheapest/fastest first."""
-        ranked: list[tuple[float, str, ModelProvider]] = []
+        ranked: list[tuple[float, int, str, ModelProvider]] = []
         for pid, provider in self._providers.items():
             profile = self._profiles.get(pid, ProviderProfile(provider_id=pid))
             caps = provider.capabilities
@@ -59,42 +49,44 @@ class ModelRouter:
                 continue
             if requirements.require_streaming and not caps.streaming:
                 continue
-            missing = [
-                name
-                for name in requirements.need_capabilities
-                if not getattr(caps, name, False)
-            ]
-            if missing:
+            if any(not getattr(caps, name, False) for name in requirements.need_capabilities):
                 continue
-            latency_rank = {"fast": 0, "standard": 1, "slow": 2}.get(
-                profile.latency_class, 1
-            )
+            latency_rank = {"fast": 0, "standard": 1, "slow": 2}.get(profile.latency_class, 1)
             ranked.append((profile.cost_per_1k, latency_rank, pid, provider))
         ranked.sort(key=lambda item: (item[0], item[1], item[2]))
         return [provider for _, _, _, provider in ranked]
 
     def select(self, requirements: RoutingRequirements) -> ModelProvider:
-        """Best provider; raises NoSuitableModelError when none qualifies."""
         options = self.candidates(requirements)
         if not options:
-            raise NoSuitableModelError(
-                f"no provider satisfies {requirements.model_dump()}"
-            )
+            raise NoSuitableModelError(f"no provider satisfies {requirements.model_dump()}")
         return options[0]
 
-    def complete(
-        self, requirements: RoutingRequirements, request: ModelRequest
-    ) -> ModelResponse:
-        """Complete via the best available provider, failing over in order."""
+    def complete(self, requirements: RoutingRequirements, request: ModelRequest) -> ModelResponse:
         options = self.candidates(requirements)
         if not options:
-            raise NoSuitableModelError(
-                f"no provider satisfies {requirements.model_dump()}"
-            )
+            raise NoSuitableModelError(f"no provider satisfies {requirements.model_dump()}")
         last_error: ModelError | None = None
         for provider in options:
             try:
                 return provider.complete(request)
+            except ModelError as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
+
+    def request_structured(
+        self, requirements: RoutingRequirements, request: ModelRequest,
+        model_cls: type[BaseModel],
+    ) -> BaseModel:
+        """Structured request with the same provider failover as complete()."""
+        options = self.candidates(requirements)
+        if not options:
+            raise NoSuitableModelError(f"no provider satisfies {requirements.model_dump()}")
+        last_error: ModelError | None = None
+        for provider in options:
+            try:
+                return request_structured(provider, request, model_cls)
             except ModelError as exc:
                 last_error = exc
         assert last_error is not None
