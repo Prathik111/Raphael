@@ -115,7 +115,6 @@ class MemoryStore:
             relevance = self._relevance(query_words, memory)
             if query_words and relevance <= 0.0:
                 continue
-            # Verification affects ranking only. It never becomes authority.
             trust = 1.0 if memory.verified else 0.0
             score = 0.45 * relevance + 0.2 * memory.importance + 0.15 * memory.confidence + 0.1 * _freshness(memory.created_at, now) + 0.1 * trust
             scored.append((round(score, 3), memory.created_at.isoformat(), memory.id, memory))
@@ -155,27 +154,43 @@ class MemoryStore:
         memory = self._repo.get(memory_id)
         if memory is None:
             raise ResourceNotFoundError("Memory", memory_id)
+        changed = any(value is not None for value in (content, confidence, importance))
         history = list(memory.metadata.get("history", []))
         history.append({"content": memory.content, "confidence": memory.confidence,
-                        "importance": memory.importance, "updated_at": memory.updated_at.isoformat()})
+                        "importance": memory.importance, "verified": memory.verified,
+                        "updated_at": memory.updated_at.isoformat()})
         if content is not None:
-            if not content.strip(): raise DomainValidationError("memory content must not be empty")
+            if not content.strip():
+                raise DomainValidationError("memory content must not be empty")
             memory.content = content
         if confidence is not None:
-            if not 0.0 <= confidence <= 1.0: raise DomainValidationError(f"confidence {confidence} outside [0, 1]")
+            if not 0.0 <= confidence <= 1.0:
+                raise DomainValidationError(f"confidence {confidence} outside [0, 1]")
             memory.confidence = confidence
         if importance is not None:
-            if not 0.0 <= importance <= 1.0: raise DomainValidationError(f"importance {importance} outside [0, 1]")
+            if not 0.0 <= importance <= 1.0:
+                raise DomainValidationError(f"importance {importance} outside [0, 1]")
             memory.importance = importance
+        if changed:
+            # Verification is a statement about the current content. Any mutation
+            # invalidates that statement and preserves an explicit provenance trail.
+            memory.verified = False
+            memory.provenance = f"modified:{memory.provenance or 'unknown'}"
+            memory.metadata["verification_invalidated"] = True
+            memory.metadata["verification_invalidated_at"] = utcnow().isoformat()
         memory.metadata["history"] = history
         memory.touch()
         updated = self._repo.update(memory)
-        self._emit(EventType.MEMORY_UPDATED, "", {"memory_id": memory_id, "history": len(history)})
+        self._emit(EventType.MEMORY_UPDATED, "", {
+            "memory_id": memory_id, "history": len(history),
+            "verified": updated.verified,
+        })
         return updated
 
     def archive(self, memory_id: str) -> Memory:
         memory = self._repo.get(memory_id)
-        if memory is None: raise ResourceNotFoundError("Memory", memory_id)
+        if memory is None:
+            raise ResourceNotFoundError("Memory", memory_id)
         memory.status = MemoryStatus.ARCHIVED
         memory.touch()
         archived = self._repo.update(memory)
@@ -184,20 +199,26 @@ class MemoryStore:
 
     def delete(self, memory_id: str) -> bool:
         removed = self._repo.delete(memory_id)
-        if removed: self._emit(EventType.MEMORY_DELETED, "", {"memory_id": memory_id})
+        if removed:
+            self._emit(EventType.MEMORY_DELETED, "", {"memory_id": memory_id})
         return removed
 
     def propose_consolidation(self, ids: list[str], new_candidate: MemoryCandidate, reason: str) -> ConsolidationProposal:
-        if len(ids) < 2: raise DomainValidationError("consolidation needs at least 2 memories")
+        if len(ids) < 2:
+            raise DomainValidationError("consolidation needs at least 2 memories")
         olds = []
         for memory_id in ids:
             memory = self._repo.get(memory_id)
-            if memory is None: raise ResourceNotFoundError("Memory", memory_id)
-            if memory.status is not MemoryStatus.ACTIVE: raise DomainValidationError(f"memory {memory_id} is not ACTIVE")
+            if memory is None:
+                raise ResourceNotFoundError("Memory", memory_id)
+            if memory.status is not MemoryStatus.ACTIVE:
+                raise DomainValidationError(f"memory {memory_id} is not ACTIVE")
             olds.append(memory)
         scopes = {(m.scope, m.scope_id) for m in olds}
-        if len(scopes) != 1: raise DomainValidationError("cannot consolidate across scopes")
-        if (new_candidate.scope, new_candidate.scope_id) != next(iter(scopes)): raise DomainValidationError("consolidated memory must match source scope")
+        if len(scopes) != 1:
+            raise DomainValidationError("cannot consolidate across scopes")
+        if (new_candidate.scope, new_candidate.scope_id) != next(iter(scopes)):
+            raise DomainValidationError("consolidated memory must match source scope")
         return ConsolidationProposal(new_candidate=new_candidate, archive_ids=ids, reason=reason)
 
     def apply_consolidation(self, proposal: ConsolidationProposal) -> Memory:
@@ -205,7 +226,8 @@ class MemoryStore:
         created = self.store(fresh.new_candidate)
         created.metadata["consolidates"] = list(fresh.archive_ids)
         self._repo.update(created)
-        for memory_id in fresh.archive_ids: self.archive(memory_id)
+        for memory_id in fresh.archive_ids:
+            self.archive(memory_id)
         return created
 
     def purge_expired(self, now: Optional[datetime] = None) -> list[str]:
@@ -215,11 +237,13 @@ class MemoryStore:
             expired_by_date = memory.expires_at is not None and memory.expires_at <= moment
             expired_by_retention = memory.retention_days is not None and (moment - memory.created_at).total_seconds() / 86400.0 > memory.retention_days
             if expired_by_date or expired_by_retention:
-                if self.delete(memory.id): purged.append(memory.id)
+                if self.delete(memory.id):
+                    purged.append(memory.id)
         return purged
 
     def list_cloud_eligible(self) -> list[Memory]:
-        return [m for m in self._repo.list() if m.status is MemoryStatus.ACTIVE and m.cloud_eligible and not (m.expires_at and m.expires_at <= utcnow())]
+        now = utcnow()
+        return [m for m in self._repo.list() if m.status is MemoryStatus.ACTIVE and m.cloud_eligible and not (m.expires_at and m.expires_at <= now)]
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
