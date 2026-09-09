@@ -1,420 +1,205 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import type { CSSProperties } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Api,
   BackendError,
   BackendStatus,
   TaskEvent,
   TaskResult,
-  TaskStatus,
   TaskView,
   backendStatus,
-  defaultBase,
   fetchBackendCredential,
-  loadApiCredential,
   loadBase,
   makeApi,
   saveBase,
-  setApiCredential,
 } from "./api";
 
-type ConnState = "connecting" | "online" | "offline";
+type Connection = "connecting" | "online" | "offline";
 
-const STATE_DOT: Record<string, string> = {
-  CREATED: "#8ab4f8",
-  UNDERSTANDING: "#8ab4f8",
-  AWARENESS: "#8ab4f8",
-  RESEARCHING: "#c58af9",
-  PLANNING: "#c58af9",
-  WAITING_PERMISSION: "#fdd663",
-  EXECUTING: "#81c995",
-  VERIFYING: "#81c995",
-  RECOVERING: "#f29900",
-  COMPLETED: "#81c995",
-  FAILED: "#f28b82",
-  CANCELLED: "#9aa0a6",
-};
-
-const PHASE_LABEL: Record<string, string> = {
-  CREATED: "Queued",
-  UNDERSTANDING: "Understanding",
-  AWARENESS: "Checking capabilities",
-  RESEARCHING: "Researching",
-  PLANNING: "Planning",
-  WAITING_PERMISSION: "Waiting for permission",
-  EXECUTING: "Working",
-  VERIFYING: "Verifying",
-  RECOVERING: "Recovering",
-  COMPLETED: "Done",
-  FAILED: "Failed",
-  CANCELLED: "Stopped",
-};
-
-const SUGGESTIONS = [
-  "List the files in my workspace and summarize what's there.",
-  "Check git status of the workspace and tell me if it is clean.",
-  "Create a notes file with three productivity tips.",
-];
-
-const css: Record<string, React.CSSProperties> = {
-  page: {
-    fontFamily:
-      "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-    background: "#212121",
-    color: "#ececec",
-    minHeight: "100vh",
-    margin: 0,
-    fontSize: 15,
-  },
-  shell: { display: "flex", minHeight: "100vh" },
-  side: {
-    width: 260,
-    flexShrink: 0,
-    background: "#171717",
-    padding: "12px 10px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    position: "sticky",
-    top: 0,
-    height: "100vh",
-    overflowY: "auto",
-    boxSizing: "border-box",
-  },
-  newChat: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    width: "100%",
-    background: "transparent",
-    color: "#ececec",
-    border: "1px solid #424242",
-    borderRadius: 10,
-    padding: "9px 12px",
-    fontSize: 14,
-    cursor: "pointer",
-    marginBottom: 8,
-  },
-  convo: {
-    width: "100%",
-    textAlign: "left",
-    background: "transparent",
-    color: "#ececec",
-    border: "none",
-    borderRadius: 8,
-    padding: "8px 10px",
-    cursor: "pointer",
-    fontSize: 14,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  sideFoot: { marginTop: "auto", paddingTop: 10, fontSize: 12, color: "#9aa0a6" },
-  main: {
-    flex: 1,
-    minWidth: 0,
-    display: "flex",
-    flexDirection: "column",
-    height: "100vh",
-  },
-  topbar: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "12px 20px",
-    color: "#b4b4b4",
-    fontSize: 14,
-  },
-  scroll: { flex: 1, overflowY: "auto", padding: "10px 0 20px" },
-  column: { maxWidth: 768, margin: "0 auto", padding: "0 20px" },
-  hero: { textAlign: "center", margin: "12vh 0 24px", fontSize: 28 },
-  chips: {
-    display: "flex",
-    gap: 8,
-    flexWrap: "wrap",
-    justifyContent: "center",
-  },
-  chip: {
-    background: "transparent",
-    color: "#ececec",
-    border: "1px solid #424242",
-    borderRadius: 999,
-    padding: "8px 14px",
-    fontSize: 13,
-    cursor: "pointer",
-    maxWidth: "100%",
-  },
-  userRow: { display: "flex", justifyContent: "flex-end", margin: "14px 0" },
-  userBubble: {
-    background: "#2f2f2f",
-    borderRadius: 20,
-    padding: "10px 18px",
-    maxWidth: "80%",
-    whiteSpace: "pre-wrap",
-    lineHeight: 1.6,
-  },
-  agentRow: { display: "flex", gap: 12, margin: "14px 0" },
-  avatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 999,
-    border: "1px solid #424242",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    fontSize: 14,
-  },
-  agentBody: { flex: 1, minWidth: 0, lineHeight: 1.7 },
-  thinking: { color: "#9aa0a6", display: "flex", gap: 8, alignItems: "center" },
-  spin: {
-    width: 12,
-    height: 12,
-    borderRadius: 999,
-    border: "2px solid #424242",
-    borderTopColor: "#ececec",
-    animation: "spin 0.9s linear infinite",
-    flexShrink: 0,
-  },
-  toolsToggle: {
-    background: "transparent",
-    border: "1px solid #424242",
-    color: "#b4b4b4",
-    borderRadius: 999,
-    padding: "4px 12px",
-    fontSize: 12,
-    cursor: "pointer",
-    margin: "6px 0",
-  },
-  toolLine: {
-    display: "flex",
-    gap: 8,
-    alignItems: "baseline",
-    fontSize: 13,
-    padding: "4px 0",
-    borderBottom: "1px solid #2f2f2f",
-  },
-  mono: { fontFamily: "ui-monospace, Consolas, monospace", fontSize: 12.5 },
-  pre: {
-    fontFamily: "ui-monospace, Consolas, monospace",
-    fontSize: 12.5,
-    background: "#171717",
-    borderRadius: 8,
-    padding: "10px 12px",
-    overflowX: "auto",
-    whiteSpace: "pre-wrap",
-  },
-  muted: { color: "#9aa0a6", fontSize: 13 },
-  err: { color: "#f28b82" },
-  ok: { color: "#81c995" },
-  composerWrap: { padding: "0 0 18px" },
-  composer: {
-    background: "#2f2f2f",
-    borderRadius: 24,
-    padding: "10px 10px 10px 18px",
-    display: "flex",
-    alignItems: "flex-end",
-    gap: 8,
-  },
-  area: {
-    flex: 1,
-    background: "transparent",
-    border: "none",
-    outline: "none",
-    resize: "none",
-    color: "#ececec",
-    fontSize: 15,
-    lineHeight: 1.5,
-    maxHeight: 160,
-    fontFamily: "inherit",
-    padding: "6px 0",
-  },
-  send: {
-    width: 34,
-    height: 34,
-    borderRadius: 999,
-    border: "none",
-    background: "#ececec",
-    color: "#171717",
-    fontSize: 16,
-    cursor: "pointer",
-    flexShrink: 0,
-  },
-  sendOff: { background: "#424242", color: "#9aa0a6", cursor: "default" },
-  stop: { background: "#ececec", color: "#171717" },
-  banner: {
-    borderRadius: 10,
-    padding: "10px 14px",
-    margin: "0 0 12px",
-    fontSize: 13,
-  },
-  ghost: {
-    background: "transparent",
-    color: "#8ab4f8",
-    border: "1px solid #424242",
-    borderRadius: 8,
-    padding: "4px 10px",
-    fontSize: 12,
-    cursor: "pointer",
-  },
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    background: "#212121",
-    color: "#ececec",
-    border: "1px solid #424242",
-    borderRadius: 8,
-    padding: "8px 10px",
-    fontSize: 13,
-  },
-};
-
-/** Minimal markdown: fenced blocks, inline code, bold, lists, paragraphs.
- *  Pure React nodes -- model text is always rendered as text, so it can
- *  never inject markup. */
-function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
-  const out: React.ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-  let last = 0;
-  let match: RegExpExecArray | null;
-  let n = 0;
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > last) out.push(text.slice(last, match.index));
-    const chunk = match[0];
-    if (chunk.startsWith("**")) {
-      out.push(<strong key={`${keyPrefix}-${n++}`}>{chunk.slice(2, -2)}</strong>);
-    } else {
-      out.push(
-        <code
-          key={`${keyPrefix}-${n++}`}
-          style={{
-            background: "#171717",
-            padding: "1px 5px",
-            borderRadius: 5,
-          }}
-        >
-          {chunk.slice(1, -1)}
-        </code>,
-      );
-    }
-    last = match.index + chunk.length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
-}
-
-function renderMarkdown(text: string): React.ReactNode[] {
-  const out: React.ReactNode[] = [];
-  const parts = text.split(/```/);
-  parts.forEach((part, i) => {
-    if (i % 2 === 1) {
-      const nl = part.indexOf("\n");
-      const code = (nl >= 0 ? part.slice(nl + 1) : part).replace(
-        /^\n+|\n+$/g,
-        "",
-      );
-      out.push(
-        <pre key={i} style={css.pre}>
-          {code}
-        </pre>,
-      );
-      return;
-    }
-    part.split(/\n{2,}/).forEach((block, j) => {
-      const lines = block.split("\n").filter((l) => l.trim() !== "");
-      if (lines.length === 0) return;
-      if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
-        out.push(
-          <ul key={`${i}-${j}`} style={{ margin: "8px 0", paddingLeft: 22 }}>
-            {lines.map((l, k) => (
-              <li key={k}>
-                {renderInline(l.replace(/^\s*[-*]\s+/, ""), `${i}-${j}-${k}`)}
-              </li>
-            ))}
-          </ul>,
-        );
-      } else {
-        out.push(
-          <p key={`${i}-${j}`} style={{ margin: "8px 0" }}>
-            {renderInline(block, `${i}-${j}`)}
-          </p>,
-        );
-      }
-    });
-  });
-  return out;
-}
-
-function fmtArgs(value: unknown, cap = 400): string {
-  try {
-    const text =
-      typeof value === "string" ? value : JSON.stringify(value, null, 1);
-    return text.length > cap ? text.slice(0, cap) + "…" : text;
-  } catch {
-    return String(value);
-  }
-}
-
-interface ToolCallView {
+type ToolCall = {
   callId: string;
   tool: string;
-  args: unknown;
+  args?: unknown;
   status: "running" | "ok" | "failed" | "denied";
   snippet: string;
   reason: string;
+};
+
+const STATE_META: Record<string, { label: string; tone: "blue" | "green" | "amber" | "red" | "muted" }> = {
+  CREATED: { label: "Queued", tone: "blue" },
+  UNDERSTANDING: { label: "Understanding", tone: "blue" },
+  AWARENESS: { label: "Checking system", tone: "blue" },
+  RESEARCHING: { label: "Researching", tone: "blue" },
+  PLANNING: { label: "Planning", tone: "amber" },
+  WAITING_PERMISSION: { label: "Permission needed", tone: "amber" },
+  EXECUTING: { label: "Executing", tone: "green" },
+  VERIFYING: { label: "Verifying", tone: "green" },
+  RECOVERING: { label: "Recovering", tone: "amber" },
+  COMPLETED: { label: "Completed", tone: "green" },
+  FAILED: { label: "Failed", tone: "red" },
+  CANCELLED: { label: "Cancelled", tone: "muted" },
+};
+
+const SUGGESTIONS = [
+  "Review the workspace and summarize its structure",
+  "Check git status and explain any uncommitted changes",
+  "Create a concise project notes file with the key next steps",
+];
+
+const css = `
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --bg: #080b11;
+  --panel: #0e131c;
+  --panel-2: #121925;
+  --border: rgba(255,255,255,.08);
+  --border-strong: rgba(255,255,255,.14);
+  --text: #eef2f8;
+  --muted: #8f9bad;
+  --faint: #647083;
+  --accent: #7c9cff;
+  --accent-2: #6ee7d0;
+  --danger: #ff7777;
+  --warning: #f5c36a;
+  --shadow: 0 20px 70px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+button, textarea, input { font: inherit; }
+button { color: inherit; }
+.app { min-height: 100vh; display: flex; background: radial-gradient(circle at 75% 5%, rgba(124,156,255,.12), transparent 30%), var(--bg); }
+.sidebar { width: 282px; padding: 18px; border-right: 1px solid var(--border); background: rgba(9,12,18,.88); backdrop-filter: blur(22px); display: flex; flex-direction: column; gap: 18px; }
+.brand { display: flex; align-items: center; gap: 12px; padding: 3px 4px; }
+.logo { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: linear-gradient(135deg, #9bb3ff, #6ee7d0); color: #08101b; font-weight: 900; box-shadow: 0 12px 30px rgba(124,156,255,.22); }
+.brand-copy strong { display: block; font-size: 14px; letter-spacing: .01em; }
+.brand-copy span { display: block; margin-top: 2px; color: var(--faint); font-size: 11px; }
+.new-task { width: 100%; border: 1px solid var(--border-strong); background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015)); border-radius: 12px; padding: 11px 13px; cursor: pointer; text-align: left; font-size: 13px; font-weight: 650; }
+.new-task:hover { border-color: rgba(124,156,255,.45); background: rgba(124,156,255,.08); }
+.section-label { color: var(--faint); font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; padding: 0 5px; }
+.task-list { display: flex; flex-direction: column; gap: 6px; overflow: auto; min-height: 0; }
+.task-item { border: 1px solid transparent; background: transparent; padding: 10px 11px; border-radius: 10px; cursor: pointer; text-align: left; }
+.task-item:hover { background: rgba(255,255,255,.035); }
+.task-item.active { background: rgba(124,156,255,.09); border-color: rgba(124,156,255,.22); }
+.task-title { font-size: 12px; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-meta { display: flex; gap: 6px; align-items: center; margin-top: 6px; color: var(--faint); font-size: 10px; }
+.dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+.dot.blue { background: var(--accent); } .dot.green { background: var(--accent-2); } .dot.amber { background: var(--warning); } .dot.red { background: var(--danger); } .dot.muted { background: #647083; }
+.side-footer { margin-top: auto; border-top: 1px solid var(--border); padding-top: 14px; color: var(--faint); font-size: 11px; line-height: 1.6; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.topbar { height: 64px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 26px; background: rgba(8,11,17,.72); backdrop-filter: blur(20px); }
+.topbar-left { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.page-title { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.page-subtitle { color: var(--faint); font-size: 11px; margin-left: 8px; }
+.status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted); }
+.workspace { width: min(1120px, calc(100vw - 340px)); margin: 0 auto; padding: 30px 26px 34px; display: flex; flex-direction: column; gap: 18px; }
+.hero { padding: 8px 0 3px; }
+.eyebrow { display: inline-flex; gap: 7px; align-items: center; color: var(--accent-2); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.hero h1 { margin: 10px 0 7px; font-size: clamp(25px, 3vw, 38px); letter-spacing: -.03em; line-height: 1.08; }
+.hero p { margin: 0; color: var(--muted); max-width: 680px; line-height: 1.55; font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 11px; }
+.stat { background: rgba(14,19,28,.85); border: 1px solid var(--border); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); }
+.stat-label { color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
+.stat-value { margin-top: 8px; font-size: 19px; font-weight: 750; }
+.stat-note { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.panel { border: 1px solid var(--border); background: rgba(14,19,28,.82); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+.panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.panel-title { font-size: 12px; font-weight: 800; letter-spacing: .02em; }
+.panel-subtitle { color: var(--faint); font-size: 10px; }
+.panel-body { padding: 16px; }
+.composer { display: flex; gap: 10px; align-items: flex-end; }
+.composer textarea { flex: 1; min-height: 94px; max-height: 220px; resize: vertical; color: var(--text); background: #0a0e15; border: 1px solid var(--border-strong); border-radius: 12px; padding: 13px 14px; outline: none; line-height: 1.55; font-size: 13px; }
+.composer textarea:focus { border-color: rgba(124,156,255,.6); box-shadow: 0 0 0 4px rgba(124,156,255,.08); }
+.send { border: 0; min-width: 92px; height: 42px; padding: 0 14px; border-radius: 11px; background: linear-gradient(135deg, #9bb3ff, #6ee7d0); color: #08101b; font-size: 12px; font-weight: 850; cursor: pointer; }
+.send:disabled { opacity: .45; cursor: default; }
+.suggestions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 11px; }
+.suggestion { border: 1px solid var(--border); background: rgba(255,255,255,.02); border-radius: 999px; color: var(--muted); padding: 7px 10px; cursor: pointer; font-size: 10px; }
+.suggestion:hover { border-color: rgba(124,156,255,.35); color: var(--text); }
+.banner { padding: 12px 14px; border-radius: 11px; font-size: 11px; line-height: 1.5; }
+.banner.error { color: #ffd1d1; background: rgba(255,119,119,.08); border: 1px solid rgba(255,119,119,.2); }
+.banner.warn { color: #fbe3a7; background: rgba(245,195,106,.07); border: 1px solid rgba(245,195,106,.18); }
+.detail-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 12px; }
+.activity { display: flex; flex-direction: column; gap: 10px; max-height: 460px; overflow: auto; }
+.activity-row { display: grid; grid-template-columns: 8px 1fr auto; gap: 9px; align-items: start; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.045); }
+.activity-row:last-child { border-bottom: 0; }
+.activity-dot { width: 7px; height: 7px; margin-top: 4px; border-radius: 999px; background: #6f7c90; }
+.activity-copy strong { display: block; font-size: 11px; }
+.activity-copy span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.activity-time { color: var(--faint); font-size: 9px; white-space: nowrap; }
+.tool { border: 1px solid var(--border); background: rgba(255,255,255,.018); border-radius: 11px; padding: 10px; }
+.tool + .tool { margin-top: 8px; }
+.tool-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tool-name { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+.tool-status { font-size: 9px; color: var(--muted); }
+.tool-snippet { margin-top: 7px; white-space: pre-wrap; color: var(--muted); font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; max-height: 100px; overflow: auto; }
+.empty { padding: 22px; color: var(--faint); text-align: center; font-size: 11px; }
+.result { white-space: pre-wrap; line-height: 1.65; font-size: 12px; color: #dbe3f0; }
+.kv { display: grid; grid-template-columns: 110px 1fr; gap: 7px 12px; font-size: 10px; }
+.kv dt { color: var(--faint); } .kv dd { margin: 0; color: var(--muted); word-break: break-word; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.action { background: transparent; border: 1px solid var(--border-strong); border-radius: 9px; padding: 7px 10px; font-size: 10px; color: var(--muted); cursor: pointer; }
+.action:hover { color: var(--text); }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(2,4,8,.7); backdrop-filter: blur(10px); display: grid; place-items: center; padding: 20px; z-index: 20; }
+.modal { width: min(560px, 100%); background: #0d131d; border: 1px solid var(--border-strong); border-radius: 16px; box-shadow: 0 30px 90px rgba(0,0,0,.55); }
+.modal-body { padding: 16px; }
+.field { margin-top: 13px; }
+.field label { display: block; color: var(--muted); font-size: 10px; margin-bottom: 6px; }
+.field input { width: 100%; background: #090d13; border: 1px solid var(--border); border-radius: 10px; color: var(--text); padding: 9px 10px; outline: none; font-size: 12px; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+@media (max-width: 980px) { .sidebar { width: 225px; } .workspace { width: calc(100vw - 225px); } .detail-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .sidebar { display: none; } .workspace { width: 100vw; padding: 22px 16px 30px; } .topbar { padding: 0 16px; } .grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .composer { flex-direction: column; } .send { width: 100%; } }
+`;
+
+function stateMeta(state: string) {
+  return STATE_META[state] ?? { label: state, tone: "muted" as const };
 }
 
-function buildToolCalls(events: TaskEvent[]): ToolCallView[] {
-  const byCall = new Map<string, ToolCallView>();
-  const order: string[] = [];
-  const get = (callId: string, tool: string): ToolCallView => {
-    let view = byCall.get(callId);
-    if (!view) {
-      view = { callId, tool, args: undefined, status: "running", snippet: "", reason: "" };
-      byCall.set(callId, view);
-      order.push(callId);
-    }
-    return view;
-  };
-  for (const event of events) {
-    const p = event.payload as Record<string, unknown>;
+function relativeTime(date: string): string {
+  const ms = Math.max(0, Date.now() - new Date(date).getTime());
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hrs = Math.floor(min / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function buildTools(events: TaskEvent[]): ToolCall[] {
+  const map = new Map<string, ToolCall>();
+  for (const e of events) {
+    const p = e.payload ?? {};
     const callId = String(p.call_id ?? p.tool_call_id ?? "");
     if (!callId) continue;
-    if (event.type === "ToolRequested") {
-      const view = get(callId, String(p.tool ?? "?"));
-      view.args = p.arguments;
-    } else if (event.type === "ToolCompleted") {
-      const view = get(callId, String(p.tool ?? "?"));
-      view.status = "ok";
-      view.snippet = String(p.output_snippet ?? "");
-    } else if (event.type === "ToolFailed") {
-      const view = get(callId, String(p.tool ?? "?"));
-      view.status = "failed";
-      view.snippet = String(p.output_snippet ?? "");
-      view.reason = String(p.error ?? "");
-    } else if (event.type === "PermissionDenied") {
-      const view = get(callId, String(p.tool ?? "?"));
-      view.status = "denied";
-      view.reason = String(p.reason ?? "");
-    }
+    const tool = String(p.tool ?? "unknown");
+    const current = map.get(callId) ?? { callId, tool, status: "running", snippet: "", reason: "" };
+    if (e.type === "ToolRequested") { current.args = p.arguments; current.status = "running"; }
+    if (e.type === "ToolCompleted") { current.status = "ok"; current.snippet = String(p.output_snippet ?? ""); }
+    if (e.type === "ToolFailed") { current.status = "failed"; current.snippet = String(p.output_snippet ?? ""); current.reason = String(p.error ?? ""); }
+    if (e.type === "PermissionDenied") { current.status = "denied"; current.reason = String(p.reason ?? ""); }
+    map.set(callId, current);
   }
-  return order.map((id) => byCall.get(id) as ToolCallView);
+  return [...map.values()];
+}
+
+function eventLabel(type: string): string {
+  return type.replaceAll("_", " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().replace(/^./, c => c.toUpperCase());
+}
+
+function markdownToText(text: string): string {
+  return text.replace(/```[a-zA-Z0-9_-]*\n?/g, "").replace(/`/g, "");
 }
 
 export function App() {
   const [base, setBase] = useState(loadBase);
   const [api, setApi] = useState<Api>(() => makeApi(loadBase()));
-  const [conn, setConn] = useState<ConnState>("connecting");
+  const [conn, setConn] = useState<Connection>("connecting");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<TaskView | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -422,594 +207,176 @@ export function App() {
   const [backend, setBackend] = useState<BackendStatus | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [draftBase, setDraftBase] = useState(base);
-  const [draftCredential, setDraftCredential] = useState("");
-  const [showTools, setShowTools] = useState(true);
-  const [showRaw, setShowRaw] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [agentCounts, setAgentCounts] = useState<Record<string, number>>({});
+  const pollRef = useRef<number | null>(null);
 
-  const online = conn === "online";
+  const selected = useMemo(() => tasks.find(t => t.task_id === selectedId) ?? null, [tasks, selectedId]);
+  const tools = useMemo(() => buildTools(events), [events]);
+  const activeTasks = useMemo(() => tasks.filter(t => !["COMPLETED", "FAILED", "CANCELLED"].includes(t.state)).length, [tasks]);
+  const completedTasks = useMemo(() => tasks.filter(t => t.state === "COMPLETED").length, [tasks]);
+  const currentState = selected ? stateMeta(selected.state) : null;
 
-  const refreshMeta = useCallback(
-    async (client: Api) => {
-      try {
-        // Bearer credential first: the shell reads it from the backend's
-        // credential file; manual entry (Settings) covers external backends.
-        await fetchBackendCredential();
-        await client.health();
-        setConn("online");
-        client
-          .models()
-          .then(setModels)
-          .catch(() => setModels([]));
-        backendStatus().then(setBackend);
-      } catch (err) {
-        setConn("offline");
-        if (err instanceof BackendError && err.status === 401) {
-          setError(
-            "The backend rejected the API credential. Enter the current one " +
-              "in Settings (backend log shows its file location).",
-          );
-        }
-      }
-    },
-    [],
-  );
-
-  const refreshTasks = useCallback(async (client: Api) => {
+  const refreshTasks = useCallback(async (client = api) => {
     try {
-      setTasks(await client.listTasks());
+      const [nextTasks, nextAgent, nextModels, nextSkills] = await Promise.all([
+        client.listTasks(), client.agentStatus(), client.models(), client.skills(),
+      ]);
+      setTasks(nextTasks);
+      setAgentCounts(nextAgent.tasks ?? {});
+      setModels(nextModels.map(m => ({ provider_id: m.provider_id })));
+      setSkillCount(nextSkills.length);
+      setConn("online");
+      setError(null);
+      if (!selectedId && nextTasks[0]) setSelectedId(nextTasks[0].task_id);
     } catch (err) {
       setConn("offline");
       if (err instanceof Error) setError(err.message);
     }
-  }, []);
+  }, [api, selectedId]);
 
-  useEffect(() => {
-    void refreshMeta(api);
-    const timer = window.setInterval(() => void refreshMeta(api), 8000);
-    return () => window.clearInterval(timer);
-  }, [api, refreshMeta]);
+  const [skillCount, setSkillCount] = useState(0);
 
-  useEffect(() => {
-    if (!online) return;
-    void refreshTasks(api);
-    const timer = window.setInterval(() => void refreshTasks(api), 3000);
-    return () => window.clearInterval(timer);
-  }, [api, online, refreshTasks]);
-
-  useEffect(() => {
-    if (!selectedId || !online) {
-      setDetail(null);
-      setEvents([]);
-      setResult(null);
-      return;
+  const refreshDetail = useCallback(async (id: string, client = api) => {
+    try {
+      const [detail, ev] = await Promise.all([client.getTask(id), client.taskEvents(id, 0)]);
+      setTasks(current => current.some(t => t.task_id === id) ? current.map(t => t.task_id === id ? detail : t) : [detail, ...current]);
+      setEvents(ev);
+      if (["COMPLETED", "FAILED", "CANCELLED"].includes(detail.state)) {
+        try { setResult(await client.taskResult(id)); } catch { setResult(null); }
+      } else setResult(null);
+      setConn("online");
+    } catch (err) {
+      if (err instanceof BackendError && err.status === 404) setError("That task no longer exists.");
+      else if (err instanceof Error) setError(err.message);
     }
-    let cancelled = false;
-    const poll = async () => {
+  }, [api]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      await fetchBackendCredential();
       try {
-        const [view, evts] = await Promise.all([
-          api.getTask(selectedId),
-          api.taskEvents(selectedId).catch(() => [] as TaskEvent[]),
-        ]);
-        if (cancelled) return;
-        setDetail(view);
-        setEvents(evts);
-        if (view.completed) {
-          api
-            .taskResult(selectedId)
-            .then((r) => {
-              if (!cancelled) setResult(r);
-            })
-            .catch((err) => {
-              if (!(err instanceof BackendError && err.status === 503)) {
-                if (!cancelled) setResult(null);
-              }
-            });
-        } else {
-          setResult(null);
-        }
+        await api.health();
+        if (!active) return;
+        setConn("online");
+        await refreshTasks(api);
+        const status = await backendStatus();
+        if (active) setBackend(status);
       } catch {
-        // Transient: stale view stays; conn poll reports outages.
+        if (active) setConn("offline");
       }
-    };
-    void poll();
-    const timer = window.setInterval(poll, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [api, selectedId, online]);
+    })();
+    return () => { active = false; };
+  }, [api, refreshTasks]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [events.length, result?.status, selectedId]);
-
-  const send = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || busy || !online) return;
-    setBusy(true);
-    try {
-      const created = await api.submitGoal(text);
-      setDraft("");
-      setSelectedId(created.task_id);
-      await refreshTasks(api);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "send failed");
-    } finally {
-      setBusy(false);
-    }
-  }, [api, draft, online, refreshTasks, busy]);
-
-  const stop = useCallback(async () => {
+    if (pollRef.current !== null) window.clearInterval(pollRef.current);
     if (!selectedId) return;
+    pollRef.current = window.setInterval(() => {
+      void refreshDetail(selectedId);
+      void refreshTasks(api);
+    }, 1800);
+    void refreshDetail(selectedId);
+    return () => { if (pollRef.current !== null) window.clearInterval(pollRef.current); };
+  }, [selectedId, api, refreshDetail, refreshTasks]);
+
+  const submit = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const goal = draft.trim();
+    if (!goal || busy) return;
+    setBusy(true);
+    setError(null);
     try {
-      await api.cancelTask(selectedId);
-      await refreshTasks(api);
+      const task = await api.submitGoal(goal);
+      setTasks(current => [task, ...current.filter(t => t.task_id !== task.task_id)]);
+      setSelectedId(task.task_id);
+      setDraft("");
+      setConn("online");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "stop failed");
-    }
-  }, [api, refreshTasks, selectedId]);
+      setConn("offline");
+      setError(err instanceof Error ? err.message : "Unable to submit task");
+    } finally { setBusy(false); }
+  };
 
-  const newChat = useCallback(() => {
-    setSelectedId(null);
-    setDetail(null);
-    setEvents([]);
-    setResult(null);
-  }, []);
+  const cancel = async () => {
+    if (!selectedId) return;
+    try { await api.cancelTask(selectedId); await refreshDetail(selectedId); }
+    catch (err) { setError(err instanceof Error ? err.message : "Unable to stop task"); }
+  };
 
-  const applyBase = useCallback(() => {
-    const cleaned = draftBase.trim().replace(/\/$/, "") || defaultBase();
-    saveBase(cleaned);
-    setBase(cleaned);
-    setApi(makeApi(cleaned));
-    setConn("connecting");
-    newChat();
-  }, [draftBase, newChat]);
+  const applySettings = () => {
+    try {
+      const safe = draftBase.trim();
+      saveBase(safe);
+      const nextApi = makeApi(safe);
+      setBase(nextApi.base);
+      setApi(nextApi);
+      setShowSettings(false);
+      setConn("connecting");
+    } catch (err) { setError(err instanceof Error ? err.message : "Invalid backend URL"); }
+  };
 
-  const toolCalls = useMemo(() => buildToolCalls(events), [events]);
-  const recalled = useMemo(
-    () =>
-      events
-        .filter((e) => e.type === "MemoryRecalled")
-        .reduce((n, e) => {
-          const c = (e.payload as Record<string, unknown>).count;
-          return typeof c === "number" ? Math.max(n, c) : n;
-        }, 0),
-    [events],
-  );
-  const running = detail !== null && !detail.completed;
-  const sorted = useMemo(() => [...tasks].reverse(), [tasks]);
-  const veredicts = useMemo(
-    () => events.filter((e) => e.type.startsWith("Verification")),
-    [events],
-  );
+  const agentPool = Object.values(agentCounts).reduce((a, b) => a + b, 0);
+  const connectionLabel = conn === "online" ? "Backend online" : conn === "connecting" ? "Connecting" : "Backend offline";
 
   return (
-    <div style={css.page}>
-      <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
-      <div style={css.shell}>
-        <aside style={css.side}>
-          <button style={css.newChat} onClick={newChat}>
-            <span style={{ fontSize: 16 }}>＋</span> New chat
-          </button>
-          {sorted.length === 0 ? (
-            <p style={css.muted}>
-              {online ? "No conversations yet." : "Offline."}
-            </p>
-          ) : (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {sorted.map((task) => (
-                <li key={task.task_id}>
-                  <button
-                    style={{
-                      ...css.convo,
-                      background:
-                        task.task_id === selectedId ? "#2f2f2f" : "transparent",
-                    }}
-                    onClick={() => setSelectedId(task.task_id)}
-                    title={`${task.title} — ${task.state}`}
-                  >
-                    <span
-                      style={{
-                        display: "inline-block",
-                        width: 7,
-                        height: 7,
-                        borderRadius: 999,
-                        background: STATE_DOT[task.state] ?? "#9aa0a6",
-                        marginRight: 8,
-                        flexShrink: 0,
-                      }}
-                    />
-                    {task.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div style={css.sideFoot}>
-            <div style={{ marginBottom: 6 }}>
-              <span
-                style={{
-                  color:
-                    conn === "online"
-                      ? "#81c995"
-                      : conn === "connecting"
-                        ? "#fdd663"
-                        : "#f28b82",
-                }}
-              >
-                {conn === "online"
-                  ? "● Connected"
-                  : conn === "connecting"
-                    ? "● Connecting…"
-                    : "● Offline"}
-              </span>
-              {backend && backend.state !== "unknown" && (
-                <span>
-                  {" · "}
-                  {backend.state === "managed"
-                    ? "backend auto-started"
-                    : backend.state === "external"
-                      ? "external backend"
-                      : "backend failed"}
-                </span>
-              )}
-            </div>
-            <div style={{ marginBottom: 6 }}>
-              {models.length > 0 ? (
-                <code style={css.mono}>{models[0].provider_id}</code>
-              ) : (
-                <span style={{ color: "#fdd663" }}>no model</span>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                style={css.ghost}
-                onClick={() => {
-                  setDraftBase(base);
-                  setShowSettings((v) => !v);
-                }}
-              >
-                Settings
-              </button>
-              <button
-                style={css.ghost}
-                onClick={() => {
-                  void refreshMeta(api);
-                  void refreshTasks(api);
-                }}
-              >
-                Retry
-              </button>
-            </div>
-            {showSettings && (
-              <div style={{ marginTop: 8 }}>
-                <input
-                  style={css.input}
-                  value={draftBase}
-                  onChange={(e) => setDraftBase(e.target.value)}
-                  placeholder={defaultBase()}
-                  aria-label="Backend URL"
-                />
-                <input
-                  style={{ ...css.input, marginTop: 6 }}
-                  type="password"
-                  value={draftCredential}
-                  onChange={(e) => setDraftCredential(e.target.value)}
-                  placeholder={
-                    loadApiCredential()
-                      ? "API credential saved (enter to replace)"
-                      : "API credential (for external backends)"
-                  }
-                  aria-label="API credential"
-                />
-                <div style={{ marginTop: 6 }}>
-                  <button
-                    style={css.ghost}
-                    onClick={() => {
-                      if (draftCredential.trim()) setApiCredential(draftCredential);
-                      setDraftCredential("");
-                      applyBase();
-                    }}
-                  >
-                    Connect
-                  </button>
-                </div>
-              </div>
-            )}
+    <>
+      <style>{css}</style>
+      <div className="app">
+        <aside className="sidebar">
+          <div className="brand"><div className="logo">R</div><div className="brand-copy"><strong>Raphael</strong><span>Autonomous operating agent</span></div></div>
+          <button className="new-task" onClick={() => { setSelectedId(null); setEvents([]); setResult(null); setError(null); }}>＋ New task</button>
+          <div className="section-label">Recent tasks</div>
+          <div className="task-list">
+            {tasks.length === 0 ? <div className="empty">Your task history will appear here.</div> : tasks.map(task => {
+              const meta = stateMeta(task.state);
+              return <button key={task.task_id} className={`task-item ${selectedId === task.task_id ? "active" : ""}`} onClick={() => setSelectedId(task.task_id)}>
+                <div className="task-title">{task.title || "Untitled task"}</div>
+                <div className="task-meta"><span className={`dot ${meta.tone}`} />{meta.label} · {relativeTime(task.created_at)}</div>
+              </button>;
+            })}
           </div>
+          <div className="side-footer"><div>{backend?.detail || base}</div><div style={{ marginTop: 4 }}>{models.length} model · {skillCount} skills · {tasks.length} tasks</div></div>
         </aside>
 
-        <main style={css.main}>
-          <div style={css.topbar}>
-            <span style={{ color: "#ececec", fontWeight: 600 }}>
-              AI Ecosystem
-            </span>
-            {detail && (
-              <span>
-                · {PHASE_LABEL[detail.state] ?? detail.state}
-                {running && (
-                  <span
-                    style={{
-                      ...css.spin,
-                      display: "inline-block",
-                      marginLeft: 8,
-                      verticalAlign: "middle",
-                    }}
-                  />
-                )}
-              </span>
-            )}
-          </div>
+        <main className="main">
+          <header className="topbar">
+            <div className="topbar-left"><div className="page-title">{selected?.title || "Operator console"}</div>{selected && currentState && <span className="page-subtitle">{currentState.label}</span>}</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}><div className="status"><span className={`dot ${conn === "online" ? "green" : conn === "connecting" ? "blue" : "red"}`} />{connectionLabel}</div><button className="action" onClick={() => { setDraftBase(base); setShowSettings(true); }}>Settings</button></div>
+          </header>
 
-          <div style={css.scroll}>
-            <div style={css.column}>
-              {error && (
-                <div
-                  style={{ ...css.banner, background: "#3a2320" }}
-                  role="alert"
-                >
-                  {error}{" "}
-                  <button style={css.ghost} onClick={() => setError(null)}>
-                    Dismiss
-                  </button>
-                </div>
-              )}
+          <section className="workspace">
+            {!selected && <div className="hero"><div className="eyebrow">● PACE runtime</div><h1>What should Raphael take care of?</h1><p>Describe the outcome. Raphael can inspect the system, plan work, request permissions, execute through the tool gateway, verify results, and retain useful context.</p></div>}
 
-              {online && models.length === 0 && (
-                <div
-                  style={{ ...css.banner, background: "#38300f" }}
-                  role="note"
-                >
-                  <strong>No model configured</strong> — tasks will fail.
-                  Set the model endpoint + key (
-                  <code style={css.mono}>AI_ECO_MODEL_*</code>) and restart{" "}
-                  <code style={css.mono}>ai-ecosystem-serve</code>.
-                </div>
-              )}
-
-              {!selectedId || !detail ? (
-                <>
-                  <h1 style={css.hero}>What can I do for you?</h1>
-                  <div style={css.chips}>
-                    {SUGGESTIONS.map((s) => (
-                      <button
-                        key={s}
-                        style={css.chip}
-                        disabled={!online}
-                        onClick={() => {
-                          setDraft(s);
-                        }}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                  {!online && (
-                    <p style={{ ...css.muted, textAlign: "center" }}>
-                      Backend unreachable at {base}. Start{" "}
-                      <code style={css.mono}>ai-ecosystem-serve</code>, then
-                      press Retry.
-                    </p>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div style={css.userRow}>
-                    <div style={css.userBubble}>{detail.title}</div>
-                  </div>
-
-                  <div style={css.agentRow}>
-                    <div style={css.avatar}>✦</div>
-                    <div style={css.agentBody}>
-                      {result ? (
-                        <>
-                          {result.reply ? (
-                            renderMarkdown(result.reply)
-                          ) : (
-                            <>
-                              {renderMarkdown(
-                                result.summary.replace(
-                                  /^(Assistant|AI Ecosystem):\s*/,
-                                  "",
-                                ) || "(done)",
-                              )}
-                              {result.error && (
-                                <p style={css.err}>
-                                  <code style={css.mono}>
-                                    {result.error.slice(0, 600)}
-                                  </code>
-                                </p>
-                              )}
-                            </>
-                          )}
-                          <div style={css.muted}>
-                            {Object.keys(result.step_states).length > 0 &&
-                              `${Object.values(result.step_states).filter((s) => s === "SUCCEEDED").length}/${Object.keys(result.step_states).length} steps · `}
-                            {result.verification_status &&
-                              `verified ${result.verification_status} · `}
-                            {result.timings.total_s !== undefined &&
-                              `${result.timings.total_s}s`}
-                          </div>
-                        </>
-                      ) : (
-                        <div style={css.thinking}>
-                          <span style={css.spin} />
-                          {PHASE_LABEL[detail.state] ?? detail.state}…
-                        </div>
-                      )}
-
-                      {recalled > 0 && (
-                        <div style={{ ...css.muted, marginTop: 6 }}>
-                          🧠 remembered {recalled} memor
-                          {recalled === 1 ? "y" : "ies"} from previous chats
-                        </div>
-                      )}
-
-                      {toolCalls.length > 0 && (
-                        <div>
-                          <button
-                            style={css.toolsToggle}
-                            onClick={() => setShowTools((v) => !v)}
-                          >
-                            {showTools ? "▾" : "▸"} Used {toolCalls.length}{" "}
-                            tool{toolCalls.length === 1 ? "" : "s"}
-                          </button>
-                          {showTools &&
-                            toolCalls.map((call) => (
-                              <div key={call.callId} style={css.toolLine}>
-                                <span
-                                  style={{
-                                    color:
-                                      call.status === "ok"
-                                        ? "#81c995"
-                                        : call.status === "running"
-                                          ? "#8ab4f8"
-                                          : "#f28b82",
-                                  }}
-                                >
-                                  {call.status === "ok"
-                                    ? "✓"
-                                    : call.status === "running"
-                                      ? "…"
-                                      : call.status === "denied"
-                                        ? "⛔"
-                                        : "✗"}
-                                </span>
-                                <code style={css.mono}>{call.tool}</code>
-                                <span style={css.muted}>
-                                  {fmtArgs(call.args, 160)}
-                                </span>
-                              </div>
-                            ))}
-                          {showTools &&
-                            toolCalls
-                              .filter((c) => c.snippet || c.reason)
-                              .map((call) => (
-                                <pre key={`${call.callId}-out`} style={css.pre}>
-                                  {fmtArgs(
-                                    call.snippet || call.reason,
-                                    500,
-                                  )}
-                                </pre>
-                              ))}
-                        </div>
-                      )}
-
-                      {veredicts.length > 0 && (
-                        <div style={{ ...css.muted, marginTop: 6 }}>
-                          {veredicts.map((e) => {
-                            const ok = e.type === "VerificationPassed";
-                            const p = e.payload as Record<string, unknown>;
-                            return (
-                              <div key={e.seq}>
-                                <span style={ok ? css.ok : css.err}>
-                                  {ok ? "✓" : "✗"}
-                                </span>{" "}
-                                check {ok ? "passed" : "did not pass"}
-                                {p.step_id ? ` · ${String(p.step_id)}` : ""}
-                                {p.reason
-                                  ? ` — ${fmtArgs(p.reason, 200)}`
-                                  : ""}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      <div style={{ marginTop: 8 }}>
-                        <button
-                          style={css.ghost}
-                          onClick={() => setShowRaw((v) => !v)}
-                        >
-                          {showRaw
-                            ? "Hide activity log"
-                            : `Activity log (${events.length})`}
-                        </button>
-                        {showRaw &&
-                          events.map((e) => (
-                            <div key={e.seq} style={css.toolLine}>
-                              <span style={css.mono}>[{e.seq}]</span>
-                              <span style={css.mono}>{e.type}</span>
-                              <span style={css.muted}>
-                                {fmtArgs(e.payload, 220)}
-                              </span>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-              <div ref={bottomRef} />
+            <div className="grid">
+              <div className="stat"><div className="stat-label">Connection</div><div className="stat-value">{conn === "online" ? "Ready" : conn === "connecting" ? "Starting" : "Offline"}</div><div className="stat-note">Authenticated local runtime</div></div>
+              <div className="stat"><div className="stat-label">Active</div><div className="stat-value">{activeTasks}</div><div className="stat-note">Tasks in progress</div></div>
+              <div className="stat"><div className="stat-label">Completed</div><div className="stat-value">{completedTasks}</div><div className="stat-note">Successful tasks in history</div></div>
+              <div className="stat"><div className="stat-label">Agent pool</div><div className="stat-value">{agentPool}</div><div className="stat-note">Currently tracked by runtime</div></div>
             </div>
-          </div>
 
-          <div style={css.composerWrap}>
-            <div style={css.column}>
-              <div style={css.composer}>
-                <textarea
-                  style={css.area}
-                  rows={1}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void send();
-                    }
-                  }}
-                  placeholder={
-                    !online
-                      ? "Backend offline…"
-                      : running
-                        ? "Agent is working — Stop it to send a new task"
-                        : "Message the agent…"
-                  }
-                  disabled={!online || busy || running}
-                  aria-label="Message the agent"
-                />
-                {running ? (
-                  <button
-                    style={{ ...css.send, ...css.stop }}
-                    onClick={() => void stop()}
-                    aria-label="Stop"
-                    title="Stop this task"
-                  >
-                    ■
-                  </button>
-                ) : (
-                  <button
-                    style={{
-                      ...css.send,
-                      ...(!online || busy || !draft.trim()
-                        ? css.sendOff
-                        : {}),
-                    }}
-                    onClick={() => void send()}
-                    disabled={!online || busy || !draft.trim()}
-                    aria-label="Send"
-                    title="Send"
-                  >
-                    ↑
-                  </button>
-                )}
-              </div>
-              <p
-                style={{
-                  ...css.muted,
-                  textAlign: "center",
-                  fontSize: 11,
-                  margin: "8px 0 0",
-                }}
-              >
-                The agent runs tools on your machine — review the activity
-                above.
-              </p>
-            </div>
-          </div>
+            <form className="panel" onSubmit={submit}>
+              <div className="panel-header"><div><div className="panel-title">Give Raphael a goal</div><div className="panel-subtitle">Natural language in, verified execution out.</div></div></div>
+              <div className="panel-body"><div className="composer"><textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder="Example: inspect the repo, summarize the architecture, and tell me what should be fixed next…" onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") void submit(); }} /><button className="send" disabled={!draft.trim() || busy}>{busy ? "Starting…" : "Run goal"}</button></div><div className="suggestions">{SUGGESTIONS.map(text => <button type="button" key={text} className="suggestion" onClick={() => setDraft(text)}>{text}</button>)}</div></div>
+            </form>
+
+            {error && <div className="banner error">{error}</div>}
+
+            {selected && <div className="detail-grid">
+              <div className="panel"><div className="panel-header"><div><div className="panel-title">Execution activity</div><div className="panel-subtitle">Durable task events from the runtime</div></div><div className="actions">{!selected.completed && <button className="action" onClick={() => void cancel()}>Stop task</button>}<button className="action" onClick={() => void refreshDetail(selected.task_id)}>Refresh</button></div></div><div className="panel-body"><div className="activity">{events.length === 0 ? <div className="empty">Waiting for runtime events…</div> : events.slice().reverse().map((e, i) => { const payload = e.payload as Record<string, unknown>; return <div className="activity-row" key={`${e.seq}-${i}`}><span className="activity-dot" /><div className="activity-copy"><strong>{eventLabel(e.type)}</strong><span>{String(payload.message ?? payload.reason ?? "Runtime event recorded.")}</span></div><span className="activity-time">{new Date(e.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>; })}</div></div></div>
+              <div className="panel"><div className="panel-header"><div><div className="panel-title">Task overview</div><div className="panel-subtitle">State, verification, and runtime</div></div></div><div className="panel-body"><dl className="kv"><dt>Status</dt><dd>{currentState?.label ?? selected.state}</dd><dt>Task ID</dt><dd>{selected.task_id}</dd><dt>Created</dt><dd>{new Date(selected.created_at).toLocaleString()}</dd><dt>Tools used</dt><dd>{tools.length}</dd><dt>Model providers</dt><dd>{models.length}</dd><dt>Backend</dt><dd>{base}</dd></dl></div></div>
+            </div>}
+
+            {selected && tools.length > 0 && <div className="panel"><div className="panel-header"><div><div className="panel-title">Tool execution</div><div className="panel-subtitle">What the execution gateway has done</div></div></div><div className="panel-body">{tools.map(tool => <div key={tool.callId} className="tool"><div className="tool-top"><div className="tool-name">{tool.tool}</div><div className="tool-status">{tool.status}</div></div>{tool.args !== undefined && <div className="tool-snippet">{fmtArgs(tool.args)}</div>}{tool.snippet && <div className="tool-snippet">{tool.snippet}</div>}{tool.reason && <div className="tool-snippet">{tool.reason}</div>}</div>)}</div></div>}
+
+            {result && <div className="panel"><div className="panel-header"><div><div className="panel-title">Verified result</div><div className="panel-subtitle">Final response and verification state</div></div><div className="status"><span className={`dot ${result.verification_status === "PASSED" ? "green" : result.status === "FAILED" ? "red" : "amber"}`} />{result.verification_status}</div></div><div className="panel-body"><div className="result">{markdownToText(result.reply || result.summary || result.error || "No final response was returned.")}</div></div></div>}
+          </section>
         </main>
+
+        {showSettings && <div className="modal-backdrop" onMouseDown={() => setShowSettings(false)}><div className="modal" onMouseDown={e => e.stopPropagation()}><div className="panel-header"><div><div className="panel-title">Runtime settings</div><div className="panel-subtitle">Choose the authenticated backend Raphael should use.</div></div></div><div className="modal-body"><div className="field"><label>Backend URL</label><input value={draftBase} onChange={e => setDraftBase(e.target.value)} placeholder="http://127.0.0.1:8765" /></div><div className="banner warn" style={{ marginTop: 12 }}>Remote endpoints must use HTTPS. Loopback HTTP is allowed for the local runtime.</div></div><div className="modal-foot"><button className="action" onClick={() => setShowSettings(false)}>Cancel</button><button className="send" style={{ height: 36 }} onClick={applySettings}>Save settings</button></div></div></div>}
       </div>
-    </div>
+    </>
   );
 }
+
+const _unused: CSSProperties | null = null;
