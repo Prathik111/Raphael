@@ -1,9 +1,4 @@
-"""Terminal execution tool.
-
-This tool launches direct argv processes without a shell, but a subprocess is
-still an OS capability boundary. It therefore remains CRITICAL by default and
-must never be auto-authorized by production policy.
-"""
+"""Terminal execution tool with explicit dangerous-capability metadata."""
 
 from __future__ import annotations
 
@@ -22,17 +17,8 @@ CONTRACT_TIMEOUT_S = 120.0
 
 
 def _scrubbed_env(allowlist: frozenset[str] | None = None) -> dict[str, str]:
-    """Child environment with credentials removed (review: env policy).
-
-    Default: inherit everything except secret-bearing entries (keys or
-    known credential formats). When ``allowlist`` is set, ONLY those
-    names pass -- strict mode for operators who want an explicit
-    inheritance list (note: Windows children typically need SystemRoot
-    to load DLLs; include it).
-    """
     if allowlist is not None:
-        return {key: os.environ[key] for key in allowlist
-                if key in os.environ}
+        return {key: os.environ[key] for key in allowlist if key in os.environ}
     redacted = redact(dict(os.environ))
     return {key: value for key, value in redacted.items() if value != "***"}
 
@@ -43,11 +29,7 @@ def _resolve_cwd(raw: object, root: object) -> str | None:
     if not isinstance(raw, str):
         raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
     candidate = Path(raw)
-    if not candidate.is_dir() and root is None:
-        raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
     if root is not None:
-        # Relative paths resolve against the root (like filesystem
-        # tools), then the result must stay inside it.
         resolved = (Path(root) / candidate).resolve()
         try:
             resolved.relative_to(Path(root).resolve())
@@ -56,23 +38,19 @@ def _resolve_cwd(raw: object, root: object) -> str | None:
         if not resolved.is_dir():
             raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
         return str(resolved)
+    if not candidate.is_dir():
+        raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
     return str(candidate.resolve())
 
 
 def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
-    """Best-effort tree termination, including descendants on Windows/POSIX."""
     if proc.poll() is not None:
         return
     if os.name == "nt":
         try:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-                check=False,
-            )
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=5, check=False)
             return
         except (OSError, subprocess.TimeoutExpired):
             pass
@@ -95,17 +73,9 @@ def _run(arguments: dict, root: object,
         raise ToolExecutionError("terminal.execute", "'timeout_s' must be positive")
     timeout_s = min(timeout_s, CONTRACT_TIMEOUT_S)
     cwd = _resolve_cwd(arguments.get("cwd"), root)
-
-    kwargs = dict(
-        args=command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=cwd,
-        shell=False,
-        stdin=subprocess.DEVNULL,
-        env=_scrubbed_env(env_allowlist),
-    )
+    kwargs = dict(args=command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                  text=True, cwd=cwd, shell=False, stdin=subprocess.DEVNULL,
+                  env=_scrubbed_env(env_allowlist))
     if os.name == "nt":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     else:
@@ -123,40 +93,29 @@ def _run(arguments: dict, root: object,
         except subprocess.TimeoutExpired:
             pass
         raise ToolTimeoutError("terminal.execute", timeout_s) from None
-
     output = stdout + stderr
     if len(output) > OUTPUT_CAP:
         output = output[:OUTPUT_CAP] + "\n[truncated: output exceeded cap]"
-    return ToolResult(
-        success=proc.returncode == 0,
-        output=output,
-        exit_code=proc.returncode,
-        error=None if proc.returncode == 0 else f"exit {proc.returncode}",
-        rollback={"rollbackable": False,
-                  "reason": "arbitrary process side effects cannot be undone"},
-    )
+    return ToolResult(success=proc.returncode == 0, output=output,
+                      exit_code=proc.returncode,
+                      error=None if proc.returncode == 0 else f"exit {proc.returncode}",
+                      rollback={"rollbackable": False,
+                                "reason": "arbitrary process side effects cannot be undone"})
 
 
 def terminal_tools(root: object = None,
-                   env_allowlist: frozenset[str] | None = None
-                   ) -> list[tuple[Tool, ToolHandler]]:
+                   env_allowlist: frozenset[str] | None = None) -> list[tuple[Tool, ToolHandler]]:
     resolved = str(Path(root).resolve()) if root is not None else None
-    return [
-        (
-            Tool(
-                name="terminal.execute",
-                description="Run a direct argv process. Critical capability; requires explicit operator authorization.",
-                input_schema={
-                    "required": ["command"],
-                    "properties": {"command": "array", "timeout_s": "number", "cwd": "string"},
-                },
-                risk_level=RiskLevel.CRITICAL,
-                timeout_s=CONTRACT_TIMEOUT_S,
-                capabilities=["subprocess", "unsandboxed-process"],
-                requires_approval=True,
-                network_access=True,
-            ),
-            lambda arguments, workspace=resolved, allowlist=env_allowlist: _run(
-                arguments, workspace, allowlist),
-        ),
-    ]
+    return [(Tool(
+        name="terminal.execute",
+        description="Run a direct argv process through the sandbox supervisor; explicit human authorization required.",
+        input_schema={"required": ["command"],
+                      "properties": {"command": "array", "timeout_s": "number", "cwd": "string"}},
+        risk_level=RiskLevel.CRITICAL,
+        timeout_s=CONTRACT_TIMEOUT_S,
+        capabilities=["subprocess", "arbitrary-code-execution"],
+        requires_approval=True,
+        requires_sandbox=True,
+        sandbox_profile="terminal",
+        network_access=True,
+    ), lambda arguments, workspace=resolved, allowlist=env_allowlist: _run(arguments, workspace, allowlist))]
