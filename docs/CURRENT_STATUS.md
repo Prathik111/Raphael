@@ -2,9 +2,9 @@
 
 ## Snapshot
 
-This status describes commit `8a0e7aad2505c81b7d4627a7255ebe4e22f658ef` on `fix/hardened-security-v2`, PR #3 into `main`.
+This status describes commit `e7d2c9480dea19f7e3e6cac381cfee48ecd3af9f` on `fix/hardened-security-v2`, PR #3 into `main`.
 
-The latest commit is `Export centralized data policy`. It exports `DataClass`, `DataPolicy`, `EgressDecision`, and `require_egress` from the security package. The commit is part of a larger hardening series.
+The documentation commit immediately before this file update established the agent-context documentation layer. The security hardening series' previous code head was `8a0e7aad2505c81b7d4627a7255ebe4e22f658ef`; the latest code change there exported `DataClass`, `DataPolicy`, `EgressDecision`, and `require_egress` from the security package.
 
 ## What is substantially implemented
 
