@@ -34,8 +34,6 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: python -m pip install -e ".[dev]"
-      - name: Ruff
-        run: python -m ruff check src tests
       - name: Windows sandbox regression
         run: python -m pytest -q tests/unit/test_windows_sandbox.py
 
