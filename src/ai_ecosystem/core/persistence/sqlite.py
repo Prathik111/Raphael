@@ -11,13 +11,18 @@ from __future__ import annotations
 import sqlite3
 import threading
 from contextlib import contextmanager
-from typing import Any, Iterator, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:  # cycle-safe: cloud imports persistence at runtime
+    from ai_ecosystem.cloud.availability import DevicePresence
+from collections.abc import Iterator
 
 from ai_ecosystem.core.errors.exceptions import PersistenceError
 from ai_ecosystem.core.events.bus import Event, EventStore
 from ai_ecosystem.core.models.base import utcnow
 from ai_ecosystem.core.models.domain import (
     Agent,
+    ApprovalRequest,
     Device,
     Entity,
     ExecutionContext,
@@ -38,7 +43,6 @@ from ai_ecosystem.core.persistence.repositories import (
     PlanRepository,
     SkillRepository,
     SnapshotRepository,
-    SnapshotRepository,
     TaskRepository,
     UsageEventRepository,
     UsagePatternRepository,
@@ -51,7 +55,7 @@ from ai_ecosystem.learning.models import (
 )
 from ai_ecosystem.system.monitor.models import SystemSnapshot
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _DDL = [
     "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -91,6 +95,8 @@ _MIGRATIONS: dict[int, list[str]] = {
     1: _DDL,
     2: ["CREATE TABLE IF NOT EXISTS schema_migrations "
         "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"],
+    3: ["CREATE TABLE IF NOT EXISTS approvals "
+        "(id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, updated_at TEXT NOT NULL)"],
 }
 
 T = TypeVar("T", bound=Entity)
@@ -166,13 +172,13 @@ class Database:
             "INSERT OR IGNORE INTO schema_migrations (version, applied_at)"
             " VALUES (?, ?)", (version, utcnow().isoformat()))
 
-    def schema_version(self) -> Optional[int]:
+    def schema_version(self) -> int | None:
         """Current schema version, or None before the first migrate()."""
         rows = self.query("SELECT value FROM meta WHERE key='schema_version'")
         return int(rows[0][0]) if rows else None
 
     @contextmanager
-    def transaction(self) -> Iterator["Database"]:
+    def transaction(self) -> Iterator[Database]:
         """Atomic block: exception rolls everything back (may nest)."""
         with self._lock:
             outermost = self._tx_depth == 0
@@ -291,7 +297,7 @@ class _SnapshotTable:
         )
         return item
 
-    def get(self, item_id: str) -> Optional[T]:
+    def get(self, item_id: str) -> T | None:
         rows = self._db.query(
             f"SELECT snapshot FROM {self._table} WHERE id = ?", (item_id,)
         )
@@ -329,7 +335,7 @@ class SqliteTaskRepository(TaskRepository):
     def create(self, item: Task) -> Task:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Task]:
+    def get(self, item_id: str) -> Task | None:
         return self._t.get(item_id)
 
     def update(self, item: Task) -> Task:
@@ -351,7 +357,7 @@ class SqlitePlanRepository(PlanRepository):
     def create(self, item: Plan) -> Plan:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Plan]:
+    def get(self, item_id: str) -> Plan | None:
         return self._t.get(item_id)
 
     def update(self, item: Plan) -> Plan:
@@ -373,7 +379,7 @@ class SqliteMemoryRepository(MemoryRepository):
     def create(self, item: Memory) -> Memory:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Memory]:
+    def get(self, item_id: str) -> Memory | None:
         return self._t.get(item_id)
 
     def update(self, item: Memory) -> Memory:
@@ -395,7 +401,7 @@ class SqliteSkillRepository(SkillRepository):
     def create(self, item: Skill) -> Skill:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Skill]:
+    def get(self, item_id: str) -> Skill | None:
         return self._t.get(item_id)
 
     def update(self, item: Skill) -> Skill:
@@ -417,7 +423,7 @@ class SqliteAgentRepository(AgentRepository):
     def create(self, item: Agent) -> Agent:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Agent]:
+    def get(self, item_id: str) -> Agent | None:
         return self._t.get(item_id)
 
     def update(self, item: Agent) -> Agent:
@@ -439,15 +445,15 @@ class SqlitePresenceRepository:
 
         self._t = _SnapshotTable(db, "device_presence", DevicePresence)
 
-    def create(self, item: "DevicePresence") -> "DevicePresence":
+    def create(self, item: DevicePresence) -> DevicePresence:
         """Persist a presence row."""
         return self._t.create(item)
 
-    def get(self, item_id: str) -> "Optional[DevicePresence]":
+    def get(self, item_id: str) -> DevicePresence | None:
         """Fetch by record id."""
         return self._t.get(item_id)
 
-    def update(self, item: "DevicePresence") -> "DevicePresence":
+    def update(self, item: DevicePresence) -> DevicePresence:
         """Replace the stored row."""
         return self._t.update(item)
 
@@ -455,7 +461,7 @@ class SqlitePresenceRepository:
         """Remove a row."""
         return self._t.delete(item_id)
 
-    def list(self) -> "list[DevicePresence]":
+    def list(self) -> list[DevicePresence]:
         """All rows."""
         return self._t.list()
 
@@ -469,7 +475,7 @@ class SqliteDeviceRepository(DeviceRepository):
     def create(self, item: Device) -> Device:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Device]:
+    def get(self, item_id: str) -> Device | None:
         return self._t.get(item_id)
 
     def update(self, item: Device) -> Device:
@@ -491,7 +497,7 @@ class SqliteVerificationRepository(VerificationRepository):
     def create(self, item: VerificationResult) -> VerificationResult:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[VerificationResult]:
+    def get(self, item_id: str) -> VerificationResult | None:
         return self._t.get(item_id)
 
     def update(self, item: VerificationResult) -> VerificationResult:
@@ -504,6 +510,28 @@ class SqliteVerificationRepository(VerificationRepository):
         return self._t.list()
 
 
+class SqliteApprovalRepository:
+    """Durable human approval requests (review: bound to exact actions)."""
+
+    def __init__(self, db: Database) -> None:
+        self._t = _SnapshotTable(db, "approvals", ApprovalRequest)
+
+    def create(self, item: ApprovalRequest) -> ApprovalRequest:
+        return self._t.create(item)
+
+    def get(self, item_id: str) -> ApprovalRequest | None:
+        return self._t.get(item_id)
+
+    def update(self, item: ApprovalRequest) -> ApprovalRequest:
+        return self._t.update(item)
+
+    def delete(self, item_id: str) -> bool:
+        return self._t.delete(item_id)
+
+    def list(self) -> list[ApprovalRequest]:
+        return self._t.list()
+
+
 class SqliteSnapshotRepository(SnapshotRepository):
     """Durable system snapshots."""
 
@@ -513,7 +541,7 @@ class SqliteSnapshotRepository(SnapshotRepository):
     def create(self, item: SystemSnapshot) -> SystemSnapshot:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[SystemSnapshot]:
+    def get(self, item_id: str) -> SystemSnapshot | None:
         return self._t.get(item_id)
 
     def update(self, item: SystemSnapshot) -> SystemSnapshot:
@@ -525,7 +553,7 @@ class SqliteSnapshotRepository(SnapshotRepository):
     def list(self) -> list[SystemSnapshot]:
         return self._t.list()
 
-    def latest(self) -> Optional[SystemSnapshot]:
+    def latest(self) -> SystemSnapshot | None:
         """Most recently collected snapshot (None when none stored)."""
         snapshots = self._t.list()
         if not snapshots:
@@ -542,7 +570,7 @@ class SqliteUsageEventRepository(UsageEventRepository):
     def create(self, item: UsageEvent) -> UsageEvent:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[UsageEvent]:
+    def get(self, item_id: str) -> UsageEvent | None:
         return self._t.get(item_id)
 
     def update(self, item: UsageEvent) -> UsageEvent:
@@ -564,7 +592,7 @@ class SqliteUsagePatternRepository(UsagePatternRepository):
     def create(self, item: UsagePattern) -> UsagePattern:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[UsagePattern]:
+    def get(self, item_id: str) -> UsagePattern | None:
         return self._t.get(item_id)
 
     def update(self, item: UsagePattern) -> UsagePattern:
@@ -586,7 +614,7 @@ class SqliteLearningProposalRepository(LearningProposalRepository):
     def create(self, item: LearningProposal) -> LearningProposal:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[LearningProposal]:
+    def get(self, item_id: str) -> LearningProposal | None:
         return self._t.get(item_id)
 
     def update(self, item: LearningProposal) -> LearningProposal:
@@ -612,7 +640,7 @@ class SqliteMessageRepository(MessageRepository):
         """Persist a sent message."""
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Any]:
+    def get(self, item_id: str) -> Any | None:
         """Fetch by message id."""
         return self._t.get(item_id)
 
@@ -645,7 +673,7 @@ class SqliteExecutionContextRepository(ExecutionContextRepository):
         )
         return context
 
-    def load(self, task_id: str) -> Optional[ExecutionContext]:
+    def load(self, task_id: str) -> ExecutionContext | None:
         rows = self._db.query(
             "SELECT snapshot FROM contexts WHERE task_id = ?", (task_id,)
         )
@@ -731,7 +759,7 @@ class SqliteJobStore:
         )
         return envelope
 
-    def load(self, job_id: str) -> Optional[dict]:
+    def load(self, job_id: str) -> dict | None:
         import json
 
         rows = self._db.query(

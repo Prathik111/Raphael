@@ -57,7 +57,9 @@ class PlanValidator:
 
     def __init__(self, known_tools: set[str] | None = None,
                  required_args: dict[str, set[str]] | None = None,
-                 tool_schemas: dict[str, dict] | None = None) -> None:
+                 tool_schemas: dict[str, dict] | None = None,
+                 max_steps: int = 50,
+                 max_arguments_bytes: int = 65536) -> None:
         self._known_tools = set(known_tools or [])
         # Tool name -> required parameter names. When provided, steps
         # must supply every required argument up front, so a model that
@@ -74,6 +76,9 @@ class PlanValidator:
             if isinstance(schema, dict):
                 self._required_args.setdefault(
                     name, set(schema.get("required", [])))
+        # Resource caps (review): a model must not schedule unbounded work.
+        self._max_steps = max(1, max_steps)
+        self._max_arguments_bytes = max(1024, max_arguments_bytes)
 
     def validate(self, plan: Plan) -> Plan:
         """Return the plan when runnable; raise PlanValidationError."""
@@ -81,6 +86,9 @@ class PlanValidator:
             raise PlanValidationError("plan has no goal")
         if not plan.steps:
             raise PlanValidationError("plan has no steps")
+        if len(plan.steps) > self._max_steps:
+            raise PlanValidationError(
+                f"plan has {len(plan.steps)} steps (max {self._max_steps})")
         ids = [step.id for step in plan.steps]
         if any(not sid for sid in ids):
             raise PlanValidationError("every step needs an id")
@@ -103,6 +111,13 @@ class PlanValidator:
             raise PlanValidationError(
                 f"step {step.id!r} uses unknown tools: {', '.join(unknown)}"
             )
+        import json as _json
+
+        blob = _json.dumps(step.arguments or {}, default=str)
+        if len(blob.encode("utf-8")) > self._max_arguments_bytes:
+            raise PlanValidationError(
+                f"step {step.id!r} arguments exceed "
+                f"{self._max_arguments_bytes} bytes")
         provided = set(step.arguments or {})
         for name in step.tools:
             required = self._required_args.get(name, set())

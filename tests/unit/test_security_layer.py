@@ -48,13 +48,13 @@ def test_read_file_is_low_and_allowed(manager, registry):
     assert permission.policy == "default"
 
 
-def test_terminal_is_high_and_denied_by_default(manager, registry):
+def test_terminal_is_critical_and_denied_by_default(manager, registry):
     call = registry.build_call(
         "t", "terminal.execute", {"command": ["echo", "hi"]}
     )
     permission = manager.authorize("t", registry.get("terminal.execute"), call)
     assert permission.decision is PermissionDecision.DENIED
-    assert "grant band" in permission.reason
+    assert "CRITICAL" in permission.reason
 
 
 def test_path_traversal_is_critical(manager, registry):
@@ -94,7 +94,8 @@ def test_argv_metachars_stay_literal_but_noted(registry):
     assessment = engine.assess(
         "t", registry.get("terminal.execute"), call, RiskContext()
     )
-    assert assessment.level is RiskLevel.HIGH  # base HIGH, no escalation
+    assert assessment.level is RiskLevel.CRITICAL  # base CRITICAL now
+    assert any("passed literally" in f for f in assessment.factors)
 
 
 def test_malformed_call_rejected(manager, registry):
@@ -171,10 +172,13 @@ def test_shell_interpreters_blocked_by_default(registry):
 
 
 def test_shell_interpreters_allowed_with_opt_in(registry):
+    # Opt-in clears the shell-interpreter escalation; the CRITICAL base
+    # level still needs an explicit grant-all-critical policy to pass.
     manager = AuthorizationManager(
         registry, allow_shells=True,
         policy_engine=PolicyEngine(
-            Policy(name="shells-ok", auto_grant_up_to=RiskLevel.HIGH)))
+            Policy(name="shells-ok", auto_grant_up_to=RiskLevel.CRITICAL,
+                   deny_critical=False)))
     permission = manager.authorize(
         "t", registry.get("terminal.execute"),
         registry.build_call("t", "terminal.execute",

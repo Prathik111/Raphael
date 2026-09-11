@@ -7,13 +7,14 @@ reasoning, planning, execution, or LLM logic may live here.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
 from ai_ecosystem.core.errors.exceptions import ContextSerializationError
 from ai_ecosystem.core.models.base import Entity
 from ai_ecosystem.core.models.enums import (
+    ApprovalStatus,
     MemoryScope,
     MemoryStatus,
     MemoryType,
@@ -38,9 +39,9 @@ class Goal(Entity):
 class Task(Entity):
     """A unit of work tracked through the PACE state machine."""
     title: str = ""
-    goal_id: Optional[str] = None
+    goal_id: str | None = None
     state: TaskState = TaskState.CREATED
-    agent_id: Optional[str] = None
+    agent_id: str | None = None
 
 
 class PlanStep(Entity):
@@ -73,6 +74,11 @@ class Tool(Entity):
     execution_policy: str = "default"
     requires_sandbox: bool = False
     sandbox_profile: str = "default"
+    # Capability metadata (review: policy reasons about capabilities,
+    # not just names). All default to the safe/closed position.
+    requires_approval: bool = False
+    network_access: bool = False
+    secrets_access: bool = False
 
 
 class ToolCall(Entity):
@@ -89,26 +95,53 @@ class ToolResult(Entity):
     tool_call_id: str = ""
     success: bool = False
     output: Any = None
-    error: Optional[str] = None
-    exit_code: Optional[int] = None
+    error: str | None = None
+    exit_code: int | None = None
+    # Rollback descriptor (review: mutating ops declare reversibility).
+    # None = not assessed; {"rollbackable": bool, "reason": str} otherwise.
+    rollback: dict[str, Any] | None = None
 
 
 class Permission(Entity):
     """An authorization decision for a (task, tool-call) pair."""
     task_id: str = ""
-    tool_call_id: Optional[str] = None
+    tool_call_id: str | None = None
     decision: PermissionDecision = PermissionDecision.PENDING
     reason: str = ""
     policy: str = "default"
+    # Set when the grant came from a human approval: the runner binds
+    # execution to this exact request (hash-checked before running).
+    approval_id: str = ""
 
 
 class RiskAssessment(Entity):
     """Risk evaluation for a proposed action (Gate 6 engine later)."""
     task_id: str = ""
-    tool_call_id: Optional[str] = None
+    tool_call_id: str | None = None
     level: RiskLevel = RiskLevel.LOW
     factors: list[str] = Field(default_factory=list)
     rationale: str = ""
+
+
+class ApprovalRequest(Entity):
+    """A human approval request bound to one exact action (review).
+
+    The ``arguments_hash`` pins tool + canonical arguments + policy at
+    request time; execution recomputes it from the live call and must
+    match, so an approval can never be retargeted at other arguments.
+    """
+
+    task_id: str = ""
+    tool: str = ""
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    arguments_hash: str = ""
+    risk: str = ""
+    reason: str = ""
+    policy: str = ""
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    expires_at: datetime | None = None
+    decided_at: datetime | None = None
+    decided_by: str = ""
 
 
 class Artifact(Entity):
@@ -117,7 +150,7 @@ class Artifact(Entity):
     name: str = ""
     kind: str = "file"
     uri: str = ""
-    sha256: Optional[str] = None
+    sha256: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -135,12 +168,12 @@ class Memory(Entity):
     scope: MemoryScope = MemoryScope.GLOBAL
     scope_id: str = ""
     status: MemoryStatus = MemoryStatus.ACTIVE
-    retention_days: Optional[int] = None
+    retention_days: int | None = None
     cloud_eligible: bool = False
     provenance: str = "unknown"
     created_by: str = "unknown"
     verified: bool = False
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -173,7 +206,7 @@ class ModelProvider(Entity):
 class Model(Entity):
     """A selectable reasoning model behind the abstraction."""
     name: str = ""
-    provider_id: Optional[str] = None
+    provider_id: str | None = None
     capabilities: list[str] = Field(default_factory=list)
     context_length: int = 0
 
@@ -188,7 +221,7 @@ class Device(Entity):
 
 class ComputeNode(Entity):
     """A schedulable compute target (Gate 25 routes to these)."""
-    device_id: Optional[str] = None
+    device_id: str | None = None
     kind: str = "local"
     available: bool = True
     resources: dict[str, Any] = Field(default_factory=dict)
@@ -213,7 +246,7 @@ class Agent(Entity):
     name: str = ""
     role: str = "general"
     capabilities: list[str] = Field(default_factory=list)
-    model_id: Optional[str] = None
+    model_id: str | None = None
     permission_scope: str = "default"
 
 
@@ -222,8 +255,8 @@ class ExecutionContext(Entity):
     task_id: str = ""
     goal: str = ""
     current_state: TaskState = TaskState.CREATED
-    plan: Optional[Plan] = None
-    current_step: Optional[str] = None
+    plan: Plan | None = None
+    current_step: str | None = None
     variables: dict[str, Any] = Field(default_factory=dict)
     tool_results: list[ToolResult] = Field(default_factory=list)
     artifacts: list[Artifact] = Field(default_factory=list)

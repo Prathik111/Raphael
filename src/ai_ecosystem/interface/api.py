@@ -8,7 +8,8 @@ the Python runtime. All responses are JSON-serializable dicts.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from ai_ecosystem.core.errors.exceptions import (
     AiEcosystemError,
@@ -37,12 +38,13 @@ class RuntimeAPI:
     def __init__(
         self,
         runtime: AgentRuntime,
-        dispatch: Optional[Callable[[str], None]] = None,
+        dispatch: Callable[[str], None] | None = None,
         awareness: Any | None = None,
         models: Any | None = None,
         skills: Any | None = None,
         event_store: Any | None = None,
-        on_cancel: Optional[Callable[[str], None]] = None,
+        on_cancel: Callable[[str], None] | None = None,
+        approvals: Any | None = None,
     ) -> None:
         self._runtime = runtime
         self._dispatch = dispatch
@@ -51,6 +53,7 @@ class RuntimeAPI:
         self._skills = skills
         self._event_store = event_store
         self._on_cancel = on_cancel
+        self._approvals = approvals
 
     # -- tasks -----------------------------------------------------------
 
@@ -133,6 +136,61 @@ class RuntimeAPI:
         if not isinstance(result, dict):
             raise ApiError("unavailable", "task has no result yet")
         return result
+
+    # -- human approvals -------------------------------------------------
+
+    def _approval_view(self, request: Any) -> dict[str, Any]:
+        from ai_ecosystem.core.secrets import redact
+
+        try:
+            arguments = redact(dict(request.arguments))
+        except Exception:  # noqa: BLE001 -- redaction degrades, never fails
+            arguments = {"redacted": True}
+        return {"id": request.id, "task_id": request.task_id,
+                "tool": request.tool, "arguments": arguments,
+                "risk": request.risk, "reason": request.reason,
+                "policy": request.policy, "status": request.status.value,
+                "created_at": request.created_at.isoformat(),
+                "expires_at": (request.expires_at.isoformat()
+                               if request.expires_at else None)}
+
+    def _approval_store(self) -> Any:
+        if self._approvals is None:
+            raise ApiError("unavailable", "approvals are not configured")
+        return self._approvals
+
+    def list_approvals(self, status: str = "PENDING") -> list[dict[str, Any]]:
+        """Approval requests (PENDING by default); empty when unconfigured."""
+        if self._approvals is None:
+            return []
+        if status == "PENDING":
+            requests = self._approvals.pending()
+        else:
+            from ai_ecosystem.core.models.enums import ApprovalStatus
+
+            try:
+                wanted = ApprovalStatus(status)
+            except ValueError:
+                raise ApiError(
+                    "malformed_request",
+                    f"unknown approval status {status!r}") from None
+            requests = [r for r in self._approvals.all()
+                        if r.status is wanted]
+        return [self._approval_view(r) for r in requests]
+
+    def decide_approval(self, approval_id: str, approved: bool,
+                        decided_by: str = "operator") -> dict[str, Any]:
+        """Approve or deny one PENDING request (human path only)."""
+        if not isinstance(approval_id, str) or not approval_id:
+            raise ApiError("malformed_request",
+                           "approval_id must be a non-empty string")
+        store = self._approval_store()
+        try:
+            decided = store.decide(approval_id, approved,
+                                   decided_by=decided_by or "operator")
+        except Exception as exc:
+            raise ApiError("invalid_transition", str(exc)) from exc
+        return self._approval_view(decided)
 
     # -- runtime state ----------------------------------------------------
 

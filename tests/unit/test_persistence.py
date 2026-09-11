@@ -24,11 +24,11 @@ def db():
 
 
 def test_migrate_is_idempotent_and_versioned(db):
-    assert db.migrate() == 2
-    assert db.migrate() == 2  # re-run applies nothing
-    assert db.schema_version() == 2
+    assert db.migrate() == 3
+    assert db.migrate() == 3  # re-run applies nothing
+    assert db.schema_version() == 3
     rows = db.query("SELECT version FROM schema_migrations ORDER BY version")
-    assert [r[0] for r in rows] == [1, 2]
+    assert [r[0] for r in rows] == [1, 2, 3]
 
 
 def test_legacy_v1_database_upgrades_to_v2(tmp_path):
@@ -47,11 +47,11 @@ def test_legacy_v1_database_upgrades_to_v2(tmp_path):
         raw.close()
     db = Database(path)
     try:
-        assert db.migrate() == 2
-        assert db.schema_version() == 2
+        assert db.migrate() == 3
+        assert db.schema_version() == 3
         assert db.query("SELECT id FROM tasks") == [("t1",)]
         rows = db.query("SELECT version FROM schema_migrations ORDER BY version")
-        assert [r[0] for r in rows] == [1, 2]
+        assert [r[0] for r in rows] == [1, 2, 3]
     finally:
         db.close()
 
@@ -90,10 +90,9 @@ def test_plan_memory_skill_round_trips(db):
 
 def test_transaction_rollback(db):
     repo = SqliteTaskRepository(db)
-    with pytest.raises(RuntimeError):
-        with db.transaction():
-            repo.create(Task(title="doomed"))
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError), db.transaction():
+        repo.create(Task(title="doomed"))
+        raise RuntimeError("boom")
     assert repo.list() == []
 
 

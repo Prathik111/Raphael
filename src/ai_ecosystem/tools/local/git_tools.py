@@ -9,6 +9,7 @@ from typing import Final
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
+from ai_ecosystem.tools.registry.registry import ToolHandler
 
 OUTPUT_CAP: Final = 100_000
 CONTRACT_TIMEOUT_S: Final = 30.0
@@ -92,7 +93,7 @@ def _diff(arguments: dict, root: object = None) -> ToolResult:
     return ToolResult(success=True, output=out)
 
 
-def git_tools(root: object = None) -> list[tuple[Tool, object]]:
+def git_tools(root: object = None) -> list[tuple[Tool, ToolHandler]]:
     """Build git.status / git.diff handlers with the same root jail."""
     from functools import partial
 

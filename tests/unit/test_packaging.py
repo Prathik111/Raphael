@@ -53,7 +53,7 @@ def test_clean_installation(tmp_path):
     db_path = str(data_dir / "ai_ecosystem.db")
     Database(db_path).migrate()
     assert (app_dir / "bin" / "ai-ecosystem.exe").is_file()
-    assert Database(db_path).schema_version() == 2
+    assert Database(db_path).schema_version() == 3
 
 
 def test_first_launch(tmp_path):
@@ -134,7 +134,7 @@ def test_downgrade_handling():
 def test_migration(tmp_path):
     db_path = str(tmp_path / "old.db")
     Database(db_path).migrate()
-    assert Database(db_path).schema_version() == 2
+    assert Database(db_path).schema_version() == 3
 
 
 def test_existing_data_preservation(tmp_path):
@@ -170,7 +170,7 @@ def test_uninstall_keeps_data_by_default(tmp_path):
 def test_reinstall(tmp_path):
     db_path = str(tmp_path / "data.db")
     Database(db_path).migrate()
-    assert Database(db_path).schema_version() == 2  # reinstall re-migrates safely
+    assert Database(db_path).schema_version() == 3  # reinstall re-migrates safely
 
 
 def test_backup_restore(tmp_path):

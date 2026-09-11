@@ -15,30 +15,46 @@ from ai_ecosystem.core.errors.exceptions import ToolExecutionError, ToolTimeoutE
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.core.secrets import redact
+from ai_ecosystem.tools.registry.registry import ToolHandler
 
 OUTPUT_CAP = 100_000
 CONTRACT_TIMEOUT_S = 120.0
 
 
-def _scrubbed_env() -> dict[str, str]:
+def _scrubbed_env(allowlist: frozenset[str] | None = None) -> dict[str, str]:
+    """Child environment with credentials removed (review: env policy).
+
+    Default: inherit everything except secret-bearing entries (keys or
+    known credential formats). When ``allowlist`` is set, ONLY those
+    names pass -- strict mode for operators who want an explicit
+    inheritance list (note: Windows children typically need SystemRoot
+    to load DLLs; include it).
+    """
+    if allowlist is not None:
+        return {key: os.environ[key] for key in allowlist
+                if key in os.environ}
     redacted = redact(dict(os.environ))
     return {key: value for key, value in redacted.items() if value != "***"}
 
 
 def _resolve_cwd(raw: object, root: object) -> str | None:
-    if raw is None:
+    if raw is None or raw == "":
         return str(root) if root is not None else None
     if not isinstance(raw, str):
         raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
     candidate = Path(raw)
-    if not candidate.is_dir():
+    if not candidate.is_dir() and root is None:
         raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
     if root is not None:
-        resolved = candidate.resolve()
+        # Relative paths resolve against the root (like filesystem
+        # tools), then the result must stay inside it.
+        resolved = (Path(root) / candidate).resolve()
         try:
             resolved.relative_to(Path(root).resolve())
         except ValueError:
             raise ToolExecutionError("terminal.execute", "'cwd' escapes the allowed root") from None
+        if not resolved.is_dir():
+            raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
         return str(resolved)
     return str(candidate.resolve())
 
@@ -66,7 +82,8 @@ def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
         pass
 
 
-def _run(arguments: dict, root: object) -> ToolResult:
+def _run(arguments: dict, root: object,
+         env_allowlist: frozenset[str] | None = None) -> ToolResult:
     command = arguments.get("command")
     if not isinstance(command, list) or not command or any(not isinstance(part, str) for part in command):
         raise ToolExecutionError("terminal.execute", "'command' must be a non-empty argv list of strings")
@@ -87,7 +104,7 @@ def _run(arguments: dict, root: object) -> ToolResult:
         cwd=cwd,
         shell=False,
         stdin=subprocess.DEVNULL,
-        env=_scrubbed_env(),
+        env=_scrubbed_env(env_allowlist),
     )
     if os.name == "nt":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -115,10 +132,14 @@ def _run(arguments: dict, root: object) -> ToolResult:
         output=output,
         exit_code=proc.returncode,
         error=None if proc.returncode == 0 else f"exit {proc.returncode}",
+        rollback={"rollbackable": False,
+                  "reason": "arbitrary process side effects cannot be undone"},
     )
 
 
-def terminal_tools(root: object = None) -> list[tuple[Tool, object]]:
+def terminal_tools(root: object = None,
+                   env_allowlist: frozenset[str] | None = None
+                   ) -> list[tuple[Tool, ToolHandler]]:
     resolved = str(Path(root).resolve()) if root is not None else None
     return [
         (
@@ -132,7 +153,10 @@ def terminal_tools(root: object = None) -> list[tuple[Tool, object]]:
                 risk_level=RiskLevel.CRITICAL,
                 timeout_s=CONTRACT_TIMEOUT_S,
                 capabilities=["subprocess", "unsandboxed-process"],
+                requires_approval=True,
+                network_access=True,
             ),
-            lambda arguments, workspace=resolved: _run(arguments, workspace),
+            lambda arguments, workspace=resolved, allowlist=env_allowlist: _run(
+                arguments, workspace, allowlist),
         ),
     ]

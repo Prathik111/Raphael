@@ -15,9 +15,9 @@ as raw tracebacks to callers.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Protocol
+from collections.abc import Callable
 
 from ai_ecosystem.core.errors.exceptions import (
     AuthorizationDeniedError,
@@ -148,10 +148,10 @@ class ToolRunner:
         self,
         registry: ToolRegistry,
         authorizer: Authorizer,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
         sandbox: Any = None,
-        sandbox_profiles: Optional[dict[str, Any]] = None,
-        auditor: Optional[Callable[[dict], None]] = None,
+        sandbox_profiles: dict[str, Any] | None = None,
+        auditor: Callable[[dict], None] | None = None,
     ) -> None:
         self._registry = registry
         self._authorizer = authorizer
@@ -159,6 +159,9 @@ class ToolRunner:
         self._sandbox = sandbox
         self._sandbox_profiles = dict(sandbox_profiles or {})
         self._auditor = auditor
+        # Executed call ids (bounded): retried operations arrive as NEW
+        # calls with new ids; replaying an identical id executes nothing.
+        self._seen_ids: dict[str, None] = {}
 
     def _emit(
         self, event_type: EventType, task_id: str, payload: dict
@@ -186,7 +189,7 @@ class ToolRunner:
             task_id=call.task_id, tool_call_id=call.id, success=False, error=error
         )
 
-    def _validate(self, tool: Tool, call: ToolCall) -> Optional[str]:
+    def _validate(self, tool: Tool, call: ToolCall) -> str | None:
         problems = check_arguments(tool, dict(call.arguments))
         if problems:
             return "; ".join(problems)
@@ -209,6 +212,49 @@ class ToolRunner:
             error=reason,
         )
 
+    def _await_human(self, call: ToolCall, tool: Tool,
+                     permission: Permission) -> Permission:
+        """Resolve a PENDING permission via a human decision (review P0).
+
+        Emits APPROVAL_REQUESTED, blocks in the authorizer's wait, then
+        emits APPROVAL_DECIDED. A GRANTED permission is re-verified
+        against the LIVE call arguments (hash binding): approve-then-
+        mutate executes nothing. Anything unexpected denies closed.
+        """
+        approval_id = getattr(permission, "approval_id", "") or ""
+        self._emit(EventType.APPROVAL_REQUESTED, call.task_id,
+                   {"tool": call.tool, "call_id": call.id,
+                    "approval_id": approval_id,
+                    "reason": permission.reason})
+        waiter = getattr(self._authorizer, "await_approval", None)
+        if not callable(waiter):
+            permission.decision = PermissionDecision.DENIED
+            permission.reason += " (authorizer cannot wait for approval)"
+        else:
+            try:
+                permission = waiter(permission)
+            except Exception as exc:  # noqa: BLE001 -- fail closed
+                permission.decision = PermissionDecision.DENIED
+                permission.reason = f"approval wait failed: {exc}"
+        self._emit(EventType.APPROVAL_DECIDED, call.task_id,
+                   {"tool": call.tool, "call_id": call.id,
+                    "approval_id": approval_id,
+                    "decision": permission.decision.value})
+        if permission.decision is PermissionDecision.GRANTED:
+            checker = getattr(self._authorizer, "check_approval", None)
+            bound = False
+            if callable(checker):
+                try:
+                    bound = bool(checker(permission, tool, call))
+                except Exception:  # noqa: BLE001 -- fail closed
+                    bound = False
+            if not bound:
+                permission.decision = PermissionDecision.DENIED
+                permission.reason = (
+                    "approval does not match this exact action "
+                    "(arguments changed after approval)")
+        return permission
+
     def run(self, call: ToolCall, cancel_token: Any = None) -> ToolResult:
         """Execute one call; always returns a ToolResult (never raises).
 
@@ -221,6 +267,12 @@ class ToolRunner:
             return ToolResult(
                 task_id=call.task_id, tool_call_id=call.id, success=False,
                 error="cancelled before execution")
+        if call.id in self._seen_ids:
+            call.status = ToolCallStatus.FAILED
+            return ToolResult(
+                task_id=call.task_id, tool_call_id=call.id, success=False,
+                error=f"duplicate call id {call.id!r}: already executed; "
+                      "retries must use a new call")
         tool = self._registry.get(call.tool)
         if tool is None:
             return self._fail(
@@ -248,6 +300,8 @@ class ToolRunner:
             return self._deny(call, tool, str(exc))
         except Exception as exc:  # noqa: BLE001 -- fail closed, never propagate
             return self._deny(call, tool, f"authorizer error: {exc}")
+        if permission.decision is PermissionDecision.PENDING:
+            permission = self._await_human(call, tool, permission)
         if permission.decision is not PermissionDecision.GRANTED:
             call.status = ToolCallStatus.DENIED
             self._emit(
@@ -266,8 +320,18 @@ class ToolRunner:
                 success=False,
                 error=f"denied: {permission.reason}",
             )
+        self._emit(
+            EventType.PERMISSION_GRANTED,
+            call.task_id,
+            {"tool": call.tool, "call_id": call.id,
+             "approval_id": getattr(permission, "approval_id", "") or ""},
+        )
 
         call.status = ToolCallStatus.EXECUTE
+        self._seen_ids[call.id] = None
+        if len(self._seen_ids) > 5000:
+            for old in list(self._seen_ids)[:1000]:
+                del self._seen_ids[old]
         self._emit(
             EventType.TOOL_STARTED,
             call.task_id,

@@ -7,7 +7,7 @@ import pytest
 
 from ai_ecosystem.core.errors import DomainValidationError, ToolExecutionError
 from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models import Tool, ToolCall, ToolResult
+from ai_ecosystem.core.models import Tool, ToolResult
 from ai_ecosystem.core.models.enums import EventType, RiskLevel
 from ai_ecosystem.tools import (
     DenyAllAuthorizer,
@@ -185,6 +185,20 @@ def test_terminal_cwd_jailed_to_root(tmp_path):
     assert escaped.success is False and "escapes" in escaped.error
 
 
+def test_terminal_relative_cwd_resolves_under_root(tmp_path):
+    from ai_ecosystem.tools.local.terminal import terminal_tools as rooted
+
+    reg = ToolRegistry()
+    for tool, handler in rooted(tmp_path):
+        reg.register(tool, handler)
+    runner = ToolRunner(reg, GrantAllAuthorizer())
+    result = runner.run(reg.build_call(
+        "t", "terminal.execute",
+        {"command": [sys.executable, "-c", "print('hi')"], "cwd": "."}))
+    assert result.success is True
+    assert "hi" in result.output
+
+
 def test_terminal_env_scrubs_credentials(tmp_path, monkeypatch):
     from ai_ecosystem.tools.local.terminal import terminal_tools as rooted
 
@@ -257,6 +271,7 @@ def test_runner_emits_lifecycle_events(registry):
     kinds = [e.event_type for e in seen]
     assert kinds == [
         EventType.TOOL_REQUESTED,
+        EventType.PERMISSION_GRANTED,
         EventType.TOOL_STARTED,
         EventType.TOOL_COMPLETED,
     ]

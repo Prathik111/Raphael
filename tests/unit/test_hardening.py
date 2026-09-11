@@ -141,8 +141,6 @@ def test_crash_recovery_corrupt_db(tmp_path):
 def test_backup_and_restore(tmp_path):
     db = Database(str(tmp_path / "live.db"))
     db.migrate()
-    from ai_ecosystem.core.persistence import SqliteTaskRepository
-    from ai_ecosystem.core.models import Task
 
     SqliteTaskRepository(db).create(Task(title="keep me"))
     backup = str(tmp_path / "backup.db")
@@ -159,9 +157,9 @@ def test_backup_and_restore(tmp_path):
 
 def test_migration_safety(tmp_path):
     db = Database(str(tmp_path / "m.db"))
-    assert db.migrate() == 2
-    assert db.migrate() == 2  # idempotent re-run is safe
-    assert db.schema_version() == 2
+    assert db.migrate() == 3
+    assert db.migrate() == 3  # idempotent re-run is safe
+    assert db.schema_version() == 3
     db.close()
 
 
@@ -201,13 +199,10 @@ def test_no_heavy_undeclared_dependencies():
 
 def test_resource_safety_guards():
     from ai_ecosystem.agent.planner.validator import PlanValidator
-    from ai_ecosystem.agent.recovery import RecoveryPolicy, RetryPolicy
     from ai_ecosystem.agent.multi.messages import MessageBus
     from ai_ecosystem.core.models import Plan
 
     # Infinite DAGs cannot validate (cycles rejected).
-    from ai_ecosystem.core.errors import PlanValidationError
-    from ai_ecosystem.core.models import PlanStep
 
     cyclic = Plan(goal="g", steps=[
         PlanStep(id="a", description="a", dependencies=["b"], tools=["t"],

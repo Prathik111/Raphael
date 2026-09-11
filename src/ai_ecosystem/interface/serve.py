@@ -8,7 +8,7 @@ import os
 import secrets
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.agent.executor import ParallelExecutor
 from ai_ecosystem.agent.executor.cancellation import CancellationToken
@@ -19,19 +19,21 @@ from ai_ecosystem.core.config import AppConfig
 from ai_ecosystem.core.events.bus import Event
 from ai_ecosystem.core.events.sqlite import SqliteEventStore
 from ai_ecosystem.core.models.enums import EventType, RiskLevel, TaskState
-from ai_ecosystem.core.persistence import SqliteMemoryRepository, SqliteSkillRepository, SqliteVerificationRepository
+from ai_ecosystem.core.persistence import SqliteApprovalRepository, SqliteMemoryRepository, SqliteSkillRepository, SqliteVerificationRepository
 from ai_ecosystem.core.runtime import AgentRuntime
 from ai_ecosystem.core.secrets import EnvSecretsProvider
+from ai_ecosystem.core.models import Tool
 from ai_ecosystem.intelligence import HttpChatModelProvider, MockModelProvider, ModelProvider, ModelRouter, ProviderProfile, RoutingRequirements
 from ai_ecosystem.intelligence.models.providers import ModelResponse
 from ai_ecosystem.interface.api import ApiError, RuntimeAPI
 from ai_ecosystem.interface.server import LocalHttpServer
 from ai_ecosystem.personalization.memory import MemoryStore
 from ai_ecosystem.personalization.personality import PersonalizationEngine, PersonalityStore, PreferenceStore
-from ai_ecosystem.security import AuthorizationManager, Policy, PolicyEngine, RiskContext
+from ai_ecosystem.security import ApprovalStore, AuthorizationManager, Policy, PolicyEngine, RiskContext
 from ai_ecosystem.system.monitor.manager import SystemAwarenessManager
 from ai_ecosystem.system.monitor.probe import LocalSystemProbe
 from ai_ecosystem.tools import ToolRegistry, ToolRunner, filesystem_tools, git_tools, respond_tools, terminal_tools
+from ai_ecosystem.tools.registry import ToolHandler
 
 log = logging.getLogger("ai_ecosystem.serve")
 
@@ -42,12 +44,12 @@ class Stack:
     runtime: AgentRuntime
     api: RuntimeAPI
     server: LocalHttpServer
-    agent: Optional[SingleAgent] = None
+    agent: SingleAgent | None = None
     providers: list[ModelProvider] = field(default_factory=list)
     model_configured: bool = False
     workspace: str = ""
-    auth_token: Optional[str] = None
-    dispatcher: Optional["BoundedDispatcher"] = None
+    auth_token: str | None = None
+    dispatcher: BoundedDispatcher | None = None
 
 
 class BoundedDispatcher:
@@ -100,7 +102,7 @@ class BoundedDispatcher:
 def load_or_create_token(path: str) -> str:
     """Read an existing credential or atomically create a new one."""
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             token = handle.read().strip()
         if token:
             return token
@@ -112,7 +114,7 @@ def load_or_create_token(path: str) -> str:
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             existing = handle.read().strip()
         if existing:
             return existing
@@ -137,15 +139,15 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
         return router, providers, True
 
     def missing(_: Any) -> ModelResponse:
-        raise ModelUnavailableError("no model configured: set AI_ECO_MODEL_ENDPOINT, AI_ECO_MODEL_API_KEY and AI_ECO_MODEL_NAME")
+        raise ModelUnavailableError("no model configured: set AI_ECO_MODEL_ENDPOINT (plus AI_ECO_MODEL_API_KEY for cloud providers, AI_ECO_MODEL_NAME for the model)")
 
     stub = MockModelProvider("unconfigured", handler=missing)
     router.register(stub, ProviderProfile(provider_id="unconfigured"))
     return router, [], False
 
 
-def build_stack(config: Optional[AppConfig] = None, workspace: str = "workspace",
-                auth_token: Optional[str] = None, no_auth: bool = False) -> Stack:
+def build_stack(config: AppConfig | None = None, workspace: str = "workspace",
+                auth_token: str | None = None, no_auth: bool = False) -> Stack:
     config = config or AppConfig.from_env()
     workspace = os.path.abspath(workspace)
     os.makedirs(workspace, exist_ok=True)
@@ -157,16 +159,31 @@ def build_stack(config: Optional[AppConfig] = None, workspace: str = "workspace"
     events.attach(bus)
 
     registry = ToolRegistry()
-    for tool, handler in (
-        list(filesystem_tools(workspace)) + list(git_tools(workspace)) + list(respond_tools()) + list(terminal_tools(workspace))
-    ):
+    raw_allowlist = os.environ.get("AI_ECO_ENV_ALLOWLIST", "")
+    env_allowlist = frozenset(
+        name.strip() for name in raw_allowlist.split(",") if name.strip())
+    if raw_allowlist and not env_allowlist:
+        log.warning("ignoring empty AI_ECO_ENV_ALLOWLIST")
+    bundles: list[tuple[Tool, ToolHandler]] = (
+        list(filesystem_tools(workspace)) + list(git_tools(workspace)) + list(respond_tools()) + list(terminal_tools(workspace, env_allowlist or None))
+    )
+    for tool, handler in bundles:
         registry.register(tool, handler)
 
+    floor = {"LOW": RiskLevel.LOW, "MEDIUM": RiskLevel.MEDIUM,
+             "HIGH": RiskLevel.HIGH,
+             "CRITICAL": RiskLevel.CRITICAL}.get(config.require_approval.strip().upper())
+    if config.require_approval.strip() and floor is None:
+        log.warning("ignoring invalid AI_ECO_REQUIRE_APPROVAL=%r "
+                    "(want HIGH, CRITICAL, ...)", config.require_approval)
+    approval_store = ApprovalStore(SqliteApprovalRepository(runtime.db))
     authorizer = AuthorizationManager(
         registry,
-        policy_engine=PolicyEngine(Policy(name="local-operator", auto_grant_up_to=RiskLevel.MEDIUM, deny_critical=True)),
+        policy_engine=PolicyEngine(Policy(name="local-operator", auto_grant_up_to=RiskLevel.MEDIUM, deny_critical=True,
+                                          approval_required_from=floor)),
         context=RiskContext(agent_id="single-agent", root=workspace),
         allow_shells=config.allow_shells,
+        approval_store=approval_store,
     )
     runner = ToolRunner(registry, authorizer, bus)
 
@@ -178,7 +195,7 @@ def build_stack(config: Optional[AppConfig] = None, workspace: str = "workspace"
     personalization = PersonalizationEngine(personalities, preferences, memories, bus)
     skills = SqliteSkillRepository(runtime.db).list()
 
-    awareness: Optional[SystemAwarenessManager] = None
+    awareness: SystemAwarenessManager | None = None
     try:
         awareness = SystemAwarenessManager(LocalSystemProbe(), bus=bus)
     except Exception:  # noqa: BLE001
@@ -186,7 +203,8 @@ def build_stack(config: Optional[AppConfig] = None, workspace: str = "workspace"
 
     tokens: dict[str, CancellationToken] = {}
     tokens_lock = threading.Lock()
-    dispatcher = BoundedDispatcher(config.max_workers, config.max_queued_tasks)
+    dispatcher = BoundedDispatcher(max_workers=config.max_workers,
+                                   max_queued=config.max_queued_tasks)
 
     def agent_factory() -> SingleAgent:
         import platform
@@ -228,9 +246,9 @@ def build_stack(config: Optional[AppConfig] = None, workspace: str = "workspace"
             token = tokens.get(task_id)
         if token is not None:
             token.cancel()
-
-    api = RuntimeAPI(runtime, dispatch=dispatch, awareness=awareness, models=providers,
-                     skills=skills, event_store=events, on_cancel=on_cancel)
+    api = RuntimeAPI(runtime, dispatch=dispatch, awareness=awareness,
+                     models=providers, skills=skills, event_store=events,
+                     on_cancel=on_cancel, approvals=approval_store)
     token = None if no_auth else auth_token
     server = LocalHttpServer(api, host=config.api_host, port=config.api_port, auth_token=token)
     agent = agent_factory()
@@ -264,7 +282,7 @@ def build_stack(config: Optional[AppConfig] = None, workspace: str = "workspace"
                  auth_token=token, dispatcher=dispatcher)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Serve the AI Ecosystem local runtime API")
     parser.add_argument("--db", default=None)
     parser.add_argument("--workspace", default="workspace")
@@ -280,6 +298,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.db: config.db_path = args.db
     if args.host: config.api_host = args.host
     if args.port: config.api_port = args.port
+
+    if args.no_auth:
+        # Review: a production binary must not be able to start an
+        # unauthenticated API by accident. --no-auth requires an
+        # explicit development environment AND loopback bind.
+        if config.environment != "development":
+            parser.error("--no-auth requires AI_ECO_ENVIRONMENT=development")
+        if config.api_host not in ("127.0.0.1", "localhost", "::1"):
+            parser.error("--no-auth refuses non-loopback binds")
 
     token_file = args.api_token_file or os.path.join(os.path.dirname(os.path.abspath(config.db_path)), "api_credential")
     token = None if args.no_auth else (args.api_token or load_or_create_token(token_file))

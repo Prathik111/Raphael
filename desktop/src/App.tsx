@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Api,
+  ApprovalView,
   BackendError,
   BackendStatus,
   TaskEvent,
@@ -141,6 +142,10 @@ button { color: inherit; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .action { background: transparent; border: 1px solid var(--border-strong); border-radius: 9px; padding: 7px 10px; font-size: 10px; color: var(--muted); cursor: pointer; }
 .action:hover { color: var(--text); }
+.action.approve { border-color: rgba(110,231,208,.4); color: var(--accent-2); }
+.action.deny { border-color: rgba(255,119,119,.4); color: var(--danger); }
+.approval { border: 1px solid rgba(245,195,106,.3); background: rgba(245,195,106,.05); border-radius: 11px; padding: 10px; }
+.approval + .approval { margin-top: 8px; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(2,4,8,.7); backdrop-filter: blur(10px); display: grid; place-items: center; padding: 20px; z-index: 20; }
 .modal { width: min(560px, 100%); background: #0d131d; border: 1px solid var(--border-strong); border-radius: 16px; box-shadow: 0 30px 90px rgba(0,0,0,.55); }
 .modal-body { padding: 16px; }
@@ -188,6 +193,15 @@ function eventLabel(type: string): string {
   return type.replaceAll("_", " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().replace(/^./, c => c.toUpperCase());
 }
 
+function fmtArgs(value: unknown, cap = 500): string {
+  try {
+    const text = typeof value === "string" ? value : JSON.stringify(value, null, 1);
+    return text.length > cap ? text.slice(0, cap) + "…" : text;
+  } catch {
+    return String(value);
+  }
+}
+
 function markdownToText(text: string): string {
   return text.replace(/```[a-zA-Z0-9_-]*\n?/g, "").replace(/`/g, "");
 }
@@ -208,6 +222,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [draftBase, setDraftBase] = useState(base);
   const [agentCounts, setAgentCounts] = useState<Record<string, number>>({});
+  const [approvals, setApprovals] = useState<ApprovalView[]>([]);
   const pollRef = useRef<number | null>(null);
 
   const selected = useMemo(() => tasks.find(t => t.task_id === selectedId) ?? null, [tasks, selectedId]);
@@ -279,6 +294,31 @@ export function App() {
     void refreshDetail(selectedId);
     return () => { if (pollRef.current !== null) window.clearInterval(pollRef.current); };
   }, [selectedId, api, refreshDetail, refreshTasks]);
+
+  useEffect(() => {
+    if (conn !== "online") { setApprovals([]); return; }
+    let active = true;
+    const poll = async () => {
+      try {
+        const pending = await api.approvals();
+        if (active) setApprovals(pending);
+      } catch { /* transient: keep last known list */ }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [api, conn]);
+
+  const decideApproval = async (id: string, approved: boolean) => {
+    try {
+      if (approved) await api.approveApproval(id);
+      else await api.denyApproval(id);
+      setApprovals(current => current.filter(a => a.id !== id));
+      if (selectedId) await refreshDetail(selectedId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to record decision");
+    }
+  };
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -361,6 +401,8 @@ export function App() {
             </form>
 
             {error && <div className="banner error">{error}</div>}
+
+            {approvals.length > 0 && <div className="panel"><div className="panel-header"><div><div className="panel-title">Approval needed ({approvals.length})</div><div className="panel-subtitle">Review the exact action — approval binds to these arguments only</div></div></div><div className="panel-body">{approvals.map(a => <div key={a.id} className="approval"><div className="tool-top"><div className="tool-name">{a.tool}</div><div className="tool-status">{a.risk}</div></div><div className="tool-snippet">{JSON.stringify(a.arguments, null, 1).slice(0, 600)}</div><div className="tool-snippet">{a.reason}</div><div className="actions" style={{ marginTop: 8 }}><button className="action approve" onClick={() => void decideApproval(a.id, true)}>Approve</button><button className="action deny" onClick={() => void decideApproval(a.id, false)}>Deny</button></div></div>)}</div></div>}
 
             {selected && <div className="detail-grid">
               <div className="panel"><div className="panel-header"><div><div className="panel-title">Execution activity</div><div className="panel-subtitle">Durable task events from the runtime</div></div><div className="actions">{!selected.completed && <button className="action" onClick={() => void cancel()}>Stop task</button>}<button className="action" onClick={() => void refreshDetail(selected.task_id)}>Refresh</button></div></div><div className="panel-body"><div className="activity">{events.length === 0 ? <div className="empty">Waiting for runtime events…</div> : events.slice().reverse().map((e, i) => { const payload = e.payload as Record<string, unknown>; return <div className="activity-row" key={`${e.seq}-${i}`}><span className="activity-dot" /><div className="activity-copy"><strong>{eventLabel(e.type)}</strong><span>{String(payload.message ?? payload.reason ?? "Runtime event recorded.")}</span></div><span className="activity-time">{new Date(e.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>; })}</div></div></div>

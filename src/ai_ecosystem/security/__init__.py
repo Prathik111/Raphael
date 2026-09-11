@@ -11,12 +11,14 @@ from ai_ecosystem.security.envelope import (
     meets,
 )
 from ai_ecosystem.security.policy import (
+    ApprovalStore,
     AuthorizationManager,
     PermissionEngine,
     Policy,
     PolicyEngine,
     RiskContext,
     RiskEngine,
+    approval_hash,
 )
 from ai_ecosystem.security.sandbox import (
     LocalSandboxProvider,
@@ -26,6 +28,7 @@ from ai_ecosystem.security.sandbox import (
 )
 
 __all__ = [
+    "ApprovalStore",
     "AuditLog",
     "AuditRecord",
     "AuthorizationManager",
@@ -42,6 +45,7 @@ __all__ = [
     "SandboxProvider",
     "SandboxUnavailableError",
     "TrustLevel",
+    "approval_hash",
     "capability_risk",
     "is_dangerous",
     "meets",

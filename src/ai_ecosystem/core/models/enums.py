@@ -57,6 +57,15 @@ class PermissionDecision(str, Enum):
     DENIED = "DENIED"
 
 
+class ApprovalStatus(str, Enum):
+    """Lifecycle of a human approval request (review: bound to exact action)."""
+
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    DENIED = "DENIED"
+    EXPIRED = "EXPIRED"
+
+
 class VerificationStatus(str, Enum):
     """Outcome of a verification (Gate 9 implements the engine)."""
 
@@ -139,6 +148,8 @@ class EventType(str, Enum):
     PERMISSION_REQUESTED = "PermissionRequested"
     PERMISSION_GRANTED = "PermissionGranted"
     PERMISSION_DENIED = "PermissionDenied"
+    APPROVAL_REQUESTED = "ApprovalRequested"
+    APPROVAL_DECIDED = "ApprovalDecided"
     VERIFICATION_STARTED = "VerificationStarted"
     VERIFICATION_PASSED = "VerificationPassed"
     VERIFICATION_FAILED = "VerificationFailed"

@@ -101,13 +101,61 @@ def redact(mapping: dict[str, Any]) -> dict[str, Any]:
     return {key: _redact_value(key, value) for key, value in mapping.items()}
 
 
+def sanitize(value: Any) -> Any:
+    """Recursively sanitize ANY value (review: one canonical sanitizer).
+
+    Handles dicts, lists, tuples, sets, Pydantic models, dataclasses,
+    and exceptions -- anything that can flow into logs, persistence,
+    model context, or UI events. Secret-looking content becomes "***";
+    containers keep their shape with sanitized contents.
+    """
+    import dataclasses
+
+    if isinstance(value, dict):
+        return {key: _redact_value(key, item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_item(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return {_sanitize_item(item) for item in value}
+    if isinstance(value, BaseException):
+        return sanitize_exception(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return sanitize(model_dump(mode="json"))
+        except Exception:  # noqa: BLE001 -- fall through to repr
+            pass
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        try:
+            return sanitize(dataclasses.asdict(value))
+        except Exception:  # noqa: BLE001 -- fall through to repr
+            pass
+    return "***" if looks_like_secret_value(value) else value
+
+
+def _sanitize_item(item: Any) -> Any:
+    if isinstance(item, dict):
+        return redact(item)
+    if isinstance(item, (list, tuple, set, frozenset)):
+        return sanitize(item)
+    return "***" if looks_like_secret_value(item) else item
+
+
+def sanitize_exception(exc: BaseException) -> str:
+    """Exception text safe for logs/events: masks credential formats."""
+    text = f"{type(exc).__name__}: {exc}"
+    if looks_like_secret_value(text):
+        return f"{type(exc).__name__}: ***"
+    return text
+
+
 def _redact_value(key: str, value: Any) -> Any:
     if looks_secret(key) or looks_like_secret_value(value):
         return "***"
     if isinstance(value, dict):
         return redact(value)
-    if isinstance(value, list):
-        return [redact(item) if isinstance(item, dict)
-                else ("***" if looks_like_secret_value(item) else item)
-                for item in value]
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_item(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return {_sanitize_item(item) for item in value}
     return value

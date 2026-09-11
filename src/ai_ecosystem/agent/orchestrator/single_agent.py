@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
@@ -37,7 +38,6 @@ from ai_ecosystem.core.errors.exceptions import ModelError
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.domain import (
     ExecutionContext,
-    Goal,
     Plan,
     Task,
     VerificationResult,
@@ -110,7 +110,7 @@ class AgentResult(BaseModel):
     reply: str = ""
     step_states: dict[str, StepState] = Field(default_factory=dict)
     verification_status: str = VerificationStatus.PENDING.value
-    recovery: Optional[RecoveryOutcome] = None
+    recovery: RecoveryOutcome | None = None
     memory_ids: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     timings: dict[str, float] = Field(default_factory=dict)
@@ -137,12 +137,12 @@ class SingleAgent:
         runner: ToolRunner,
         planner: ReasoningBackend,
         verifier: Verifier,
-        recovery_planner_factory: Optional[Callable[[], RecoveryPlanner]] = None,
-        research: Optional[ResearchManager] = None,
-        memories: Optional[MemoryStore] = None,
-        personalization: Optional[PersonalizationEngine] = None,
-        executor_factory: Optional[Callable[[], ParallelExecutor]] = None,
-        bus: Optional[EventBus] = None,
+        recovery_planner_factory: Callable[[], RecoveryPlanner] | None = None,
+        research: ResearchManager | None = None,
+        memories: MemoryStore | None = None,
+        personalization: PersonalizationEngine | None = None,
+        executor_factory: Callable[[], ParallelExecutor] | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._runtime = runtime
         self._router = router
@@ -161,8 +161,8 @@ class SingleAgent:
 
     # -- public entry points --------------------------------------------
 
-    def run_goal(self, goal_text: str, config: Optional[AgentConfig] = None,
-                 cancel_token: Optional[CancellationToken] = None) -> AgentResult:
+    def run_goal(self, goal_text: str, config: AgentConfig | None = None,
+                 cancel_token: CancellationToken | None = None) -> AgentResult:
         """Run the full PACE loop for a user goal string."""
         self._config = config or AgentConfig()
         clock = _Clock()
@@ -172,8 +172,8 @@ class SingleAgent:
                            cancel_token)
 
     def run_task(self, task_id: str,
-                 config: Optional[AgentConfig] = None,
-                 cancel_token: Optional[CancellationToken] = None) -> AgentResult:
+                 config: AgentConfig | None = None,
+                 cancel_token: CancellationToken | None = None) -> AgentResult:
         """Drive an already-created task through the full PACE loop.
 
         The desktop API creates the task first (so the UI has an id to
@@ -192,14 +192,14 @@ class SingleAgent:
                            cancel_token)
 
     def _check_cancelled(self, task_id: str,
-                         cancel_token: Optional[CancellationToken]) -> None:
+                         cancel_token: CancellationToken | None) -> None:
         """Raise _Cancelled when the operator cancelled mid-run."""
         if cancel_token is not None and cancel_token.cancelled:
             raise _Cancelled(f"task {task_id} cancelled by operator")
 
     def _drive(self, task: Task, ctx: ExecutionContext, goal_text: str,
                clock: _Clock, total_started: float,
-               cancel_token: Optional[CancellationToken] = None) -> AgentResult:
+               cancel_token: CancellationToken | None = None) -> AgentResult:
         """Shared PACE loop; the task always terminates (COMPLETED/FAILED)."""
         try:
             self._check_cancelled(task.id, cancel_token)
@@ -232,10 +232,12 @@ class SingleAgent:
                 return self._cancelled(
                     task, ctx, f"task {task.id} cancelled by operator",
                     clock, total_started)
-            return self._fail(task, ctx, f"{type(exc).__name__}: {exc}",
+            from ai_ecosystem.core.secrets import sanitize_exception
+
+            return self._fail(task, ctx, sanitize_exception(exc),
                               clock, total_started)
 
-    def resume(self, task_id: str, config: Optional[AgentConfig] = None) -> AgentResult:
+    def resume(self, task_id: str, config: AgentConfig | None = None) -> AgentResult:
         """Resume a persisted task that already has a plan (crash recovery)."""
         self._config = config or AgentConfig()
         clock = _Clock()
@@ -256,7 +258,9 @@ class SingleAgent:
             return self._complete(task, ctx, ctx.plan, execution, verifications,
                                   recovery, memory_ids, clock, total_started)
         except Exception as exc:  # noqa: BLE001
-            return self._fail(task, ctx, f"{type(exc).__name__}: {exc}",
+            from ai_ecosystem.core.secrets import sanitize_exception
+
+            return self._fail(task, ctx, sanitize_exception(exc),
                               clock, total_started)
 
     # -- phases ----------------------------------------------------------
@@ -374,7 +378,7 @@ class SingleAgent:
 
     def _execute(self, task: Task, ctx: ExecutionContext, plan: Plan,
                  clock: _Clock,
-                 cancel_token: Optional[CancellationToken] = None) -> ExecutionResult:
+                 cancel_token: CancellationToken | None = None) -> ExecutionResult:
         started = time.monotonic()
         self._walk_to(task, TaskState.EXECUTING)
         execution = self._executor().execute_graph(
@@ -401,8 +405,8 @@ class SingleAgent:
                            execution: ExecutionResult,
                            verifications: dict[str, VerificationResult],
                            clock: _Clock,
-                           cancel_token: Optional[CancellationToken] = None,
-                           ) -> Optional[RecoveryOutcome]:
+                           cancel_token: CancellationToken | None = None,
+                           ) -> RecoveryOutcome | None:
         started = time.monotonic()
         try:
             if execution.status is OverallStatus.COMPLETED and all(
@@ -499,7 +503,7 @@ class SingleAgent:
     def _complete(self, task: Task, ctx: ExecutionContext, plan: Plan,
                   execution: ExecutionResult,
                   verifications: dict[str, VerificationResult],
-                  recovery: Optional[RecoveryOutcome], memory_ids: list[str],
+                  recovery: RecoveryOutcome | None, memory_ids: list[str],
                   clock: _Clock, total_started: float) -> AgentResult:
         current = self._runtime.manager.get_task(task.id)
         if current is not None and current.state is TaskState.CANCELLED:
@@ -624,7 +628,7 @@ class SingleAgent:
         return "\n\n".join(parts)
 
     def _summarize(self, ctx: ExecutionContext, execution: ExecutionResult,
-                   worst: VerificationResult, recovery: Optional[RecoveryOutcome],
+                   worst: VerificationResult, recovery: RecoveryOutcome | None,
                    task: Task) -> str:
         lines = [
             f"Task '{task.title}' ended {execution.status.value}; "

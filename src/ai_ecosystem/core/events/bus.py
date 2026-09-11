@@ -14,7 +14,7 @@ import threading
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import ConfigDict, Field
 
@@ -32,14 +32,14 @@ class Event(Entity):
     model_config = ConfigDict(frozen=True)
 
     event_type: EventType = EventType.TASK_CREATED
-    task_id: Optional[str] = None
+    task_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class EventBus:
     """Synchronous in-memory publisher/subscriber bus (thread-safe)."""
 
-    def __init__(self, on_error: Optional[ErrorHandler] = None) -> None:
+    def __init__(self, on_error: ErrorHandler | None = None) -> None:
         self._lock = threading.Lock()
         self._handlers: dict[EventType, list[EventHandler]] = defaultdict(list)
         self._global_handlers: list[EventHandler] = []
@@ -163,7 +163,7 @@ class InMemoryEventStore(EventStore):
             return [(index, event) for index, event in enumerate(self._events)
                     if index > seq]
 
-    def attach(self, bus: EventBus, event_type: Optional[EventType] = None) -> None:
+    def attach(self, bus: EventBus, event_type: EventType | None = None) -> None:
         """Persist everything (or one type) published on ``bus``."""
         if event_type is None:
             bus.subscribe_all(self.append_and_ignore)

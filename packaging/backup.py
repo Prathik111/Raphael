@@ -13,7 +13,6 @@ import json
 import shutil
 import sqlite3
 from pathlib import Path
-from typing import Any, Optional
 
 
 USER_TABLES = ["tasks", "contexts", "events", "memories", "skills", "agents",
@@ -25,7 +24,7 @@ USER_TABLES = ["tasks", "contexts", "events", "memories", "skills", "agents",
 
 
 def backup_user_data(db_path: str, out_path: str,
-                     extra_dirs: Optional[list[str]] = None) -> str:
+                     extra_dirs: list[str] | None = None) -> str:
     """Copy the database file + metadata manifest into a backup path.
 
     Uses the SQLite online-backup API into a temp file first, so the
@@ -62,7 +61,7 @@ def backup_user_data(db_path: str, out_path: str,
 
 
 def restore_user_data(backup_path: str, db_path: str,
-                      tables: Optional[list[str]] = None) -> str:
+                      tables: list[str] | None = None) -> str:
     """Restore the database file (full) or selected tables only."""
     import zipfile
 

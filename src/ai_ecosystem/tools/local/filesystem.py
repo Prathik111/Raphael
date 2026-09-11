@@ -12,6 +12,7 @@ from pathlib import Path
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
+from ai_ecosystem.tools.registry.registry import ToolHandler
 
 MAX_READ_BYTES = 1_000_000
 MAX_LIST_ENTRIES = 5_000
@@ -76,7 +77,7 @@ def _exists(arguments: dict, root: Path) -> ToolResult:
     return ToolResult(success=True, output=_resolve(root, raw).exists())
 
 
-def filesystem_tools(root: str | Path) -> list[tuple[Tool, object]]:
+def filesystem_tools(root: str | Path) -> list[tuple[Tool, ToolHandler]]:
     """Build (contract, handler) pairs for filesystem.read/list/exists."""
     base = Path(root)
     return [

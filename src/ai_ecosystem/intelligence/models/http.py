@@ -48,6 +48,10 @@ class HttpChatModelProvider(ModelProvider):
 
     HTTPS is mandatory for non-loopback endpoints so API credentials cannot
     be intentionally or accidentally sent over plaintext transport.
+
+    The key is optional: local providers (Ollama, LM Studio, llama.cpp
+    server at e.g. http://127.0.0.1:11434/v1 with any model name) need
+    no authentication, and none is sent then.
     """
 
     def __init__(
@@ -63,8 +67,6 @@ class HttpChatModelProvider(ModelProvider):
             tool_calling=True, structured_output=True, reasoning=True))
         if not endpoint:
             raise ValueError("endpoint is required")
-        if not api_key:
-            raise ValueError("api_key is required")
         self._endpoint = normalize_endpoint(endpoint)
         self._api_key = api_key
         self._model = model or provider_id
@@ -74,10 +76,10 @@ class HttpChatModelProvider(ModelProvider):
     def from_secrets(cls, secrets: SecretsProvider, provider_id: str = "http-chat",
                      timeout_s: float = DEFAULT_TIMEOUT_S) -> Optional["HttpChatModelProvider"]:
         endpoint = secrets.get(ENDPOINT_ENV)
-        api_key = secrets.get(API_KEY_ENV)
-        if not endpoint or not api_key:
+        if not endpoint:
             return None
-        return cls(provider_id=provider_id, endpoint=endpoint, api_key=api_key,
+        return cls(provider_id=provider_id, endpoint=endpoint,
+                   api_key=secrets.get(API_KEY_ENV) or "",
                    model=secrets.get(MODEL_ENV) or provider_id, timeout_s=timeout_s)
 
     @property
@@ -94,13 +96,14 @@ class HttpChatModelProvider(ModelProvider):
             "max_tokens": max(1, request.max_tokens),
         }
         body = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "ai-ecosystem/0.1",
+        }
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         http_request = urllib.request.Request(
-            self._endpoint, data=body, method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._api_key}",
-                "User-Agent": "ai-ecosystem/0.1",
-            })
+            self._endpoint, data=body, method="POST", headers=headers)
         timeout = min(self._timeout, max(1.0, request.timeout_s))
         try:
             with urllib.request.urlopen(http_request, timeout=timeout) as response:

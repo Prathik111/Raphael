@@ -3,14 +3,13 @@
 import json
 import threading
 import time
-from pathlib import Path
 
 from ai_ecosystem.agent.executor import ParallelExecutor
 from ai_ecosystem.agent.orchestrator import AgentConfig, SingleAgent
 from ai_ecosystem.agent.planner.backend import ModelReasoningBackend
 from ai_ecosystem.agent.recovery import RecoveryPlanner
 from ai_ecosystem.agent.verifier import Verifier
-from ai_ecosystem.core.events import Event, EventBus
+from ai_ecosystem.core.events import Event
 from ai_ecosystem.core.models import Plan, Tool, ToolResult
 from ai_ecosystem.core.models.enums import (
     EventType,
@@ -19,14 +18,12 @@ from ai_ecosystem.core.models.enums import (
     TaskState,
 )
 from ai_ecosystem.core.persistence import (
-    Database,
     SqliteMemoryRepository,
     SqliteVerificationRepository,
 )
 from ai_ecosystem.core.runtime import AgentRuntime, is_valid_transition
 from ai_ecosystem.intelligence import (
     MockModelProvider,
-    ModelCapabilities,
     ModelRequest,
     ModelResponse,
     ModelRouter,
@@ -648,7 +645,7 @@ def test_18_respond_step_becomes_task_reply(tmp_path):
 
 def test_19_second_task_recalls_first_task(tmp_path):
     """Session continuity: memories from task 1 reach task 2's planner."""
-    from ai_ecosystem.core.models.enums import EventType, MemoryScope
+    from ai_ecosystem.core.models.enums import EventType
 
     tools = [_ok_tool("work")]
     spec = {"title": "Work", "constraints": [], "desired_outcome": "ok",

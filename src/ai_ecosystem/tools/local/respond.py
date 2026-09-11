@@ -13,6 +13,7 @@ from __future__ import annotations
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
+from ai_ecosystem.tools.registry.registry import ToolHandler
 
 MAX_REPLY_CHARS = 8_000
 
@@ -29,7 +30,7 @@ def _respond(arguments: dict) -> ToolResult:
     return ToolResult(success=True, output=text)
 
 
-def respond_tools() -> list[tuple[Tool, object]]:
+def respond_tools() -> list[tuple[Tool, ToolHandler]]:
     """Build the (contract, handler) pair for agent.respond."""
     return [
         (

@@ -3,6 +3,7 @@
 from ai_ecosystem.core.models.base import Entity, new_id, utcnow
 from ai_ecosystem.core.models.domain import (
     Agent,
+    ApprovalRequest,
     Artifact,
     ComputeNode,
     Device,
@@ -23,6 +24,7 @@ from ai_ecosystem.core.models.domain import (
     VerificationResult,
 )
 from ai_ecosystem.core.models.enums import (
+    ApprovalStatus,
     EventType,
     MemoryScope,
     MemoryStatus,
@@ -40,6 +42,8 @@ from ai_ecosystem.core.models.enums import (
 
 __all__ = [
     "Agent",
+    "ApprovalRequest",
+    "ApprovalStatus",
     "Artifact",
     "ComputeNode",
     "Device",

@@ -90,6 +90,19 @@ export interface SkillInfo {
   status: string;
 }
 
+export interface ApprovalView {
+  id: string;
+  task_id: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  risk: string;
+  reason: string;
+  policy: string;
+  status: string;
+  created_at: string;
+  expires_at: string | null;
+}
+
 export interface BackendStatus {
   state: "managed" | "external" | "failed" | "unknown";
   url: string;
@@ -187,6 +200,17 @@ export function makeApi(base: string) {
     awareness: () => request<Record<string, unknown>>(safeBase, "/awareness"),
     models: () => request<ModelInfo[]>(safeBase, "/models"),
     skills: () => request<SkillInfo[]>(safeBase, "/skills"),
+    approvals: () => request<ApprovalView[]>(safeBase, "/approvals"),
+    approveApproval: (id: string) =>
+      request<ApprovalView>(safeBase, `/approvals/${id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    denyApproval: (id: string) =>
+      request<ApprovalView>(safeBase, `/approvals/${id}/deny`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
   };
 }
 

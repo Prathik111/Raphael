@@ -16,7 +16,7 @@ import hmac
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from ai_ecosystem.core.errors.exceptions import (
@@ -53,7 +53,7 @@ def _error_code(exc: Exception) -> tuple[int, str]:
     return 500, "internal_error"
 
 
-def _authorized(headers: Any, auth_token: Optional[str]) -> bool:
+def _authorized(headers: Any, auth_token: str | None) -> bool:
     """True when no token is configured or the bearer matches exactly."""
     if not auth_token:
         return True
@@ -61,7 +61,7 @@ def _authorized(headers: Any, auth_token: Optional[str]) -> bool:
     return hmac.compare_digest(presented, f"Bearer {auth_token}")
 
 
-def _cors_origin(headers: Any) -> Optional[str]:
+def _cors_origin(headers: Any) -> str | None:
     """Echo the Origin only when it is explicitly allow-listed."""
     origin = headers.get("Origin")
     if origin in ALLOWED_ORIGINS:
@@ -71,7 +71,7 @@ def _cors_origin(headers: Any) -> Optional[str]:
 
 class _Handler(BaseHTTPRequestHandler):
     api: RuntimeAPI
-    auth_token: Optional[str] = None
+    auth_token: str | None = None
     # HTTP/1.0 + explicit close: avoids half-open keep-alive resets
     # (Windows loopback RST / WinError 10053 under rapid test traffic).
     protocol_version = "HTTP/1.0"
@@ -161,6 +161,16 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, self.api.get_models())
             elif method == "GET" and parts == ["skills"]:
                 self._send(200, self.api.get_skills())
+            elif method == "GET" and parts == ["approvals"]:
+                status = query.get("status", ["PENDING"])[0] or "PENDING"
+                self._send(200, self.api.list_approvals(status))
+            elif method == "POST" and len(parts) == 3 and parts[0] == "approvals" \
+                    and parts[2] in ("approve", "deny"):
+                body = self._read_json()
+                decided_by = body.get("by", "operator") \
+                    if isinstance(body, dict) else "operator"
+                self._send(200, self.api.decide_approval(
+                    parts[1], parts[2] == "approve", decided_by=decided_by))
             else:
                 self._send(404, {"code": "not_found", "message": "unknown route"})
         except Exception as exc:  # noqa: BLE001 -- mapped, never leaks
@@ -188,7 +198,7 @@ class LocalHttpServer:
 
     def __init__(self, api: RuntimeAPI, host: str = "127.0.0.1", port: int = 0,
                  allow_remote: bool = False,
-                 auth_token: Optional[str] = None) -> None:
+                 auth_token: str | None = None) -> None:
         if not allow_remote and host not in ("127.0.0.1", "localhost", "::1"):
             raise ApiError("malformed_request",
                            f"refusing non-loopback bind {host!r} without "
@@ -196,7 +206,7 @@ class LocalHttpServer:
         handler = type("BoundHandler", (_Handler,),
                        {"api": api, "auth_token": auth_token})
         self._server = ThreadingHTTPServer((host, port), handler)
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
@@ -204,7 +214,7 @@ class LocalHttpServer:
         host, port = self._server.server_address
         return f"http://{host}:{port}"
 
-    def start(self) -> "LocalHttpServer":
+    def start(self) -> LocalHttpServer:
         """Serve in a background thread."""
         self._thread = threading.Thread(target=self._server.serve_forever,
                                         daemon=True)
@@ -223,7 +233,7 @@ class ApiClient:
     """Minimal test/operator client for the local API."""
 
     def __init__(self, base_url: str, timeout_s: float = 5.0,
-                 auth_token: Optional[str] = None) -> None:
+                 auth_token: str | None = None) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout_s
         self._auth_token = auth_token

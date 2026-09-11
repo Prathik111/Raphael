@@ -210,8 +210,10 @@ def test_14_scaffold_contains_no_secrets_or_privileges():
     # 'token' legitimately appears in "CSRF token: none" docs; allow listed notes.
     # type="password" is the masked credential input in Settings: correct
     # practice (the value is never in source), so it is allow-listed here.
+    # "token" in api.ts is the credential variable name (not a secret).
     hits = [h for h in hits if "csrf" not in h.lower()
-            and h != "App.tsx:password"]
+            and h != "App.tsx:password"
+            and h != "api.ts:token"]
     assert hits == [], hits
 
 
