@@ -4,7 +4,7 @@
 
 - Repository: `Prathik111/Raphael`
 - Branch documented here: `fix/hardened-security-v2`
-- Snapshot commit: `8a0e7aad2505c81b7d4627a7255ebe4e22f658ef`
+- Snapshot commit: `ed21a2da771860b3ee586a3b5692c393a3db0f78`
 - Snapshot date: 2026-09-11
 - Pull request: #3, base `main`
 - Base commit: `73ce38c324043ee0408a1656c64e4efd2a185e42`
@@ -134,11 +134,11 @@ PR #3 is the current hardening line. It addresses:
 - TLS requirements for remote API exposure
 - security regression tests
 
-The latest commit only exported the centralized data-policy API; the broader hardening series is already present in its ancestry.
+The latest code commit before the documentation-only commits was `8a0e7aad2505c81b7d4627a7255ebe4e22f658ef` (`Export centralized data policy`). The current branch head now includes the documentation layer and structure/status synchronization.
 
 ## Known issues / unfinished security work
 
-P0: implement a real OS-level boundary for arbitrary untrusted terminal/code execution. On Windows this likely requires a restricted identity/token plus filesystem ACL boundary and other OS controls; on Linux it requires an appropriate namespace/seccomp/cgroup strategy. The exact implementation must be designed and tested rather than assumed.
+P0: implement a real OS-level boundary for arbitrary untrusted terminal/code execution. On Windows this likely requires a restricted identity/token plus filesystem ACLs and other OS controls; on Linux it requires an appropriate namespace/seccomp/cgroup strategy. The exact implementation must be designed and tested rather than assumed.
 
 P1: make the full CI/security matrix execute on the hardened branch and record results. GitHub workflow presence is not evidence that the latest commit has passed CI.
 
@@ -146,7 +146,7 @@ P1: strengthen network isolation to the minimum required destinations/capabiliti
 
 P1: continue adversarial testing around secrets, data classification, remote transport, replay/recovery, memory poisoning, and compromised-model behavior.
 
-P2: reconcile stale roadmap/structure statements that still describe old gate numbers or placeholder directories.
+P2: reconcile stale roadmap statements in `BUILD_PLAN.md` that describe historical gate completion versus current release readiness.
 
 ## Historical progress
 
