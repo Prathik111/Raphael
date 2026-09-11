@@ -95,17 +95,16 @@ def _terminate_process(process: mp.Process) -> None:
 
 
 class _WindowsJob:
-    """Windows Job Object enforcing descendant lifetime and resource limits.
-
-    A plain ``Process.kill`` does not terminate children created by the worker.
-    The job is therefore the authoritative lifetime boundary on Windows.
-    """
+    """Windows Job Object enforcing descendant lifetime and resource limits."""
 
     JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
     JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
     JOB_OBJECT_LIMIT_JOB_TIME = 0x00000004
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
     JobObjectExtendedLimitInformation = 9
+    PROCESS_SET_QUOTA = 0x0100
+    PROCESS_TERMINATE = 0x0001
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
     class _BasicLimit(ctypes.Structure):
         _fields_ = [
@@ -140,9 +139,9 @@ class _WindowsJob:
             ("PeakJobMemoryUsed", ctypes.c_size_t),
         ]
 
-    def __init__(self, profile: SandboxProfile) -> None:
+    def __init__(self, profile: SandboxProfile, has_subprocess_capability: bool) -> None:
+        self.handle = None
         if os.name != "nt":
-            self.handle = None
             return
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         self._kernel32 = kernel32
@@ -155,6 +154,8 @@ class _WindowsJob:
             ctypes.c_uint32,
         ]
         kernel32.SetInformationJobObject.restype = ctypes.c_int
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
         kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
         kernel32.AssignProcessToJobObject.restype = ctypes.c_int
         kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
@@ -170,7 +171,11 @@ class _WindowsJob:
         flags = self.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         if profile.max_processes > 0:
             flags |= self.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-            limits.BasicLimitInformation.ActiveProcessLimit = profile.max_processes
+            # max_processes describes child processes; the sandbox worker itself
+            # is also a member of the Job Object.
+            limits.BasicLimitInformation.ActiveProcessLimit = profile.max_processes + (
+                1 if has_subprocess_capability else 0
+            )
         if profile.max_memory_mb > 0:
             flags |= self.JOB_OBJECT_LIMIT_PROCESS_MEMORY
             limits.ProcessMemoryLimit = profile.max_memory_mb * 1024 * 1024
@@ -190,13 +195,22 @@ class _WindowsJob:
             raise OSError(error, "SetInformationJobObject failed")
 
     def assign(self, process: mp.Process) -> None:
-        if self.handle is None:
+        if self.handle is None or process.pid is None:
             return
-        ok = self._kernel32.AssignProcessToJobObject(self.handle, ctypes.c_void_p(process.pid))
-        if not ok:
+        access = self.PROCESS_SET_QUOTA | self.PROCESS_TERMINATE | self.PROCESS_QUERY_LIMITED_INFORMATION
+        process_handle = self._kernel32.OpenProcess(access, 0, process.pid)
+        if not process_handle:
             error = ctypes.get_last_error()
             self.close()
-            raise OSError(error, "AssignProcessToJobObject failed")
+            raise OSError(error, "OpenProcess failed")
+        try:
+            ok = self._kernel32.AssignProcessToJobObject(self.handle, process_handle)
+            if not ok:
+                error = ctypes.get_last_error()
+                self.close()
+                raise OSError(error, "AssignProcessToJobObject failed")
+        finally:
+            self._kernel32.CloseHandle(process_handle)
 
     def terminate(self) -> None:
         if self.handle:
@@ -251,6 +265,7 @@ class LocalSandboxProvider(SandboxProvider):
             raise ToolExecutionError(
                 tool.name, "secret access is not granted by the local sandbox profile"
             )
+        has_subprocess_capability = "subprocess" in set(tool.capabilities)
         deadline = min(timeout_s, profile.timeout_s) if profile.timeout_s > 0 else timeout_s
         lock = self._lock_for(profile.name)
         with lock:
@@ -264,16 +279,20 @@ class LocalSandboxProvider(SandboxProvider):
                     handler,
                     dict(arguments),
                     profile,
-                    "subprocess" in set(tool.capabilities),
+                    has_subprocess_capability,
                     clean_env,
                     result_queue,
                 ),
             )
-            job = _WindowsJob(profile)
+            job = _WindowsJob(profile, has_subprocess_capability)
             try:
                 os.environ.clear()
                 os.environ.update(clean_env)
-                process.start()
+                try:
+                    process.start()
+                except Exception:
+                    job.close()
+                    raise
                 if os.name == "nt":
                     try:
                         job.assign(process)
