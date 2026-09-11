@@ -149,9 +149,7 @@ def test_failure_fail_fast():
     registry = _registry(ok=_ok, fail=_fail)
     # max_concurrency=1: c is still PENDING when b fails, so the halt
     # provably stops unstarted work (a concurrent c could not be un-started).
-    executor, bus = _harness(
-        registry, max_concurrency=1, failure_policy=FailurePolicy.FAIL_FAST
-    )
+    executor, bus = _harness(registry, max_concurrency=1, failure_policy=FailurePolicy.FAIL_FAST)
     plan = _plan(
         ("a", [], ["ok"]),
         ("b", ["a"], ["fail"]),
@@ -167,9 +165,7 @@ def test_failure_fail_fast():
 
 def test_failure_continue_independent():
     registry = _registry(ok=_ok, fail=_fail)
-    executor, _ = _harness(
-        registry, failure_policy=FailurePolicy.CONTINUE_INDEPENDENT
-    )
+    executor, _ = _harness(registry, failure_policy=FailurePolicy.CONTINUE_INDEPENDENT)
     plan = _plan(
         ("a", [], ["ok"]),
         ("b", ["a"], ["fail"]),
@@ -196,7 +192,7 @@ def test_cancellation_stops_unstarted_work():
     runner = ToolRunner(registry, GrantAllAuthorizer(), bus)
     executor = ParallelExecutor(runner, registry, bus, max_concurrency=1)
     graph = TaskGraph.from_plan(
-        _plan(*[(f"s{i}", [f"s{i-1}"] if i else [], ["slow"]) for i in range(4)])
+        _plan(*[(f"s{i}", [f"s{i - 1}"] if i else [], ["slow"]) for i in range(4)])
     )
     token = CancellationToken()
     outcome = {}
@@ -250,10 +246,22 @@ def test_invalid_graph_refused():
     cyclic = Plan(
         goal="g",
         steps=[
-            PlanStep(id="a", description="a", dependencies=["b"], tools=["ok"],
-                     verification="v", completion_criteria="c"),
-            PlanStep(id="b", description="b", dependencies=["a"], tools=["ok"],
-                     verification="v", completion_criteria="c"),
+            PlanStep(
+                id="a",
+                description="a",
+                dependencies=["b"],
+                tools=["ok"],
+                verification="v",
+                completion_criteria="c",
+            ),
+            PlanStep(
+                id="b",
+                description="b",
+                dependencies=["a"],
+                tools=["ok"],
+                verification="v",
+                completion_criteria="c",
+            ),
         ],
         final_verification="v",
     )
@@ -279,8 +287,9 @@ def test_denied_tool_never_runs_handler():
 
 def test_step_state_transitions_validated():
     node = GraphNode(
-        step=PlanStep(id="a", description="a", tools=["ok"],
-                      verification="v", completion_criteria="c")
+        step=PlanStep(
+            id="a", description="a", tools=["ok"], verification="v", completion_criteria="c"
+        )
     )
     with pytest.raises(DomainValidationError):
         node.transition(StepState.SUCCEEDED)  # PENDING -> SUCCEEDED illegal
@@ -293,9 +302,7 @@ def test_step_state_transitions_validated():
 
 def test_result_aggregation_shape():
     registry = _registry(ok=_ok, fail=_fail)
-    executor, _ = _harness(
-        registry, failure_policy=FailurePolicy.CONTINUE_INDEPENDENT
-    )
+    executor, _ = _harness(registry, failure_policy=FailurePolicy.CONTINUE_INDEPENDENT)
     plan = _plan(("a", [], ["ok"]), ("b", ["a"], ["fail"]))
     result = executor.execute("t", plan)
     assert result.task_id == "t"

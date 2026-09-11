@@ -8,7 +8,6 @@ to be autonomous fact-checking.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.base import utcnow
@@ -34,8 +33,8 @@ class ResearchManager:
         runner: ToolRunner,
         registry: ToolRegistry,
         search_tool: str = "web.search",
-        bus: Optional[EventBus] = None,
-        collector: Optional[SourceCollector] = None,
+        bus: EventBus | None = None,
+        collector: SourceCollector | None = None,
     ) -> None:
         self._collector = collector or SourceCollector(runner, registry, search_tool)
         self._extractor = EvidenceExtractor()
@@ -50,7 +49,8 @@ class ResearchManager:
         sources = collected.sources[: max(0, query.max_sources)]
         for source in sources:
             self._emit(
-                EventType.SOURCE_COLLECTED, "",
+                EventType.SOURCE_COLLECTED,
+                "",
                 {"source_id": source.id, "origin": source.origin},
             )
         evidence = []
@@ -58,19 +58,19 @@ class ResearchManager:
             items = self._extractor.extract(source, query.query)
             evidence.extend(items)
             self._emit(
-                EventType.EVIDENCE_EXTRACTED, "",
+                EventType.EVIDENCE_EXTRACTED,
+                "",
                 {"source_id": source.id, "evidence": len(items)},
             )
-        evidence = [
-            item for item in evidence if item.confidence >= query.min_confidence
-        ]
+        evidence = [item for item in evidence if item.confidence >= query.min_confidence]
         lookup = {source.id: source for source in sources}
         ranked_evidence = rank_evidence(evidence, lookup)
         ranked_sources = rank_sources(sources, ranked_evidence)
         conflicts = detect_conflicts(ranked_evidence)
         confidence = (
             round(sum(item.confidence for item in ranked_evidence) / len(ranked_evidence), 3)
-            if ranked_evidence else 0.0
+            if ranked_evidence
+            else 0.0
         )
         notes = [f"{len(collected.duplicates)} duplicate(s) merged."]
         if collected.error and not sources:
@@ -83,36 +83,52 @@ class ResearchManager:
         if not sources:
             notes.append("no results for query")
         result = self._result(
-            query, ranked_sources, ranked_evidence, conflicts, collected,
-            confidence, notes,
+            query,
+            ranked_sources,
+            ranked_evidence,
+            conflicts,
+            collected,
+            confidence,
+            notes,
         )
         self._emit(
-            EventType.RESEARCH_COMPLETED, "",
-            {"sources": len(sources), "evidence": len(ranked_evidence),
-             "conflicts": len(conflicts)},
+            EventType.RESEARCH_COMPLETED,
+            "",
+            {
+                "sources": len(sources),
+                "evidence": len(ranked_evidence),
+                "conflicts": len(conflicts),
+            },
         )
         return result
 
     @staticmethod
     def _result(
-        query: ResearchQuery, sources: list, evidence: list, conflicts: list,
-        collected: Collected, confidence: float, notes: list[str],
+        query: ResearchQuery,
+        sources: list,
+        evidence: list,
+        conflicts: list,
+        collected: Collected,
+        confidence: float,
+        notes: list[str],
     ) -> ResearchResult:
         return ResearchResult(
-            query=query.query, sources=sources, evidence=evidence,
-            conflicts=conflicts, duplicates=collected.duplicates,
-            confidence=confidence, notes=notes,
+            query=query.query,
+            sources=sources,
+            evidence=evidence,
+            conflicts=conflicts,
+            duplicates=collected.duplicates,
+            confidence=confidence,
+            notes=notes,
         )
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload)
-            )
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))
 
 
 def verify_research(
-    result: ResearchResult, max_age_days: float = 30.0, now: Optional[datetime] = None
+    result: ResearchResult, max_age_days: float = 30.0, now: datetime | None = None
 ) -> VerificationResult:
     """Check source existence, metadata validity, freshness, and support.
 
@@ -151,7 +167,12 @@ def verify_research(
     else:
         status, reason = VerificationStatus.PASSED, "sources exist with valid metadata"
     return VerificationResult(
-        task_id="", step_id="research", status=status, strategy="source_verification",
-        checks=checks, evidence=evidence, reason=reason,
+        task_id="",
+        step_id="research",
+        status=status,
+        strategy="source_verification",
+        checks=checks,
+        evidence=evidence,
+        reason=reason,
         metadata={"sources": len(result.sources), "evidence": len(result.evidence)},
     )

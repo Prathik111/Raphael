@@ -76,7 +76,9 @@ class ModelRouter:
         raise last_error
 
     def request_structured(
-        self, requirements: RoutingRequirements, request: ModelRequest,
+        self,
+        requirements: RoutingRequirements,
+        request: ModelRequest,
         model_cls: type[BaseModel],
     ) -> BaseModel:
         """Structured request with the same provider failover as complete()."""

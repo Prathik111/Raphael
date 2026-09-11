@@ -35,18 +35,22 @@ def _rich_snapshot(**overrides):
     args = {
         "operating_system": "TestOS 1.0",
         "architecture": "x86_64",
-        "cpu": CpuInfo(model="Test CPU", logical_processors=8,
-                       utilization_percent=42.0),
-        "memory": MemoryInfo(total_bytes=16_000_000_000,
-                             available_bytes=8_000_000_000,
-                             used_bytes=8_000_000_000,
-                             utilization_percent=50.0),
-        "storage": [StorageVolume(mount="/", total_bytes=1000,
-                                  available_bytes=600,
-                                  utilization_percent=40.0)],
+        "cpu": CpuInfo(model="Test CPU", logical_processors=8, utilization_percent=42.0),
+        "memory": MemoryInfo(
+            total_bytes=16_000_000_000,
+            available_bytes=8_000_000_000,
+            used_bytes=8_000_000_000,
+            utilization_percent=50.0,
+        ),
+        "storage": [
+            StorageVolume(
+                mount="/", total_bytes=1000, available_bytes=600, utilization_percent=40.0
+            )
+        ],
         "processes": [ProcessInfo(name="agent", cpu_percent=5.0)],
-        "capabilities": Capabilities(git_available=True, python_available=True,
-                                     storage_available=True),
+        "capabilities": Capabilities(
+            git_available=True, python_available=True, storage_available=True
+        ),
         "pressure": PressureLevel.LOW,
     }
     args.update(overrides)
@@ -84,8 +88,12 @@ def test_4_storage_information():
 
 
 def test_5_gpu_information_mocked():
-    gpu = GpuInfo(name="Mock GPU", vram_total_bytes=12_000_000_000,
-                  vram_available_bytes=4_000_000_000, utilization_percent=66.0)
+    gpu = GpuInfo(
+        name="Mock GPU",
+        vram_total_bytes=12_000_000_000,
+        vram_available_bytes=4_000_000_000,
+        utilization_percent=66.0,
+    )
     snap = MockProbe(_rich_snapshot(gpus=[gpu])).snapshot()
     assert len(snap.gpus) == 1
     assert snap.gpus[0].vram_total_bytes == 12_000_000_000
@@ -94,11 +102,13 @@ def test_5_gpu_information_mocked():
 
 def test_6_capability_detection():
     assert classify_pressure(None, None, None) is PressureLevel.UNKNOWN
-    probe = LocalSystemProbe(checkers={
-        "git_available": lambda: True,
-        "docker_available": lambda: False,
-        "network_available": lambda: True,
-    })
+    probe = LocalSystemProbe(
+        checkers={
+            "git_available": lambda: True,
+            "docker_available": lambda: False,
+            "network_available": lambda: True,
+        }
+    )
     snap = probe.snapshot()
     assert snap.capabilities.git_available is True
     assert snap.capabilities.docker_available is False
@@ -120,9 +130,12 @@ def test_8_resource_pressure_classification():
     assert classify_pressure(10.0, 90.0, 10.0) is PressureLevel.HIGH
     assert classify_pressure(10.0, 10.0, 75.0) is PressureLevel.MODERATE
     assert classify_pressure(10.0, 10.0, 10.0) is PressureLevel.LOW
-    pressured = MockProbe(_rich_snapshot(
-        cpu=CpuInfo(model="x", logical_processors=4, utilization_percent=91.0),
-        pressure=PressureLevel.HIGH)).snapshot()
+    pressured = MockProbe(
+        _rich_snapshot(
+            cpu=CpuInfo(model="x", logical_processors=4, utilization_percent=91.0),
+            pressure=PressureLevel.HIGH,
+        )
+    ).snapshot()
     context = build_context(pressured)
     assert context.pressure is PressureLevel.HIGH
     assert "cpu" in context.constrained_resources
@@ -150,13 +163,14 @@ def test_10_disabled_monitoring():
 def test_11_no_sensitive_data_collection():
     snap = MockProbe(_rich_snapshot()).snapshot()
     dumped = snap.model_dump_json().lower()
-    for forbidden in ("password", "token", "secret", "keystroke", "camera",
-                      "microphone", "cookie"):
+    for forbidden in ("password", "token", "secret", "keystroke", "camera", "microphone", "cookie"):
         assert forbidden not in dumped
     for process in snap.processes:
-        assert process.model_dump() == {"name": process.name,
-                                        "cpu_percent": process.cpu_percent,
-                                        "memory_bytes": process.memory_bytes}
+        assert process.model_dump() == {
+            "name": process.name,
+            "cpu_percent": process.cpu_percent,
+            "memory_bytes": process.memory_bytes,
+        }
 
 
 def test_12_persistence_and_13_restart(tmp_path):
@@ -188,8 +202,7 @@ def test_awareness_events_carry_summaries_not_raw_data():
     assert kinds[0] is EventType.SYSTEM_AWARENESS_REQUESTED
     assert EventType.SYSTEM_SNAPSHOT_CREATED in kinds
     assert EventType.CAPABILITY_DETECTED in kinds
-    created = next(e for e in seen
-                   if e.event_type is EventType.SYSTEM_SNAPSHOT_CREATED)
+    created = next(e for e in seen if e.event_type is EventType.SYSTEM_SNAPSHOT_CREATED)
     assert "processes" in created.payload  # count only...
     assert created.payload["processes"] == 1  # ...never the list itself
     assert "hostname" not in created.payload
@@ -199,8 +212,9 @@ def test_pressure_event_on_high_load():
     bus = EventBus()
     seen: list[Event] = []
     bus.subscribe_all(seen.append)
-    manager = SystemAwarenessManager(MockProbe(_rich_snapshot(
-        pressure=PressureLevel.CRITICAL)), bus=bus)
+    manager = SystemAwarenessManager(
+        MockProbe(_rich_snapshot(pressure=PressureLevel.CRITICAL)), bus=bus
+    )
     manager.snapshot()
     assert EventType.RESOURCE_PRESSURE_DETECTED in [e.event_type for e in seen]
 

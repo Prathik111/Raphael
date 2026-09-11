@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import ToolResult
@@ -29,7 +29,7 @@ class VerificationTarget:
 class Finding:
     """One strategy's verdict: passed / failed / cannot-tell."""
 
-    passed: Optional[bool]  # True / False / None (inconclusive)
+    passed: bool | None  # True / False / None (inconclusive)
     evidence: list[str] = field(default_factory=list)
     reason: str = ""
 
@@ -41,9 +41,7 @@ def safe_path(root: str, raw: str) -> Path:
     try:
         candidate.relative_to(base)
     except ValueError:
-        raise ToolExecutionError(
-            "verifier", f"path {raw!r} escapes the allowed root"
-        ) from None
+        raise ToolExecutionError("verifier", f"path {raw!r} escapes the allowed root") from None
     return candidate
 
 
@@ -76,9 +74,7 @@ class CommandResultStrategy(VerificationStrategy):
         expected = params.get("expect_in_output")
         if expected:
             missing = [
-                r.tool_call_id
-                for r in target.tool_results
-                if expected not in str(r.output or "")
+                r.tool_call_id for r in target.tool_results if expected not in str(r.output or "")
             ]
             if missing:
                 return Finding(
@@ -109,9 +105,7 @@ class ArtifactExistsStrategy(VerificationStrategy):
                 [f"missing: {p}" for p in missing],
                 "expected artifact does not exist despite successful execution",
             )
-        return Finding(
-            True, [f"exists: {p}" for p in paths], "all expected artifacts exist"
-        )
+        return Finding(True, [f"exists: {p}" for p in paths], "all expected artifacts exist")
 
 
 class ArtifactPropertyStrategy(VerificationStrategy):
@@ -141,9 +135,7 @@ class ArtifactPropertyStrategy(VerificationStrategy):
             try:
                 content = target_path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError) as exc:
-                return Finding(
-                    False, [f"{path}: unreadable ({exc})"], "artifact is corrupt"
-                )
+                return Finding(False, [f"{path}: unreadable ({exc})"], "artifact is corrupt")
             if expected_text not in content:
                 return Finding(
                     False,
@@ -167,8 +159,7 @@ class TestCommandStrategy(VerificationStrategy):
         command = params.get("command")
         if not command:
             return Finding(None, [], "no test command specified")
-        call = self._registry.build_call(target.task_id, "terminal.execute",
-                                         {"command": command})
+        call = self._registry.build_call(target.task_id, "terminal.execute", {"command": command})
         result = self._runner.run(call)
         if (result.error or "").lower().startswith("denied:"):
             return Finding(

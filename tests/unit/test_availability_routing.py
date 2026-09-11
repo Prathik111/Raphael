@@ -35,18 +35,37 @@ def service():
 def _providers(healthy=None):
     healthy = {"local": True, "oci": True, "kaggle": True} | (healthy or {})
     return {
-        "local": ProviderCapabilities(name="local", local=True, ram_gb=16.0,
-                                      runtimes=["python"], models=["mock"],
-                                      cost_per_hour=0.0, latency_class="fast",
-                                      reliability=0.99),
-        "oci": ProviderCapabilities(name="oci", ram_gb=64.0, gpu=True, vram_gb=40.0,
-                                    runtimes=["python", "cuda"], models=["oci-mock"],
-                                    cost_per_hour=2.0, latency_class="standard",
-                                    reliability=0.999),
-        "kaggle": ProviderCapabilities(name="kaggle", ram_gb=32.0, gpu=True,
-                                       vram_gb=16.0, runtimes=["python", "cuda"],
-                                       cost_per_hour=0.0, latency_class="slow",
-                                       reliability=0.9),
+        "local": ProviderCapabilities(
+            name="local",
+            local=True,
+            ram_gb=16.0,
+            runtimes=["python"],
+            models=["mock"],
+            cost_per_hour=0.0,
+            latency_class="fast",
+            reliability=0.99,
+        ),
+        "oci": ProviderCapabilities(
+            name="oci",
+            ram_gb=64.0,
+            gpu=True,
+            vram_gb=40.0,
+            runtimes=["python", "cuda"],
+            models=["oci-mock"],
+            cost_per_hour=2.0,
+            latency_class="standard",
+            reliability=0.999,
+        ),
+        "kaggle": ProviderCapabilities(
+            name="kaggle",
+            ram_gb=32.0,
+            gpu=True,
+            vram_gb=16.0,
+            runtimes=["python", "cuda"],
+            cost_per_hour=0.0,
+            latency_class="slow",
+            reliability=0.9,
+        ),
     }, healthy
 
 
@@ -102,8 +121,7 @@ def test_duplicate_heartbeat(service):
 
 def test_stale_heartbeat(service):
     svc, _, _ = service
-    svc.heartbeat("pc-1", status=PCStatus.SLEEPING,
-                  now=utcnow() - timedelta(seconds=3600))
+    svc.heartbeat("pc-1", status=PCStatus.SLEEPING, now=utcnow() - timedelta(seconds=3600))
     assert svc.is_available("pc-1") is False  # sleeping is not available
     assert svc.poll()[0].status is PCStatus.OFFLINE
 
@@ -158,8 +176,9 @@ def test_local_selection():
 
 def test_oci_selection():
     router = _router()
-    target = router.route(ComputeRequirements(gpu=True, vram_gb=32.0,
-                                              runtime="cuda", model="oci-mock"))
+    target = router.route(
+        ComputeRequirements(gpu=True, vram_gb=32.0, runtime="cuda", model="oci-mock")
+    )
     assert target.provider == "oci"  # only OCI has 32GB+ VRAM
 
 
@@ -186,15 +205,13 @@ def test_privacy_restriction():
     with pytest.raises(PolicyRejectionError):
         # High privacy + incapable local PC must fail, never leak to cloud.
         router.route(ComputeRequirements(privacy="high", gpu=True, vram_gb=80.0))
-    ok = _router({"local": True}).route(
-        ComputeRequirements(privacy="high", ram_gb=4.0))
+    ok = _router({"local": True}).route(ComputeRequirements(privacy="high", ram_gb=4.0))
     assert ok.provider == "local"
 
 
 def test_fallback():
     router = _router()
-    ranked = router.rank(ComputeRequirements(gpu=True, vram_gb=8.0,
-                                             duration_s=3600.0))
+    ranked = router.rank(ComputeRequirements(gpu=True, vram_gb=8.0, duration_s=3600.0))
     assert [t.provider for t in ranked] == ["kaggle", "oci"]
     chosen = router.select_first_available(ranked, lambda name: name != "kaggle")
     assert chosen.provider == "oci"
@@ -215,13 +232,13 @@ def test_deterministic_routing():
     first = _router().rank(ComputeRequirements(gpu=True))
     second = _router().rank(ComputeRequirements(gpu=True))
     assert [(t.provider, t.estimated_cost) for t in first] == [
-        (t.provider, t.estimated_cost) for t in second]
+        (t.provider, t.estimated_cost) for t in second
+    ]
 
 
 def test_policy_rejection():
     router = _router(policy=ComputePolicy(blocked_providers=["local"]))
     target = router.route(ComputeRequirements(ram_gb=4.0))
     assert target.provider != "local"
-    cheap_only = ComputeRouter(
-        _providers()[0], policy=ComputePolicy(max_cost_per_hour=0.0))
+    cheap_only = ComputeRouter(_providers()[0], policy=ComputePolicy(max_cost_per_hour=0.0))
     assert cheap_only.route(ComputeRequirements()).provider in ("local", "kaggle")

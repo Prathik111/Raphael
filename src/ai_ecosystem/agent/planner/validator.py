@@ -25,13 +25,9 @@ class DependencyResolver:
         for step in steps:
             for dep in step.dependencies:
                 if dep == step.id:
-                    raise PlanValidationError(
-                        f"step {step.id!r} depends on itself"
-                    )
+                    raise PlanValidationError(f"step {step.id!r} depends on itself")
                 if dep not in by_id:
-                    raise PlanValidationError(
-                        f"step {step.id!r} depends on unknown step {dep!r}"
-                    )
+                    raise PlanValidationError(f"step {step.id!r} depends on unknown step {dep!r}")
         incoming = {step.id: 0 for step in steps}
         children: dict[str, list[str]] = {step.id: [] for step in steps}
         for step in steps:
@@ -55,18 +51,20 @@ class DependencyResolver:
 class PlanValidator:
     """Strict structural gate every plan must pass before execution."""
 
-    def __init__(self, known_tools: set[str] | None = None,
-                 required_args: dict[str, set[str]] | None = None,
-                 tool_schemas: dict[str, dict] | None = None,
-                 max_steps: int = 50,
-                 max_arguments_bytes: int = 65536) -> None:
+    def __init__(
+        self,
+        known_tools: set[str] | None = None,
+        required_args: dict[str, set[str]] | None = None,
+        tool_schemas: dict[str, dict] | None = None,
+        max_steps: int = 50,
+        max_arguments_bytes: int = 65536,
+    ) -> None:
         self._known_tools = set(known_tools or [])
         # Tool name -> required parameter names. When provided, steps
         # must supply every required argument up front, so a model that
         # forgets 'command' or 'path' gets a repair round instead of a
         # doomed execution with three wasted retries.
-        self._required_args = {name: set(params)
-                               for name, params in (required_args or {}).items()}
+        self._required_args = {name: set(params) for name, params in (required_args or {}).items()}
         # Tool name -> {"required": [...], "properties": {param: type}}.
         # Superset of required_args: also checks JSON types, so a model
         # that passes 'command' as a string instead of an argv list is
@@ -74,8 +72,7 @@ class PlanValidator:
         self._schemas = dict(tool_schemas or {})
         for name, schema in self._schemas.items():
             if isinstance(schema, dict):
-                self._required_args.setdefault(
-                    name, set(schema.get("required", [])))
+                self._required_args.setdefault(name, set(schema.get("required", [])))
         # Resource caps (review): a model must not schedule unbounded work.
         self._max_steps = max(1, max_steps)
         self._max_arguments_bytes = max(1024, max_arguments_bytes)
@@ -87,8 +84,7 @@ class PlanValidator:
         if not plan.steps:
             raise PlanValidationError("plan has no steps")
         if len(plan.steps) > self._max_steps:
-            raise PlanValidationError(
-                f"plan has {len(plan.steps)} steps (max {self._max_steps})")
+            raise PlanValidationError(f"plan has {len(plan.steps)} steps (max {self._max_steps})")
         ids = [step.id for step in plan.steps]
         if any(not sid for sid in ids):
             raise PlanValidationError("every step needs an id")
@@ -108,21 +104,18 @@ class PlanValidator:
             raise PlanValidationError(f"step {step.id!r} names no tools")
         unknown = [name for name in step.tools if name not in self._known_tools]
         if unknown:
-            raise PlanValidationError(
-                f"step {step.id!r} uses unknown tools: {', '.join(unknown)}"
-            )
+            raise PlanValidationError(f"step {step.id!r} uses unknown tools: {', '.join(unknown)}")
         import json as _json
 
         blob = _json.dumps(step.arguments or {}, default=str)
         if len(blob.encode("utf-8")) > self._max_arguments_bytes:
             raise PlanValidationError(
-                f"step {step.id!r} arguments exceed "
-                f"{self._max_arguments_bytes} bytes")
+                f"step {step.id!r} arguments exceed {self._max_arguments_bytes} bytes"
+            )
         provided = set(step.arguments or {})
         for name in step.tools:
             required = self._required_args.get(name, set())
-            missing = [param for param in sorted(required)
-                       if param not in provided]
+            missing = [param for param in sorted(required) if param not in provided]
             if missing:
                 raise PlanValidationError(
                     f"step {step.id!r} tool {name!r} is missing required "
@@ -137,24 +130,21 @@ class PlanValidator:
                 props = schema.get("properties")
                 if isinstance(props, dict):
                     properties = props
-            contract = SimpleNamespace(input_schema={
-                "required": sorted(required), "properties": properties})
+            contract = SimpleNamespace(
+                input_schema={"required": sorted(required), "properties": properties}
+            )
             problems = check_arguments(contract, dict(step.arguments or {}))
             # Presence errors already raised above with step context.
-            type_problems = [p for p in problems
-                             if not p.startswith("missing required")]
+            type_problems = [p for p in problems if not p.startswith("missing required")]
             if type_problems:
                 raise PlanValidationError(
-                    f"step {step.id!r} tool {name!r}: "
-                    f"{'; '.join(type_problems)}"
+                    f"step {step.id!r} tool {name!r}: {'; '.join(type_problems)}"
                 )
         if step.risk is RiskLevel.CRITICAL:
             raise PlanValidationError(
                 f"step {step.id!r} is CRITICAL risk and cannot be auto-planned"
             )
         if not step.completion_criteria.strip():
-            raise PlanValidationError(
-                f"step {step.id!r} has no completion criteria"
-            )
+            raise PlanValidationError(f"step {step.id!r} has no completion criteria")
         if not step.verification.strip():
             raise PlanValidationError(f"step {step.id!r} has no verification")

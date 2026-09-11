@@ -8,7 +8,6 @@ observation first (Gate 6 wires the real authorizer; tests use stubs).
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.models.domain import Tool, ToolCall, ToolResult
@@ -35,11 +34,11 @@ class ToolRegistry:
         self._handlers[tool.name] = handler
         return tool
 
-    def get(self, name: str) -> Optional[Tool]:
+    def get(self, name: str) -> Tool | None:
         """Contract for ``name`` (None when unknown)."""
         return self._tools.get(name)
 
-    def handler(self, name: str) -> Optional[ToolHandler]:
+    def handler(self, name: str) -> ToolHandler | None:
         """Handler for ``name`` (None when unknown)."""
         return self._handlers.get(name)
 

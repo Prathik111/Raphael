@@ -9,9 +9,8 @@ without knowing whether the bytes arrived over HTTP, USB, or MQTT.
 
 from __future__ import annotations
 
-import json
-import time
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
@@ -58,7 +57,7 @@ class ProtocolValidator:
 
     def __init__(
         self,
-        authorize: Optional[Callable[[EcosystemEnvelope], bool]] = None,
+        authorize: Callable[[EcosystemEnvelope], bool] | None = None,
         clock: Any = None,
     ) -> None:
         import time as _time
@@ -93,8 +92,7 @@ class ProtocolValidator:
             raise ProtocolError("envelope has no message type")
         major = str(envelope.protocol_version).split(".")[0]
         if major != SUPPORTED_MAJOR:
-            raise ProtocolError(
-                f"protocol version {envelope.protocol_version!r} incompatible")
+            raise ProtocolError(f"protocol version {envelope.protocol_version!r} incompatible")
         now = self._clock()
         created = envelope.created_at.timestamp()
         if abs(now - created) > SKEW_TOLERANCE_S:
@@ -118,12 +116,20 @@ class ProtocolValidator:
             raise ProtocolError("envelope expired")
 
 
-def envelope_for(sender: str, sender_type: str, message_type: str,
-                 payload: Optional[dict] = None,
-                 correlation_id: str = "",
-                 auth: Optional[AuthRef] = None) -> EcosystemEnvelope:
+def envelope_for(
+    sender: str,
+    sender_type: str,
+    message_type: str,
+    payload: dict | None = None,
+    correlation_id: str = "",
+    auth: AuthRef | None = None,
+) -> EcosystemEnvelope:
     """Build a well-formed envelope (timestamps handled by the model)."""
     return EcosystemEnvelope(
-        sender=sender, sender_type=sender_type, message_type=message_type,
-        payload=dict(payload or {}), correlation_id=correlation_id,
-        auth=auth or AuthRef())
+        sender=sender,
+        sender_type=sender_type,
+        message_type=message_type,
+        payload=dict(payload or {}),
+        correlation_id=correlation_id,
+        auth=auth or AuthRef(),
+    )

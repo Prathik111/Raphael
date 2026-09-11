@@ -10,7 +10,7 @@ capture, no local execution on either end.
 from __future__ import annotations
 
 import secrets as secrets_lib
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
@@ -22,8 +22,9 @@ from ai_ecosystem.interface.gateway import EcosystemGateway
 class PhoneClient:
     """Authenticated thin client over a RuntimeAPI instance."""
 
-    def __init__(self, gateway: EcosystemGateway, api: RuntimeAPI,
-                 bus: Optional[EventBus] = None) -> None:
+    def __init__(
+        self, gateway: EcosystemGateway, api: RuntimeAPI, bus: EventBus | None = None
+    ) -> None:
         self._gateway = gateway
         self._api = api
         self._bus = bus
@@ -39,9 +40,11 @@ class PhoneClient:
             awareness = self._api.get_system_awareness()
         except ApiError:
             awareness = {"unavailable": True}
-        return {"tasks": self._api.list_tasks(),
-                "agents": self._api.get_agent_status(),
-                "awareness": awareness}
+        return {
+            "tasks": self._api.list_tasks(),
+            "agents": self._api.get_agent_status(),
+            "awareness": awareness,
+        }
 
     def permission_requests(self, token: str, limit: int = 20) -> list[dict]:
         """Recent permission decisions (read-only log)."""
@@ -52,8 +55,9 @@ class PhoneClient:
         """Deny = cancel the task (safe, immediate, audited)."""
         session = self._gateway.check(token, "cancel", nonce=_nonce())
         cancelled = self._api.cancel_task(task_id)
-        self._emit(EventType.PHONE_DECISION, task_id,
-                   {"device_id": session.device_id, "decision": "deny"})
+        self._emit(
+            EventType.PHONE_DECISION, task_id, {"device_id": session.device_id, "decision": "deny"}
+        )
         return cancelled
 
     def approve(self, token: str, task_id: str, call_id: str) -> dict[str, Any]:
@@ -67,10 +71,16 @@ class PhoneClient:
         if not call_id:
             raise DomainValidationError("approve requires a call_id")
         session = self._gateway.check(token, "decide", nonce=_nonce())
-        self._emit(EventType.PHONE_DECISION, task_id,
-                   {"device_id": session.device_id, "decision": "approve",
-                    "call_id": call_id,
-                    "note": "acknowledgment only; grants nothing"})
+        self._emit(
+            EventType.PHONE_DECISION,
+            task_id,
+            {
+                "device_id": session.device_id,
+                "decision": "approve",
+                "call_id": call_id,
+                "note": "acknowledgment only; grants nothing",
+            },
+        )
         return {"acknowledged": True, "grants": "nothing"}
 
     def submit_voice_goal(self, token: str, text: str) -> dict[str, Any]:
@@ -82,8 +92,7 @@ class PhoneClient:
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload))
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))
 
 
 def _nonce() -> str:

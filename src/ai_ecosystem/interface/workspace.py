@@ -11,26 +11,46 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
-from ai_ecosystem.core.models.base import Entity, utcnow
+from ai_ecosystem.core.models.base import Entity
 from ai_ecosystem.core.models.enums import EventType
 
 MAX_PROP_BYTES = 64_000
 
-_FORBIDDEN_KEYS = ("__proto__", "constructor", "prototype",
-                   "dangerouslySetInnerHTML", "__html")
+_FORBIDDEN_KEYS = ("__proto__", "constructor", "prototype", "dangerouslySetInnerHTML", "__html")
 
 _FORBIDDEN_SNIPPETS = (
-    "<script", "javascript:", "vbscript:", "data:text/html",
-    "eval(", "new function", "settimeout(", "setinterval(",
-    "expression(", "<img", "<svg", "<iframe", "<object", "<embed",
-    "<link", "<meta", "<base", "<form", "<input", "<button", "<select",
-    "<textarea", "<keygen", "<marquee", "onerror=", "onload=",
+    "<script",
+    "javascript:",
+    "vbscript:",
+    "data:text/html",
+    "eval(",
+    "new function",
+    "settimeout(",
+    "setinterval(",
+    "expression(",
+    "<img",
+    "<svg",
+    "<iframe",
+    "<object",
+    "<embed",
+    "<link",
+    "<meta",
+    "<base",
+    "<form",
+    "<input",
+    "<button",
+    "<select",
+    "<textarea",
+    "<keygen",
+    "<marquee",
+    "onerror=",
+    "onload=",
 )
 
 
@@ -56,11 +76,11 @@ class NodeType(str, Enum):
 class NodeState(str, Enum):
     """Lifecycle with real behavior behind each state."""
 
-    LIVE = "LIVE"            # updates apply
-    FROZEN = "FROZEN"        # updates rejected until thawed
+    LIVE = "LIVE"  # updates apply
+    FROZEN = "FROZEN"  # updates rejected until thawed
     COLLAPSED = "COLLAPSED"  # children hidden (containers)
-    DORMANT = "DORMANT"      # no auto-refresh; explicit refresh allowed
-    GHOST = "GHOST"          # tombstone left by a removed reference
+    DORMANT = "DORMANT"  # no auto-refresh; explicit refresh allowed
+    GHOST = "GHOST"  # tombstone left by a removed reference
 
 
 _ALLOWED_AFFORDANCES = {
@@ -87,7 +107,7 @@ class WorkspaceNode(Entity):
 
     node_type: NodeType = NodeType.PROSE
     props: dict[str, Any] = Field(default_factory=dict)
-    data_ref: Optional[DataRef] = None
+    data_ref: DataRef | None = None
     salience: float = 0.5
     state: NodeState = NodeState.LIVE
     affordances: list[str] = Field(default_factory=list)
@@ -121,8 +141,7 @@ def validate_props(node_type: NodeType, props: Any) -> dict[str, Any]:
     except (TypeError, ValueError) as exc:
         raise DomainValidationError(f"node props must be JSON data: {exc}") from exc
     if size > MAX_PROP_BYTES:
-        raise DomainValidationError(
-            f"node props {size} bytes exceed {MAX_PROP_BYTES} limit")
+        raise DomainValidationError(f"node props {size} bytes exceed {MAX_PROP_BYTES} limit")
     for key, value in props.items():
         lowered = str(key).lower()
         if lowered in _FORBIDDEN_KEYS:
@@ -139,8 +158,7 @@ def _scan_value(value: Any) -> None:
         lowered = value.lower()
         for snippet in _FORBIDDEN_SNIPPETS:
             if snippet in lowered:
-                raise DomainValidationError(
-                    f"executable content rejected ({snippet!r})")
+                raise DomainValidationError(f"executable content rejected ({snippet!r})")
     elif isinstance(value, dict):
         for key, item in value.items():
             lowered = str(key).lower()
@@ -157,15 +175,14 @@ def validate_affordances(node_type: NodeType, affordances: list[str]) -> list[st
     allowed = _ALLOWED_AFFORDANCES[node_type]
     unknown = [name for name in affordances if name not in allowed]
     if unknown:
-        raise DomainValidationError(
-            f"affordances {unknown} not allowed for {node_type.value}")
+        raise DomainValidationError(f"affordances {unknown} not allowed for {node_type.value}")
     return list(affordances)
 
 
 class WorkspaceManager:
     """CRUD + layout + validated agent updates over persisted workspaces."""
 
-    def __init__(self, repository: Any, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, repository: Any, bus: EventBus | None = None) -> None:
         self._repo = repository
         self._bus = bus
 
@@ -191,11 +208,15 @@ class WorkspaceManager:
             return [w for w in all_workspaces if w.project_scope == project_scope]
         return all_workspaces
 
-    def add_node(self, workspace_id: str, node_type: NodeType,
-                 props: Optional[dict] = None,
-                 data_ref: Optional[DataRef] = None,
-                 salience: float = 0.5,
-                 affordances: Optional[list[str]] = None) -> WorkspaceNode:
+    def add_node(
+        self,
+        workspace_id: str,
+        node_type: NodeType,
+        props: dict | None = None,
+        data_ref: DataRef | None = None,
+        salience: float = 0.5,
+        affordances: list[str] | None = None,
+    ) -> WorkspaceNode:
         """Validate and append a node (layout defaults assigned)."""
         workspace = self.get(workspace_id)
         node = WorkspaceNode(
@@ -212,9 +233,13 @@ class WorkspaceManager:
         self._emit(workspace_id, {"node_id": node.id, "type": node_type.value})
         return node
 
-    def update_node(self, workspace_id: str, node_id: str,
-                    props: Optional[dict] = None,
-                    state: Optional[NodeState] = None) -> WorkspaceNode:
+    def update_node(
+        self,
+        workspace_id: str,
+        node_id: str,
+        props: dict | None = None,
+        state: NodeState | None = None,
+    ) -> WorkspaceNode:
         """Apply validated changes (FROZEN nodes refuse updates)."""
         workspace = self.get(workspace_id)
         node = self._need(workspace, node_id)
@@ -244,11 +269,11 @@ class WorkspaceManager:
         self._emit(workspace_id, {"node_id": node_id, "removed": True})
         return True
 
-    def move_node(self, workspace_id: str, node_id: str,
-                  x: int, y: int, width: int = 0, height: int = 0) -> NodeLayout:
+    def move_node(
+        self, workspace_id: str, node_id: str, x: int, y: int, width: int = 0, height: int = 0
+    ) -> NodeLayout:
         """Reposition (and optionally resize) a node."""
-        for label, value in (("x", x), ("y", y), ("width", width),
-                             ("height", height)):
+        for label, value in (("x", x), ("y", y), ("width", width), ("height", height)):
             if not isinstance(value, int) or isinstance(value, bool):
                 raise DomainValidationError(f"layout {label} must be an integer")
             if value < 0:
@@ -266,8 +291,7 @@ class WorkspaceManager:
         self._repo.update(workspace)
         return layout
 
-    def group_nodes(self, workspace_id: str, group: str,
-                    node_ids: list[str]) -> None:
+    def group_nodes(self, workspace_id: str, group: str, node_ids: list[str]) -> None:
         """Assign nodes to a named group."""
         workspace = self.get(workspace_id)
         for node_id in node_ids:
@@ -278,8 +302,7 @@ class WorkspaceManager:
         workspace.touch()
         self._repo.update(workspace)
 
-    def set_collapsed(self, workspace_id: str, node_id: str,
-                      collapsed: bool) -> WorkspaceNode:
+    def set_collapsed(self, workspace_id: str, node_id: str, collapsed: bool) -> WorkspaceNode:
         """Collapse/expand a node (containers hide children when collapsed)."""
         node = self.get(workspace_id).nodes.get(node_id)
         if node is None:
@@ -287,8 +310,8 @@ class WorkspaceManager:
 
             raise ResourceNotFoundError("WorkspaceNode", node_id)
         return self.update_node(
-            workspace_id, node_id,
-            state=NodeState.COLLAPSED if collapsed else NodeState.LIVE)
+            workspace_id, node_id, state=NodeState.COLLAPSED if collapsed else NodeState.LIVE
+        )
 
     def focus(self, workspace_id: str, node_id: str) -> None:
         """Focus a node (must exist)."""
@@ -305,10 +328,14 @@ class WorkspaceManager:
         whose state is COLLAPSED.
         """
         workspace = self.get(workspace_id)
-        collapsed_ids = {nid for nid, node in workspace.nodes.items()
-                         if node.state is NodeState.COLLAPSED}
-        return [node for nid, node in workspace.nodes.items()
-                if workspace.layout.get(nid, NodeLayout()).group not in collapsed_ids]
+        collapsed_ids = {
+            nid for nid, node in workspace.nodes.items() if node.state is NodeState.COLLAPSED
+        }
+        return [
+            node
+            for nid, node in workspace.nodes.items()
+            if workspace.layout.get(nid, NodeLayout()).group not in collapsed_ids
+        ]
 
     def apply_update(self, workspace_id: str, update: dict) -> WorkspaceNode:
         """Agent/model-shaped update through the same validation gate."""
@@ -317,17 +344,14 @@ class WorkspaceManager:
         try:
             node_type = NodeType(str(update.get("type", "")))
         except ValueError:
-            raise DomainValidationError(
-                f"unknown node type {update.get('type')!r}") from None
+            raise DomainValidationError(f"unknown node type {update.get('type')!r}") from None
         ref = update.get("data_ref")
         data_ref = None
         if ref is not None:
             if not isinstance(ref, dict):
                 raise DomainValidationError("data_ref must be a mapping")
-            data_ref = DataRef(kind=str(ref.get("kind", "")),
-                               ref_id=str(ref.get("ref_id", "")))
-            validate_props(node_type, {"kind": data_ref.kind,
-                                       "ref_id": data_ref.ref_id})
+            data_ref = DataRef(kind=str(ref.get("kind", "")), ref_id=str(ref.get("ref_id", "")))
+            validate_props(node_type, {"kind": data_ref.kind, "ref_id": data_ref.ref_id})
         try:
             salience = float(update.get("salience", 0.5))
         except (TypeError, ValueError):
@@ -340,7 +364,8 @@ class WorkspaceManager:
         if any(not isinstance(name, str) for name in raw_affordances):
             raise DomainValidationError("affordances must be strings")
         return self.add_node(
-            workspace_id, node_type,
+            workspace_id,
+            node_type,
             props=update.get("props", {}),
             data_ref=data_ref,
             salience=salience,
@@ -358,9 +383,13 @@ class WorkspaceManager:
 
     def _emit(self, workspace_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(Event(
-                event_type=EventType.WORKSPACE_UPDATED, task_id="",
-                payload={"workspace_id": workspace_id, **payload}))
+            self._bus.publish(
+                Event(
+                    event_type=EventType.WORKSPACE_UPDATED,
+                    task_id="",
+                    payload={"workspace_id": workspace_id, **payload},
+                )
+            )
 
 
 class SqliteWorkspaceRepository:
@@ -375,7 +404,7 @@ class SqliteWorkspaceRepository:
         """Persist a workspace."""
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Workspace]:
+    def get(self, item_id: str) -> Workspace | None:
         """Fetch by id (None when unknown)."""
         return self._t.get(item_id)
 

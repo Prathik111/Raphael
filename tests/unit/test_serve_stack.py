@@ -11,8 +11,7 @@ from ai_ecosystem.interface.serve import build_stack
 @pytest.fixture(autouse=True)
 def _no_ambient_model(monkeypatch):
     """Tests must never reach a real model from ambient environment."""
-    for var in ("AI_ECO_MODEL_ENDPOINT", "AI_ECO_MODEL_API_KEY",
-                "AI_ECO_MODEL_NAME"):
+    for var in ("AI_ECO_MODEL_ENDPOINT", "AI_ECO_MODEL_API_KEY", "AI_ECO_MODEL_NAME"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -28,11 +27,13 @@ def test_stack_serves_on_configured_loopback(tmp_path):
         import urllib.request
 
         req = urllib.request.Request(
-            server.url + "/health",
-            headers={"Origin": "http://tauri.localhost"})
+            server.url + "/health", headers={"Origin": "http://tauri.localhost"}
+        )
         with urllib.request.urlopen(req) as response:
-            assert dict(response.headers).get(
-                "Access-Control-Allow-Origin") == "http://tauri.localhost"
+            assert (
+                dict(response.headers).get("Access-Control-Allow-Origin")
+                == "http://tauri.localhost"
+            )
     finally:
         server.stop()
         stack.runtime.shutdown()
@@ -146,9 +147,12 @@ def test_cancel_stops_dispatch_and_marks_task(tmp_path, monkeypatch):
         raise ModelUnavailableError("slow model down")
 
     monkeypatch.setattr(
-        serve_module.HttpChatModelProvider, "from_secrets",
-        classmethod(lambda cls, secrets, **kw: MockModelProvider(
-            "slow-mock", handler=slow_provider)))
+        serve_module.HttpChatModelProvider,
+        "from_secrets",
+        classmethod(
+            lambda cls, secrets, **kw: MockModelProvider("slow-mock", handler=slow_provider)
+        ),
+    )
     config = AppConfig(db_path=str(tmp_path / "serve.db"), api_port=0)
     stack = build_stack(config, workspace=str(tmp_path / "ws"))
     assert stack.model_configured is True
@@ -191,11 +195,15 @@ def test_queue_overflow_rejected_with_429(tmp_path, monkeypatch):
         raise ModelUnavailableError("slow model down")
 
     monkeypatch.setattr(
-        serve_module.HttpChatModelProvider, "from_secrets",
-        classmethod(lambda cls, secrets, **kw: MockModelProvider(
-            "slow-mock", handler=slow_provider)))
-    config = AppConfig(db_path=str(tmp_path / "queue.db"), api_port=0,
-                       max_workers=1, max_queued_tasks=1)
+        serve_module.HttpChatModelProvider,
+        "from_secrets",
+        classmethod(
+            lambda cls, secrets, **kw: MockModelProvider("slow-mock", handler=slow_provider)
+        ),
+    )
+    config = AppConfig(
+        db_path=str(tmp_path / "queue.db"), api_port=0, max_workers=1, max_queued_tasks=1
+    )
     stack = build_stack(config, workspace=str(tmp_path / "ws"))
     server = stack.server.start()
     try:
@@ -231,8 +239,7 @@ def test_restart_settles_stranded_tasks(tmp_path):
 
         assert stack.api.get_task(stranded.id)["state"] == "FAILED"
         assert stack.api.get_task(done.id)["state"] == "CANCELLED"
-        failures = [e for e in stack.api.get_task_events(stranded.id)
-                    if e["type"] == "TaskFailed"]
+        failures = [e for e in stack.api.get_task_events(stranded.id) if e["type"] == "TaskFailed"]
         assert failures and "interrupted" in str(failures[-1]["payload"])
     finally:
         stack.runtime.shutdown()

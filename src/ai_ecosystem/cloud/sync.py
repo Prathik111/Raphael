@@ -15,7 +15,8 @@ import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
@@ -96,8 +97,7 @@ class SyncReport(BaseModel):
 
 def canonical_hash(payload: dict[str, Any]) -> str:
     """Deterministic content hash (sorted keys, compact separators)."""
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                           default=str)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -106,8 +106,9 @@ def contains_secrets(payload: Any) -> bool:
     from ai_ecosystem.core.secrets import looks_like_secret_value
 
     if isinstance(payload, dict):
-        return any(looks_secret(str(key)) or contains_secrets(value)
-                   for key, value in payload.items())
+        return any(
+            looks_secret(str(key)) or contains_secrets(value) for key, value in payload.items()
+        )
     if isinstance(payload, list):
         return any(contains_secrets(item) for item in payload)
     return looks_like_secret_value(payload)
@@ -121,7 +122,7 @@ _DEFAULT_CLASS: dict[str, SyncClass] = {
     "model": SyncClass.SYNC_ALLOWED,
     "job": SyncClass.SYNC_ALLOWED,
     "memory": SyncClass.SYNC_RESTRICTED,  # only cloud_eligible, content-free
-    "event": SyncClass.SYNC_ALLOWED,      # counts/metadata, never payloads
+    "event": SyncClass.SYNC_ALLOWED,  # counts/metadata, never payloads
 }
 
 
@@ -130,8 +131,8 @@ class SyncPolicy:
 
     def __init__(
         self,
-        defaults: Optional[dict[str, SyncClass]] = None,
-        overrides: Optional[dict[str, SyncClass]] = None,
+        defaults: dict[str, SyncClass] | None = None,
+        overrides: dict[str, SyncClass] | None = None,
         allow_restricted_download: bool = False,
     ) -> None:
         self._defaults = dict(defaults or _DEFAULT_CLASS)
@@ -171,7 +172,7 @@ class SyncTransport(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def pull(self, object_id: str) -> Optional[SyncObject]:
+    def pull(self, object_id: str) -> SyncObject | None:
         """Fetch one remote object (None when absent)."""
         raise NotImplementedError
 
@@ -193,8 +194,7 @@ class MockSyncTransport(SyncTransport):
     def list_versions(self) -> dict[str, tuple[str, str]]:
         """Remote version index (empty when unreachable -> raises)."""
         self._check()
-        return {oid: (obj.version, obj.content_hash)
-                for oid, obj in self.remote.items()}
+        return {oid: (obj.version, obj.content_hash) for oid, obj in self.remote.items()}
 
     def push(self, obj: SyncObject) -> str:
         """Store; optionally die after N pushes (interruption drills)."""
@@ -205,7 +205,7 @@ class MockSyncTransport(SyncTransport):
         self.remote[obj.object_id] = obj.model_copy(deep=True)
         return obj.version
 
-    def pull(self, object_id: str) -> Optional[SyncObject]:
+    def pull(self, object_id: str) -> SyncObject | None:
         """Fetch a copy (None when absent)."""
         self._check()
         self.pulls += 1
@@ -218,9 +218,9 @@ class SyncManager:
 
     def __init__(
         self,
-        policy: Optional[SyncPolicy] = None,
-        transport: Optional[SyncTransport] = None,
-        bus: Optional[EventBus] = None,
+        policy: SyncPolicy | None = None,
+        transport: SyncTransport | None = None,
+        bus: EventBus | None = None,
         max_retries: int = 3,
     ) -> None:
         self._policy = policy or SyncPolicy()
@@ -238,11 +238,18 @@ class SyncManager:
 
     def manifest(self, objects: list[SyncObject]) -> list[ManifestEntry]:
         """Build the version manifest for local objects."""
-        return [ManifestEntry(
-            object_id=obj.object_id, object_type=obj.object_type,
-            version=obj.version, content_hash=obj.content_hash,
-            scope=obj.scope, sync_class=self._policy.classify(obj),
-            timestamp=obj.updated_at) for obj in objects]
+        return [
+            ManifestEntry(
+                object_id=obj.object_id,
+                object_type=obj.object_type,
+                version=obj.version,
+                content_hash=obj.content_hash,
+                scope=obj.scope,
+                sync_class=self._policy.classify(obj),
+                timestamp=obj.updated_at,
+            )
+            for obj in objects
+        ]
 
     def sync(self, objects: list[SyncObject]) -> SyncReport:
         """One bounded run: upload, download, conflicts -- never overwrite."""
@@ -266,16 +273,18 @@ class SyncManager:
                 raise
             except (ConnectionError, OSError) as exc:
                 if attempts > self._max_retries:
-                    return SyncReport(state=SyncState.FAILED, attempts=attempts,
-                                      error=f"retry budget exhausted: {exc}")
+                    return SyncReport(
+                        state=SyncState.FAILED,
+                        attempts=attempts,
+                        error=f"retry budget exhausted: {exc}",
+                    )
                 continue
             if report.state is SyncState.FAILED and attempts <= self._max_retries:
                 continue
             report.attempts = attempts
             return report
 
-    def resolve(self, object_id: str, keep: str,
-                objects: list[SyncObject]) -> SyncResult:
+    def resolve(self, object_id: str, keep: str, objects: list[SyncObject]) -> SyncResult:
         """Resolve a conflict explicitly (keep 'local' or 'remote').
 
         Explicit resolution still passes policy: forbidden objects can
@@ -287,36 +296,60 @@ class SyncManager:
         if local is None:
             raise DomainValidationError(f"unknown object {object_id!r}")
         try:
-            remote_versions = self._transport.list_versions()
+            self._transport.list_versions()
         except (ConnectionError, OSError) as exc:
-            return SyncResult(object_id=object_id, object_type=local.object_type,
-                              state=SyncState.FAILED, detail=str(exc))
+            return SyncResult(
+                object_id=object_id,
+                object_type=local.object_type,
+                state=SyncState.FAILED,
+                detail=str(exc),
+            )
         if keep == "local":
             if not self._policy.can_upload(local):
                 return SyncResult(
-                    object_id=object_id, object_type=local.object_type,
+                    object_id=object_id,
+                    object_type=local.object_type,
                     state=SyncState.SKIPPED,
-                    detail=f"policy {self._policy.classify(local).value}: "
-                           "upload not permitted")
+                    detail=f"policy {self._policy.classify(local).value}: upload not permitted",
+                )
             try:
                 version = self._transport.push(local)
             except (ConnectionError, OSError) as exc:
-                return SyncResult(object_id=object_id, object_type=local.object_type,
-                                  state=SyncState.FAILED, detail=str(exc))
+                return SyncResult(
+                    object_id=object_id,
+                    object_type=local.object_type,
+                    state=SyncState.FAILED,
+                    detail=str(exc),
+                )
             self._acknowledged[object_id] = version
-            return SyncResult(object_id=object_id, object_type=local.object_type,
-                              state=SyncState.UPLOADED, detail="conflict kept local")
+            return SyncResult(
+                object_id=object_id,
+                object_type=local.object_type,
+                state=SyncState.UPLOADED,
+                detail="conflict kept local",
+            )
         remote = self._transport.pull(object_id)
         if remote is None:
-            return SyncResult(object_id=object_id, object_type=local.object_type,
-                              state=SyncState.FAILED, detail="remote object vanished")
+            return SyncResult(
+                object_id=object_id,
+                object_type=local.object_type,
+                state=SyncState.FAILED,
+                detail="remote object vanished",
+            )
         if not self._policy.can_download(self._policy.classify(remote)):
-            return SyncResult(object_id=object_id, object_type=local.object_type,
-                              state=SyncState.SKIPPED,
-                              detail="download not permitted by policy")
+            return SyncResult(
+                object_id=object_id,
+                object_type=local.object_type,
+                state=SyncState.SKIPPED,
+                detail="download not permitted by policy",
+            )
         self._acknowledged[object_id] = remote.version
-        return SyncResult(object_id=object_id, object_type=local.object_type,
-                          state=SyncState.DOWNLOADED, detail="conflict kept remote")
+        return SyncResult(
+            object_id=object_id,
+            object_type=local.object_type,
+            state=SyncState.DOWNLOADED,
+            detail="conflict kept remote",
+        )
 
     # -- internals ----------------------------------------------------------
 
@@ -331,25 +364,33 @@ class SyncManager:
             results.append(self._sync_one(obj, remote_versions))
         results.extend(self._pull_new(objects, remote_versions))
         failed = [r for r in results if r.state is SyncState.FAILED]
-        state = SyncState.FAILED if failed and not [
-            r for r in results if r.state in (
-                SyncState.UPLOADED, SyncState.DOWNLOADED, SyncState.IN_SYNC)] \
+        state = (
+            SyncState.FAILED
+            if failed
+            and not [
+                r
+                for r in results
+                if r.state in (SyncState.UPLOADED, SyncState.DOWNLOADED, SyncState.IN_SYNC)
+            ]
             else SyncState.COMPLETED
+        )
         report = SyncReport(state=state, results=results)
-        self._emit(EventType.SYNC_COMPLETED, "",
-                   {"state": state.value,
-                    "up": sum(1 for r in results if r.state is SyncState.UPLOADED),
-                    "down": sum(1 for r in results if r.state is SyncState.DOWNLOADED),
-                    "conflicts": sum(1 for r in results
-                                     if r.state is SyncState.CONFLICT)})
+        self._emit(
+            EventType.SYNC_COMPLETED,
+            "",
+            {
+                "state": state.value,
+                "up": sum(1 for r in results if r.state is SyncState.UPLOADED),
+                "down": sum(1 for r in results if r.state is SyncState.DOWNLOADED),
+                "conflicts": sum(1 for r in results if r.state is SyncState.CONFLICT),
+            },
+        )
         return report
 
-    def _sync_one(self, obj: SyncObject,
-                  remote_versions: dict[str, tuple[str, str]]) -> SyncResult:
+    def _sync_one(self, obj: SyncObject, remote_versions: dict[str, tuple[str, str]]) -> SyncResult:
         sync_class = self._policy.classify(obj)
         if sync_class in (SyncClass.LOCAL_ONLY, SyncClass.SYNC_FORBIDDEN):
-            return self._record(obj, SyncState.SKIPPED,
-                                f"policy {sync_class.value}")
+            return self._record(obj, SyncState.SKIPPED, f"policy {sync_class.value}")
         if not self._policy.can_upload(obj):
             return self._record(obj, SyncState.SKIPPED, "upload not permitted")
         remote = remote_versions.get(obj.object_id)
@@ -363,8 +404,9 @@ class SyncManager:
             # Remote matches what we last pushed: local moved on -> upload.
             return self._push(obj, "local newer")
         # Both sides moved since the last handshake: explicit conflict.
-        return self._record(obj, SyncState.CONFLICT,
-                            f"local v{obj.version} vs remote v{remote_version}")
+        return self._record(
+            obj, SyncState.CONFLICT, f"local v{obj.version} vs remote v{remote_version}"
+        )
 
     def _push(self, obj: SyncObject, detail: str) -> SyncResult:
         try:
@@ -374,8 +416,9 @@ class SyncManager:
         self._acknowledged[obj.object_id] = version
         return self._record(obj, SyncState.UPLOADED, detail)
 
-    def _pull_new(self, objects: list[SyncObject],
-                  remote_versions: dict[str, tuple[str, str]]) -> list[SyncResult]:
+    def _pull_new(
+        self, objects: list[SyncObject], remote_versions: dict[str, tuple[str, str]]
+    ) -> list[SyncResult]:
         local_ids = {obj.object_id for obj in objects}
         results = []
         for object_id, (version, _hash) in sorted(remote_versions.items()):
@@ -386,30 +429,47 @@ class SyncManager:
                 continue
             sync_class = self._policy.classify(remote)
             if not self._policy.can_download(sync_class):
-                results.append(SyncResult(
-                    object_id=object_id, object_type=remote.object_type,
-                    state=SyncState.SKIPPED, detail="download not permitted"))
+                results.append(
+                    SyncResult(
+                        object_id=object_id,
+                        object_type=remote.object_type,
+                        state=SyncState.SKIPPED,
+                        detail="download not permitted",
+                    )
+                )
                 continue
             self._acknowledged[object_id] = version
-            results.append(SyncResult(
-                object_id=object_id, object_type=remote.object_type,
-                state=SyncState.DOWNLOADED, detail="new remote object"))
+            results.append(
+                SyncResult(
+                    object_id=object_id,
+                    object_type=remote.object_type,
+                    state=SyncState.DOWNLOADED,
+                    detail="new remote object",
+                )
+            )
         for result in results:
             self._emit_for(result)
         return results
 
     def _failed(self, objects: list[SyncObject], error: str) -> SyncReport:
-        results = [SyncResult(object_id=o.object_id, object_type=o.object_type,
-                              state=SyncState.FAILED, detail=error)
-                   for o in objects]
+        results = [
+            SyncResult(
+                object_id=o.object_id,
+                object_type=o.object_type,
+                state=SyncState.FAILED,
+                detail=error,
+            )
+            for o in objects
+        ]
         for result in results:
             self._emit_for(result)
         self._emit(EventType.SYNC_FAILED, "", {"error": error})
         return SyncReport(state=SyncState.FAILED, results=results, error=error)
 
     def _record(self, obj: SyncObject, state: SyncState, detail: str) -> SyncResult:
-        result = SyncResult(object_id=obj.object_id, object_type=obj.object_type,
-                            state=state, detail=detail)
+        result = SyncResult(
+            object_id=obj.object_id, object_type=obj.object_type, state=state, detail=detail
+        )
         self._emit_for(result)
         return result
 
@@ -422,25 +482,34 @@ class SyncManager:
             SyncState.FAILED: EventType.SYNC_FAILED,
             SyncState.IN_SYNC: EventType.SYNC_SKIPPED,
         }
-        self._emit(mapping.get(result.state, EventType.SYNC_SKIPPED),
-                   "", {"object_id": result.object_id,
-                        "object_type": result.object_type,
-                        "detail": result.detail})
+        self._emit(
+            mapping.get(result.state, EventType.SYNC_SKIPPED),
+            "",
+            {
+                "object_id": result.object_id,
+                "object_type": result.object_type,
+                "detail": result.detail,
+            },
+        )
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload))
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))
 
 
-def make_sync_object(object_type: str, object_id: str, payload: dict,
-                     scope: str = "", version: str = "") -> SyncObject:
+def make_sync_object(
+    object_type: str, object_id: str, payload: dict, scope: str = "", version: str = ""
+) -> SyncObject:
     """Build a versioned, hashed envelope for metadata payloads."""
     content_hash = canonical_hash(payload)
     return SyncObject(
-        object_id=object_id, object_type=object_type,
-        version=version or content_hash[:12], content_hash=content_hash,
-        scope=scope, payload=dict(payload))
+        object_id=object_id,
+        object_type=object_type,
+        version=version or content_hash[:12],
+        content_hash=content_hash,
+        scope=scope,
+        payload=dict(payload),
+    )
 
 
 SyncAdapter = Callable[[], list[SyncObject]]

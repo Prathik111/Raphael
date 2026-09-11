@@ -45,8 +45,7 @@ def test_config_has_no_secrets():
 
 def test_circuit_closed_to_open_to_half_open():
     clock = [0.0]
-    breaker = CircuitBreaker(failure_threshold=2, reset_timeout_s=10.0,
-                             clock=lambda: clock[0])
+    breaker = CircuitBreaker(failure_threshold=2, reset_timeout_s=10.0, clock=lambda: clock[0])
     assert breaker.state is BreakerState.CLOSED
     with pytest.raises(RuntimeError):
         breaker.call(_boom)
@@ -68,8 +67,7 @@ def _boom():
 
 def test_circuit_half_open_failure_reopens():
     clock = [0.0]
-    breaker = CircuitBreaker(failure_threshold=1, reset_timeout_s=5.0,
-                             clock=lambda: clock[0])
+    breaker = CircuitBreaker(failure_threshold=1, reset_timeout_s=5.0, clock=lambda: clock[0])
     with pytest.raises(RuntimeError):
         breaker.call(_boom)
     clock[0] += 6.0
@@ -104,8 +102,7 @@ def test_startup_recovery(tmp_path):
     agents.register(AgentDefinition(id="a1", name="a1", allowed_tools=[]))
     manager = AgentManager(agents, runtime, ToolRegistry())
     manager.spawn("a1")
-    record = manager.submit("a1", "half", Plan(
-        goal="g", steps=[], final_verification="v"))
+    record = manager.submit("a1", "half", Plan(goal="g", steps=[], final_verification="v"))
     stored = manager.task_repository.get(record.id)
     stored.status = AgentStatus.RUNNING
     manager.task_repository.update(stored)
@@ -120,8 +117,7 @@ def test_startup_recovery(tmp_path):
     reopened_db.migrate()
     reopened = AgentRuntime(path)
     try:
-        report = startup_recovery(
-            reopened_db, reopened, SqliteScheduledJobRepository(reopened_db))
+        report = startup_recovery(reopened_db, reopened, SqliteScheduledJobRepository(reopened_db))
         assert report["agent_tasks_reset"] == 1
         assert report["scheduler_jobs_reset"] == 1
         assert report["audit_ok"] is True
@@ -165,31 +161,50 @@ def test_migration_safety(tmp_path):
 
 def test_no_secrets_in_source_tree():
     root = Path(__file__).resolve().parents[2]
-    pattern = re.compile(
-        r"(?i)(api_key|password|passwd|secret)\s*[:=]\s*[\"']([^\"']{8,})[\"']")
-    allowed_markers = ("mock", "test", "fake", "example", "placeholder",
-                       "xxx", "supersecret", "redact", "***", "x", "k")
+    pattern = re.compile(r"(?i)(api_key|password|passwd|secret)\s*[:=]\s*[\"']([^\"']{8,})[\"']")
+    allowed_markers = (
+        "mock",
+        "test",
+        "fake",
+        "example",
+        "placeholder",
+        "xxx",
+        "supersecret",
+        "redact",
+        "***",
+        "x",
+        "k",
+    )
     hits = []
-    for path in list(root.rglob("*.py")) + list((root / "desktop").rglob("*.ts")) \
-            + list((root / "desktop").rglob("*.tsx")):
+    for path in (
+        list(root.rglob("*.py"))
+        + list((root / "desktop").rglob("*.ts"))
+        + list((root / "desktop").rglob("*.tsx"))
+    ):
         if ".venv" in path.parts or "node_modules" in path.parts:
             continue
         # Skip test files - they contain test fixtures with hardcoded values
         if "tests" in path.parts:
             continue
         for lineno, line in enumerate(
-                path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
             match = pattern.search(line)
-            if match and not any(marker in match.group(2).lower()
-                                 for marker in allowed_markers):
+            if match and not any(marker in match.group(2).lower() for marker in allowed_markers):
                 hits.append(f"{path.name}:{lineno}")
     assert hits == [], hits
 
 
 def test_no_heavy_undeclared_dependencies():
     root = Path(__file__).resolve().parents[2] / "src"
-    forbidden = ("import requests", "import boto3", "import torch",
-                 "import tensorflow", "import openai", "import anthropic")
+    forbidden = (
+        "import requests",
+        "import boto3",
+        "import torch",
+        "import tensorflow",
+        "import openai",
+        "import anthropic",
+    )
     hits = []
     for path in root.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
@@ -204,16 +219,34 @@ def test_resource_safety_guards():
 
     # Infinite DAGs cannot validate (cycles rejected).
 
-    cyclic = Plan(goal="g", steps=[
-        PlanStep(id="a", description="a", dependencies=["b"], tools=["t"],
-                 verification="v", completion_criteria="c"),
-        PlanStep(id="b", description="b", dependencies=["a"], tools=["t"],
-                 verification="v", completion_criteria="c")],
-        final_verification="v")
+    cyclic = Plan(
+        goal="g",
+        steps=[
+            PlanStep(
+                id="a",
+                description="a",
+                dependencies=["b"],
+                tools=["t"],
+                verification="v",
+                completion_criteria="c",
+            ),
+            PlanStep(
+                id="b",
+                description="b",
+                dependencies=["a"],
+                tools=["t"],
+                verification="v",
+                completion_criteria="c",
+            ),
+        ],
+        final_verification="v",
+    )
     with pytest.raises(PlanValidationError):
         PlanValidator({"t"}).validate(cyclic)
     # Infinite retries cannot be configured (bounded by construction).
-    assert RetryPolicy(max_attempts=3).should_retry(Classification(
-        FailureClass.TIMEOUT, "t", "s"), 99) is False
+    assert (
+        RetryPolicy(max_attempts=3).should_retry(Classification(FailureClass.TIMEOUT, "t", "s"), 99)
+        is False
+    )
     # Infinite communication cannot happen (hop + inbox caps).
     assert MessageBus(max_hops=2, max_inbox=2)._max_hops == 2

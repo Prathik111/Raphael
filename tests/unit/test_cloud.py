@@ -6,7 +6,6 @@ import time
 import pytest
 
 from ai_ecosystem.cloud import (
-    CloudAuthError,
     CloudStatus,
     CloudUnavailableError,
     ComputeJob,
@@ -15,11 +14,8 @@ from ai_ecosystem.cloud import (
     OCIModelProvider,
     OCIProvider,
     SqliteComputeJobRepository,
-    redact_event,
 )
 from ai_ecosystem.core.errors import DomainValidationError, ModelUnavailableError
-from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models.enums import EventType
 from ai_ecosystem.core.persistence import Database
 from ai_ecosystem.core.secrets import DictSecretsProvider, redact
 from ai_ecosystem.intelligence import (
@@ -36,7 +32,8 @@ from ai_ecosystem.intelligence import (
 def _oci(failures=0, secrets=None, **kwargs):
     return OCIProvider(
         MockOCITransport(failures=failures, **kwargs),
-        DictSecretsProvider(secrets or {"OCI_TENANCY": "ocid1.tenancy.mock"}))
+        DictSecretsProvider(secrets or {"OCI_TENANCY": "ocid1.tenancy.mock"}),
+    )
 
 
 def test_1_provider_registration():
@@ -152,18 +149,20 @@ def test_12_cancellation(tmp_path):
 def test_13_provider_fallback():
     router = ModelRouter()
     oci_models = OCIModelProvider(
-        "oci-llm", _oci(failures=99), "oci-mock",
-        capabilities=ModelCapabilities(
-            structured_output=True, context_length=128000))
+        "oci-llm",
+        _oci(failures=99),
+        "oci-mock",
+        capabilities=ModelCapabilities(structured_output=True, context_length=128000),
+    )
     # Connect the mock so routing sees it; calls still fail -> fallback.
     from ai_ecosystem.cloud.providers import CloudStatus as CS
 
     oci_models._oci._status = CS.CONNECTED
-    router.register(oci_models, ProviderProfile(provider_id="oci-llm",
-                                                cost_per_1k=0.0))
+    router.register(oci_models, ProviderProfile(provider_id="oci-llm", cost_per_1k=0.0))
     router.register(
         MockModelProvider("local", handler=lambda req: ModelResponse(text="local")),
-        ProviderProfile(provider_id="local", local=True, cost_per_1k=1.0))
+        ProviderProfile(provider_id="local", local=True, cost_per_1k=1.0),
+    )
     response = router.complete(RoutingRequirements(), ModelRequest(prompt="hi"))
     assert response.text == "local"  # OCI failed over deterministically
 
@@ -173,8 +172,7 @@ def test_14_credential_redaction(caplog):
     provider = _oci(secrets=secrets)
     described = provider.describe_redacted()
     assert "SUPERSECRET" not in str(described)
-    assert redact({"api_key": "abc", "region": "here"}) == {"api_key": "***",
-                                                           "region": "here"}
+    assert redact({"api_key": "abc", "region": "here"}) == {"api_key": "***", "region": "here"}
     with caplog.at_level(logging.INFO):
         logging.getLogger("test").info("status: %s", described)
     assert "SUPERSECRET" not in caplog.text
@@ -183,8 +181,11 @@ def test_14_credential_redaction(caplog):
 def test_15_cloud_cannot_bypass_local_policy():
     import ai_ecosystem.cloud.providers as module
 
-    imports = [line.strip() for line in open(module.__file__).read().splitlines()
-               if line.strip().startswith(("import ", "from "))]
+    imports = [
+        line.strip()
+        for line in open(module.__file__).read().splitlines()
+        if line.strip().startswith(("import ", "from "))
+    ]
     assert not any("ToolRunner" in line for line in imports), imports
     assert not any("AuthorizationManager" in line for line in imports), imports
     assert not any("PermissionEngine" in line for line in imports), imports
@@ -201,9 +202,9 @@ def test_16_runtime_survives_cloud_outage():
     router = ModelRouter()
     router.register(
         MockModelProvider("local", handler=lambda req: ModelResponse(text="fine")),
-        ProviderProfile(provider_id="local", local=True))
-    assert router.complete(RoutingRequirements(),
-                           ModelRequest(prompt="hi")).text == "fine"
+        ProviderProfile(provider_id="local", local=True),
+    )
+    assert router.complete(RoutingRequirements(), ModelRequest(prompt="hi")).text == "fine"
 
 
 def test_17_persistence_and_18_restart(tmp_path):

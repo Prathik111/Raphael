@@ -7,7 +7,6 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import (
     ModelMalformedError,
@@ -69,7 +68,7 @@ class HttpChatModelProvider(ModelProvider):
     def __init__(
         self,
         provider_id: str = "http-chat",
-        capabilities: Optional[ModelCapabilities] = None,
+        capabilities: ModelCapabilities | None = None,
         endpoint: str = "",
         api_key: str = "",
         model: str = "",
@@ -77,7 +76,8 @@ class HttpChatModelProvider(ModelProvider):
     ) -> None:
         super().__init__(
             provider_id,
-            capabilities or ModelCapabilities(
+            capabilities
+            or ModelCapabilities(
                 tool_calling=True,
                 structured_output=True,
                 reasoning=True,
@@ -97,7 +97,7 @@ class HttpChatModelProvider(ModelProvider):
         secrets: SecretsProvider,
         provider_id: str = "http-chat",
         timeout_s: float = DEFAULT_TIMEOUT_S,
-    ) -> Optional["HttpChatModelProvider"]:
+    ) -> HttpChatModelProvider | None:
         endpoint = secrets.get(ENDPOINT_ENV)
         if not endpoint:
             return None
@@ -162,7 +162,9 @@ class HttpChatModelProvider(ModelProvider):
         try:
             decoded = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
-            raise ModelMalformedError(f"provider {self.provider_id!r} returned invalid JSON") from exc
+            raise ModelMalformedError(
+                f"provider {self.provider_id!r} returned invalid JSON"
+            ) from exc
         return _parse_response(decoded, self.provider_id, self._model)
 
 
@@ -223,11 +225,15 @@ def _parse_response(decoded: object, provider_id: str, default_model: str) -> Mo
     usage = decoded.get("usage") if isinstance(decoded.get("usage"), dict) else {}
     finish_reason = first.get("finish_reason") or ""
     if not text.strip() and not tool_calls:
-        raise ModelMalformedError(f"provider {provider_id!r} returned empty content and no tool calls")
+        raise ModelMalformedError(
+            f"provider {provider_id!r} returned empty content and no tool calls"
+        )
     return ModelResponse(
         text=text,
         tool_calls=tool_calls,
-        model=decoded.get("model", default_model) if isinstance(decoded.get("model"), str) else default_model,
+        model=decoded.get("model", default_model)
+        if isinstance(decoded.get("model"), str)
+        else default_model,
         input_tokens=int(usage.get("prompt_tokens", 0) or 0),
         output_tokens=int(usage.get("completion_tokens", 0) or 0),
         finish_reason=finish_reason,

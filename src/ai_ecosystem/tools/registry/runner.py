@@ -300,7 +300,9 @@ class ToolRunner:
         except (ToolError, DomainValidationError) as exc:
             return self._fail(call, EventType.TOOL_FAILED, str(exc), tool, permission)
         except Exception as exc:
-            return self._fail(call, EventType.TOOL_FAILED, f"handler crashed: {exc}", tool, permission)
+            return self._fail(
+                call, EventType.TOOL_FAILED, f"handler crashed: {exc}", tool, permission
+            )
         return self._finish(call, tool, permission, result)
 
     def _run_sandboxed(
@@ -341,7 +343,9 @@ class ToolRunner:
         except (ToolError, DomainValidationError) as exc:
             return self._fail(call, EventType.TOOL_FAILED, str(exc), tool, permission)
         except Exception as exc:
-            return self._fail(call, EventType.TOOL_FAILED, f"sandbox crashed: {exc}", tool, permission)
+            return self._fail(
+                call, EventType.TOOL_FAILED, f"sandbox crashed: {exc}", tool, permission
+            )
         return self._finish(call, tool, permission, result, sandboxed=True)
 
     def _finish(

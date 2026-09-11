@@ -9,9 +9,9 @@ is no background recording, no audio storage, and a master switch.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
-from ai_ecosystem.core.errors.exceptions import AiEcosystemError, DomainValidationError
+from ai_ecosystem.core.errors.exceptions import AiEcosystemError
 from ai_ecosystem.interface.phone import PhoneClient
 
 
@@ -40,8 +40,7 @@ class TTSProvider(ABC):
 class MockSTT(STTProvider):
     """Scripted transcripts for tests (optionally failing)."""
 
-    def __init__(self, transcripts: Optional[dict[str, str]] = None,
-                 fail: bool = False) -> None:
+    def __init__(self, transcripts: dict[str, str] | None = None, fail: bool = False) -> None:
         self._transcripts = dict(transcripts or {})
         self._fail = fail
         self.calls: list[str] = []
@@ -106,9 +105,12 @@ class VoiceSession:
             reply = f"{len(status['tasks'])} tasks known."
             return {"reply": reply, "audio": self._tts.speak(reply)}
         if lowered.startswith("cancel "):
-            title = lowered[len("cancel "):].strip()
-            tasks = [t for t in self._phone.status(self._token)["tasks"]
-                     if title in t["title"].lower() and not t["completed"]]
+            title = lowered[len("cancel ") :].strip()
+            tasks = [
+                t
+                for t in self._phone.status(self._token)["tasks"]
+                if title in t["title"].lower() and not t["completed"]
+            ]
             if not tasks:
                 reply = "No matching open task."
                 return {"reply": reply, "audio": self._tts.speak(reply)}
@@ -117,8 +119,7 @@ class VoiceSession:
             return {"reply": reply, "audio": self._tts.speak(reply)}
         created = self._phone.submit_voice_goal(self._token, text.strip())
         reply = f"Task {created['task_id']} submitted."
-        return {"reply": reply, "audio": self._tts.speak(reply),
-                "task_id": created["task_id"]}
+        return {"reply": reply, "audio": self._tts.speak(reply), "task_id": created["task_id"]}
 
     def read_permission_requests(self, limit: int = 5) -> dict[str, Any]:
         """Speak back recent permission decisions (read-only)."""
@@ -131,5 +132,6 @@ class VoiceSession:
             reply = "; ".join(
                 f"{d['payload'].get('tool', 'a tool')} was "
                 f"{'allowed' if d['type'] == 'PermissionGranted' else 'denied'}"
-                for d in decisions)
+                for d in decisions
+            )
         return {"reply": reply, "audio": self._tts.speak(reply)}

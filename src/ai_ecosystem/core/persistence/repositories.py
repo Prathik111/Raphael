@@ -6,7 +6,7 @@ transactions, migrations, and crash recovery. No storage code here.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from ai_ecosystem.core.models.domain import (
     Agent,
@@ -20,13 +20,7 @@ from ai_ecosystem.core.models.domain import (
 )
 
 if TYPE_CHECKING:
-    from ai_ecosystem.agent.multi.messages import AgentMessage
-    from ai_ecosystem.learning.models import (
-        LearningProposal,
-        UsageEvent,
-        UsagePattern,
-    )
-    from ai_ecosystem.system.monitor.models import SystemSnapshot
+    pass
 
 T = TypeVar("T")
 
@@ -40,7 +34,7 @@ class Repository(ABC, Generic[T]):
         raise NotImplementedError
 
     @abstractmethod
-    def get(self, item_id: str) -> Optional[T]:
+    def get(self, item_id: str) -> T | None:
         """Return the item, or None when it does not exist."""
         raise NotImplementedError
 
@@ -81,7 +75,7 @@ class ExecutionContextRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def load(self, task_id: str) -> Optional[ExecutionContext]:
+    def load(self, task_id: str) -> ExecutionContext | None:
         """Latest context for ``task_id``, or None when unknown."""
         raise NotImplementedError
 

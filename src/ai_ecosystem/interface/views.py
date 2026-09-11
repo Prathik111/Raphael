@@ -10,7 +10,7 @@ activity keeps names, states, and durations only.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -92,7 +92,7 @@ class _ToolClock:
 class EventAdapter:
     """Folds the runtime event stream into per-task view models."""
 
-    def __init__(self, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, bus: EventBus | None = None) -> None:
         self._tasks: dict[str, TaskView] = {}
         self._clocks: dict[str, _ToolClock] = {}
         if bus is not None:
@@ -142,7 +142,8 @@ class EventAdapter:
             call_id = str(payload.get("call_id", ""))
             if call_id not in view.tools:
                 view.tools[call_id] = ToolActivity(
-                    call_id=call_id, tool=str(payload.get("tool", "")))
+                    call_id=call_id, tool=str(payload.get("tool", ""))
+                )
             self._pending_permission(view, payload)
         elif kind is EventType.TOOL_STARTED:
             activity = self._tool(view, payload)
@@ -162,8 +163,7 @@ class EventAdapter:
             call_id = str(payload.get("call_id", ""))
             entry = view.permissions.get(call_id)
             if entry is None:
-                entry = PermissionView(
-                    call_id=call_id, tool=str(payload.get("tool", "")))
+                entry = PermissionView(call_id=call_id, tool=str(payload.get("tool", "")))
                 view.permissions[call_id] = entry
             entry.decided = True
             entry.granted = False
@@ -200,8 +200,7 @@ class EventAdapter:
         elif kind is EventType.AGENT_COMPLETED:
             agent_id = str(payload.get("agent_id", ""))
             if agent_id and agent_id in view.agents:
-                view.agents[agent_id].status = (
-                    "COMPLETED" if payload.get("success") else "FAILED")
+                view.agents[agent_id].status = "COMPLETED" if payload.get("success") else "FAILED"
 
     def ingest_store(self, events: list[Event], last_seen: int = -1) -> int:
         """Polling fallback: fold events newer than last_seen; returns new mark."""
@@ -222,7 +221,7 @@ class EventAdapter:
             self._tasks.clear()
             self._clocks.clear()
 
-    def snapshot(self, task_id: str) -> Optional[TaskView]:
+    def snapshot(self, task_id: str) -> TaskView | None:
         """Current view for one task (None when never observed)."""
         return self._tasks.get(task_id)
 
@@ -231,12 +230,17 @@ class EventAdapter:
         view = self._tasks.get(task_id)
         if view is None:
             return {"nodes": [], "edges": []}
-        nodes = [{"id": node.step_id, "label": node.label or node.step_id,
-                  "state": node.state} for node in view.steps.values()]
+        nodes = [
+            {"id": node.step_id, "label": node.label or node.step_id, "state": node.state}
+            for node in view.steps.values()
+        ]
         known = set(view.steps)
-        edges = [{"from": dep, "to": node.step_id}
-                 for node in view.steps.values() for dep in node.dependencies
-                 if dep in known]
+        edges = [
+            {"from": dep, "to": node.step_id}
+            for node in view.steps.values()
+            for dep in node.dependencies
+            if dep in known
+        ]
         return {"nodes": nodes, "edges": edges}
 
     def note_model(self, task_id: str, model: str, provider: str = "") -> None:
@@ -245,8 +249,9 @@ class EventAdapter:
         view.model = model
         view.provider = provider
 
-    def note_step_deps(self, task_id: str, step_id: str,
-                       dependencies: list[str], label: str = "") -> None:
+    def note_step_deps(
+        self, task_id: str, step_id: str, dependencies: list[str], label: str = ""
+    ) -> None:
         """Attach plan structure the event stream does not carry."""
         node = self._step_by_id(task_id, step_id)
         node.dependencies = list(dependencies)
@@ -272,8 +277,7 @@ class EventAdapter:
         call_id = str(payload.get("call_id", ""))
         entry = view.permissions.get(call_id)
         if entry is None:
-            entry = PermissionView(call_id=call_id,
-                                   tool=str(payload.get("tool", "")))
+            entry = PermissionView(call_id=call_id, tool=str(payload.get("tool", "")))
             view.permissions[call_id] = entry
         return entry
 

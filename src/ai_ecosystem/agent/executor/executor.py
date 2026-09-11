@@ -158,9 +158,7 @@ class ParallelExecutor:
         args = arguments or {}
         token = cancel or CancellationToken()
         started = time.monotonic()
-        self._emit(
-            EventType.GRAPH_STARTED, task_id, {"steps": len(graph.nodes)}
-        )
+        self._emit(EventType.GRAPH_STARTED, task_id, {"steps": len(graph.nodes)})
         self._persist(graph, context, contexts_repo)
 
         halting = False
@@ -171,8 +169,7 @@ class ParallelExecutor:
                 if (token.cancelled or halting) and in_flight is not None:
                     self._stop_unstarted(graph, task_id, token, halting)
                 if not token.cancelled and not halting:
-                    self._submit_ready(graph, task_id, args, pool, in_flight,
-                                       token)
+                    self._submit_ready(graph, task_id, args, pool, in_flight, token)
                 if not in_flight:
                     if not self._drain_stuck(graph, task_id):
                         break
@@ -186,9 +183,7 @@ class ParallelExecutor:
                         task_id,
                         {"step_id": node.step.id, "error": node.error},
                     )
-                if self._first_failure(graph) and (
-                    self._failure_policy is FailurePolicy.FAIL_FAST
-                ):
+                if self._first_failure(graph) and (self._failure_policy is FailurePolicy.FAIL_FAST):
                     halting = True
                 self._persist(graph, context, contexts_repo)
         finally:
@@ -233,22 +228,20 @@ class ParallelExecutor:
             node.transition(StepState.RUNNING)
             node.attempts += 1
             node.started_at = utcnow()
-            node.timeout_s = self._step_timeouts.get(
-                node.step.id, self._default_step_timeout_s
-            )
+            node.timeout_s = self._step_timeouts.get(node.step.id, self._default_step_timeout_s)
             self._emit(EventType.STEP_STARTED, task_id, {"step_id": node.step.id})
             # Model-proposed step arguments apply first; operator-pinned
             # config arguments override per key (operator is trusted,
             # model output is not). Both still pass authorization.
-            merged = {**(node.step.arguments or {}),
-                      **args.get(node.step.id, {})}
-            future = pool.submit(
-                self._run_node, task_id, node, merged, token
-            )
+            merged = {**(node.step.arguments or {}), **args.get(node.step.id, {})}
+            future = pool.submit(self._run_node, task_id, node, merged, token)
             in_flight[future] = node
 
     def _run_node(
-        self, task_id: str, node: GraphNode, arguments: dict,
+        self,
+        task_id: str,
+        node: GraphNode,
+        arguments: dict,
         token: CancellationToken | None = None,
     ) -> tuple[bool, list[ToolResult], str]:
         """Run one step's tools sequentially via ToolRunner (never direct)."""
@@ -273,8 +266,7 @@ class ParallelExecutor:
     ) -> None:
         if not in_flight:
             return
-        done, _ = wait(set(in_flight), timeout=self._poll_interval_s,
-                       return_when=FIRST_COMPLETED)
+        done, _ = wait(set(in_flight), timeout=self._poll_interval_s, return_when=FIRST_COMPLETED)
         for future in done:
             node = in_flight.pop(future)
             if node.state is not StepState.RUNNING:
@@ -288,9 +280,7 @@ class ParallelExecutor:
             node.completed_at = utcnow()
             if ok:
                 node.transition(StepState.SUCCEEDED)
-                self._emit(
-                    EventType.STEP_COMPLETED, task_id, {"step_id": node.step.id}
-                )
+                self._emit(EventType.STEP_COMPLETED, task_id, {"step_id": node.step.id})
             else:
                 node.transition(StepState.FAILED)
                 node.error = error
@@ -309,7 +299,7 @@ class ParallelExecutor:
         in_flight: dict[Future, GraphNode],
     ) -> None:
         now = utcnow()
-        for future, node in list(in_flight.items()):
+        for _future, node in list(in_flight.items()):
             if node.state is not StepState.RUNNING or node.started_at is None:
                 continue
             elapsed = (now - node.started_at).total_seconds()
@@ -343,11 +333,7 @@ class ParallelExecutor:
 
     def _drain_stuck(self, graph: TaskGraph, task_id: str) -> bool:
         """Defensive: skip anything no wave can ever unblock. Returns True if it acted."""
-        stuck = [
-            node
-            for node in graph.nodes
-            if node.state in (StepState.PENDING, StepState.READY)
-        ]
+        stuck = [node for node in graph.nodes if node.state in (StepState.PENDING, StepState.READY)]
         if not stuck or graph.done():
             return False
         for node in stuck:
@@ -356,19 +342,14 @@ class ParallelExecutor:
             except DomainValidationError:
                 continue
             node.error = "unsatisfiable dependencies; skipped defensively"
-            self._emit(
-                EventType.STEP_SKIPPED, task_id, {"step_id": node.step.id}
-            )
+            self._emit(EventType.STEP_SKIPPED, task_id, {"step_id": node.step.id})
         return True
 
     # -- aggregation / persistence -------------------------------------
 
     @staticmethod
     def _first_failure(graph: TaskGraph) -> bool:
-        return any(
-            node.state in (StepState.FAILED, StepState.TIMED_OUT)
-            for node in graph.nodes
-        )
+        return any(node.state in (StepState.FAILED, StepState.TIMED_OUT) for node in graph.nodes)
 
     @staticmethod
     def _overall_status(graph: TaskGraph, token: CancellationToken) -> OverallStatus:
@@ -419,6 +400,4 @@ class ParallelExecutor:
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload)
-            )
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))
