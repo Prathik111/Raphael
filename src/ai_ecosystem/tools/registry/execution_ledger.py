@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ai_ecosystem.core.models.base import utcnow
 from ai_ecosystem.core.persistence.sqlite import Database
@@ -31,8 +31,8 @@ class ExecutionRecord(BaseModel):
     tool: str
     state: ExecutionState
     attempt: int = 1
-    created_at: datetime = utcnow()
-    updated_at: datetime = utcnow()
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
     result_hash: str = ""
 
 
@@ -74,8 +74,8 @@ class ExecutionLedger:
             self._db.write("UPDATE execution_ledger SET state=?,attempt=?,updated_at=? WHERE action_hash=?",
                            (ExecutionState.STARTED.value, attempt, now.isoformat(), digest))
             return existing.model_copy(update={"state": ExecutionState.STARTED, "attempt": attempt, "updated_at": now})
-        record = ExecutionRecord(action_hash=digest, task_id=task_id, tool=tool,
-                                 state=ExecutionState.STARTED, created_at=now, updated_at=now)
+        record = ExecutionRecord(action_hash=digest, task_id=task_id, tool=tool, state=ExecutionState.STARTED,
+                                 created_at=now, updated_at=now)
         self._db.write("INSERT INTO execution_ledger VALUES (?,?,?,?,?,?,?,?)",
                        (record.action_hash, record.task_id, record.tool, record.state.value,
                         record.attempt, record.created_at.isoformat(), record.updated_at.isoformat(), ""))
@@ -87,7 +87,7 @@ class ExecutionLedger:
                        (state.value, now.isoformat(), result_hash, digest))
 
     def recover_unknowns(self) -> int:
-        """Mark in-flight actions UNKNOWN after process restart; never auto-retry side effects."""
+        """Mark in-flight actions UNKNOWN after restart; never auto-retry side effects."""
         rows = self._db.query("SELECT action_hash FROM execution_ledger WHERE state IN ('STARTED','EXECUTING','AUTHORIZED')")
         for (digest,) in rows:
             self.transition(digest, ExecutionState.UNKNOWN)
