@@ -4,23 +4,28 @@ from __future__ import annotations
 
 import os
 import subprocess
+from functools import partial
 from pathlib import Path
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError, ToolTimeoutError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
-from ai_ecosystem.core.secrets import redact
 from ai_ecosystem.tools.registry.registry import ToolHandler
 
 OUTPUT_CAP = 100_000
 CONTRACT_TIMEOUT_S = 120.0
 
+# Explicitly safe process metadata. Credentials/proxy tokens/application
+# configuration are never inherited by an untrusted command.
+SAFE_ENV = frozenset({
+    "PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
+    "COMSPEC", "PATHEXT", "HOME", "LANG", "LC_ALL",
+})
+
 
 def _scrubbed_env(allowlist: frozenset[str] | None = None) -> dict[str, str]:
-    if allowlist is not None:
-        return {key: os.environ[key] for key in allowlist if key in os.environ}
-    redacted = redact(dict(os.environ))
-    return {key: value for key, value in redacted.items() if value != "***"}
+    keys = SAFE_ENV | (allowlist or frozenset())
+    return {key: os.environ[key] for key in keys if key in os.environ}
 
 
 def _resolve_cwd(raw: object, root: object) -> str | None:
@@ -30,9 +35,10 @@ def _resolve_cwd(raw: object, root: object) -> str | None:
         raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
     candidate = Path(raw)
     if root is not None:
-        resolved = (Path(root) / candidate).resolve()
+        base = Path(root).resolve()
+        resolved = (base / candidate).resolve()
         try:
-            resolved.relative_to(Path(root).resolve())
+            resolved.relative_to(base)
         except ValueError:
             raise ToolExecutionError("terminal.execute", "'cwd' escapes the allowed root") from None
         if not resolved.is_dir():
@@ -91,7 +97,7 @@ def _run(arguments: dict, root: object,
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
+            raise ToolTimeoutError("terminal.execute", timeout_s) from None
         raise ToolTimeoutError("terminal.execute", timeout_s) from None
     output = stdout + stderr
     if len(output) > OUTPUT_CAP:
@@ -117,5 +123,5 @@ def terminal_tools(root: object = None,
         requires_approval=True,
         requires_sandbox=True,
         sandbox_profile="terminal",
-        network_access=True,
-    ), lambda arguments, workspace=resolved, allowlist=env_allowlist: _run(arguments, workspace, allowlist))]
+        network_access=False,
+    ), partial(_run, root=resolved, env_allowlist=env_allowlist))]
