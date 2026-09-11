@@ -24,7 +24,6 @@ from ai_ecosystem.cloud import (
     MockSyncTransport,
     OCIProvider,
     PCAvailabilityService,
-    PCStatus,
     ProviderCapabilities,
     SqlitePresenceRepository,
     SyncManager,
@@ -34,32 +33,19 @@ from ai_ecosystem.cloud import (
 from ai_ecosystem.core.errors import ToolExecutionError
 from ai_ecosystem.core.models import Plan, PlanStep, Tool, ToolResult
 from ai_ecosystem.core.models.enums import (
-    MemoryScope,
     RiskLevel,
     VerificationStatus,
 )
-from ai_ecosystem.core.persistence import Database, SqliteMemoryRepository
+from ai_ecosystem.core.persistence import Database
 from ai_ecosystem.core.runtime import AgentRuntime
 from ai_ecosystem.core.secrets import DictSecretsProvider
 from ai_ecosystem.intelligence.research.manager import ResearchManager
 from ai_ecosystem.learning.models import ObservationMode, ObservationPolicy
 from ai_ecosystem.learning.observer import PatternDetector, ProposalEngine, UsageObserver
-from ai_ecosystem.personalization.memory import MemoryCandidate, MemoryStore
-from ai_ecosystem.personalization.personality import (
-    PersonalizationEngine,
-    PersonalityStore,
-    PreferenceStore,
-)
-from ai_ecosystem.agent.proactive import (
-    ProactiveConfig,
-    ProactiveEngine,
-    ProactiveTrigger,
-    TriggerKind,
-)
 from ai_ecosystem.security import AuthorizationManager, RiskContext
 from ai_ecosystem.skills import SkillPlanBuilder, SkillRegistry
 from ai_ecosystem.core.persistence import SqliteSkillRepository
-from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry, ToolRunner
+from ai_ecosystem.tools import ToolRegistry, ToolRunner
 
 
 def _ok(output="ok"):
@@ -258,8 +244,6 @@ def test_12_recovery(world):
 
 
 def test_13_learning_proposal(world):
-    from ai_ecosystem.learning.models import ObservationMode, ObservationPolicy
-    from ai_ecosystem.learning.observer import PatternDetector, ProposalEngine, UsageObserver
 
     observer = UsageObserver(ObservationPolicy(mode=ObservationMode.SESSION_ONLY))
     for _ in range(4):

@@ -10,7 +10,8 @@ so it simply is not there. Resume on the PC reuses versions/conflicts.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from ai_ecosystem.agent.executor.executor import ExecutionResult, OverallStatus
 from ai_ecosystem.cloud.sync import SyncClass, SyncManager, SyncObject
@@ -30,9 +31,9 @@ class CloudAgent:
     def __init__(
         self,
         executor_factory: Callable[[], Any],
-        sync: Optional[SyncManager] = None,
-        allowed_tools: Optional[list[str]] = None,
-        bus: Optional[EventBus] = None,
+        sync: SyncManager | None = None,
+        allowed_tools: list[str] | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._executor_factory = executor_factory
         self._sync = sync
@@ -61,7 +62,7 @@ class CloudAgent:
         self._emit(EventType.AGENT_STARTED, task_id, {"agent": "cloud"})
 
     def run_cloud_task(self, task_id: str, plan: Plan,
-                       arguments: Optional[dict] = None) -> ExecutionResult:
+                       arguments: dict | None = None) -> ExecutionResult:
         """Execute an admitted plan through the normal executor path."""
         executor = self._executor_factory()
         result = executor.execute(task_id, plan, arguments=arguments or {})

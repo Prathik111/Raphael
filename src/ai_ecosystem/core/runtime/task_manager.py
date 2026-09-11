@@ -8,7 +8,6 @@ be re-derived; the state cannot).
 
 from __future__ import annotations
 
-from typing import Optional
 
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.domain import ExecutionContext, Goal, Task
@@ -30,7 +29,7 @@ class TaskManager:
         tasks: SqliteTaskRepository,
         contexts: SqliteExecutionContextRepository,
         bus: EventBus,
-        db: Optional[Database] = None,
+        db: Database | None = None,
     ) -> None:
         self._tasks = tasks
         self._contexts = contexts
@@ -86,11 +85,11 @@ class TaskManager:
             self._contexts.save(ctx)
         return task
 
-    def get_task(self, task_id: str) -> Optional[Task]:
+    def get_task(self, task_id: str) -> Task | None:
         """Fetch a task by id (None when unknown)."""
         return self._tasks.get(task_id)
 
-    def get_context(self, task_id: str) -> Optional[ExecutionContext]:
+    def get_context(self, task_id: str) -> ExecutionContext | None:
         """Fetch the latest restorable context (None when unknown)."""
         return self._contexts.load(task_id)
 

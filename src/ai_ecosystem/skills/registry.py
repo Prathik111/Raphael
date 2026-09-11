@@ -9,7 +9,7 @@ machinery; skills add reuse, not privilege.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -78,7 +78,7 @@ class SkillRegistry:
     """Versioned, scoped skill storage over the existing skills table."""
 
     def __init__(self, repository: SqliteSkillRepository,
-                 bus: Optional[EventBus] = None) -> None:
+                 bus: EventBus | None = None) -> None:
         self._repo = repository
         self._bus = bus
 
@@ -97,7 +97,7 @@ class SkillRegistry:
                     "version": created.version})
         return created
 
-    def lookup(self, name: str, version: Optional[str] = None) -> Optional[Skill]:
+    def lookup(self, name: str, version: str | None = None) -> Skill | None:
         """Highest ACTIVE version, or one exact version (any status)."""
         matches = [s for s in self._repo.list() if s.name == name]
         if not matches:
@@ -150,7 +150,7 @@ class SkillRegistry:
         """Remove one version record (history of other versions stays)."""
         return self._repo.delete(skill_id)
 
-    def select(self, query: str = "", capabilities: Optional[list[str]] = None,
+    def select(self, query: str = "", capabilities: list[str] | None = None,
                scope_id: str = "", limit: int = 5) -> list[Skill]:
         """Deterministic discovery: keywords + capability + scope match.
 
@@ -214,9 +214,9 @@ class SkillPlanBuilder:
     """
 
     def __init__(self, tools: ToolRegistry,
-                 risk_engine: Optional[RiskEngine] = None,
-                 policy_engine: Optional[PolicyEngine] = None,
-                 bus: Optional[EventBus] = None) -> None:
+                 risk_engine: RiskEngine | None = None,
+                 policy_engine: PolicyEngine | None = None,
+                 bus: EventBus | None = None) -> None:
         self._tools = tools
         self._risk = risk_engine or RiskEngine()
         self._policy = policy_engine or PolicyEngine()
@@ -309,7 +309,7 @@ class SkillPlanBuilder:
 class SkillCandidateStore:
     """Proposal inbox: candidates wait for explicit human approval."""
 
-    def __init__(self, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, bus: EventBus | None = None) -> None:
         self._bus = bus
         self._candidates: dict[str, SkillProposal] = {}
 
@@ -326,7 +326,7 @@ class SkillCandidateStore:
                 payload={"proposal_id": proposal.id, "name": proposal.name}))
         return proposal
 
-    def get(self, proposal_id: str) -> Optional[SkillProposal]:
+    def get(self, proposal_id: str) -> SkillProposal | None:
         """Fetch a pending candidate (None when unknown/decided)."""
         return self._candidates.get(proposal_id)
 

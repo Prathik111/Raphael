@@ -12,9 +12,8 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
-from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.models.base import Entity, utcnow
 from pydantic import Field
 
@@ -25,7 +24,7 @@ def _canonical(payload: dict[str, Any]) -> str:
 
 
 def _chain_hash(prev_hash: str, body: str) -> str:
-    return hashlib.sha256(f"{prev_hash}|{body}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{prev_hash}|{body}".encode()).hexdigest()
 
 
 # Volatile storage fields excluded from the chain body (create() touches
@@ -119,7 +118,7 @@ class AuditLog:
         if len(heads) != 1:
             return False, "multiple chain heads"
         on_chain = 0
-        current: Optional[AuditRecord] = heads[0]
+        current: AuditRecord | None = heads[0]
         while current is not None:
             on_chain += 1
             nxt = by_prev.get(current.record_hash, [])
@@ -163,7 +162,7 @@ class AuditLog:
         return count
 
     def purge_older_than(self, days: float, archive_path: str,
-                           now: Optional[datetime] = None) -> int:
+                           now: datetime | None = None) -> int:
         """Retention by archival rotation: export olds, then clear all.
 
         Physical deletion without export would break the chain, so

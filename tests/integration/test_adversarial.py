@@ -12,13 +12,12 @@ from ai_ecosystem.cloud import (
     MockSyncTransport,
     OCIProvider,
     SyncManager,
-    SyncPolicy,
     SyncState,
     make_sync_object,
 )
 from ai_ecosystem.core.events import Event, EventBus
 from ai_ecosystem.core.models import Tool, ToolResult
-from ai_ecosystem.core.models.enums import EventType, PermissionDecision, RiskLevel
+from ai_ecosystem.core.models.enums import PermissionDecision, RiskLevel
 from ai_ecosystem.core.persistence import Database
 from ai_ecosystem.core.runtime import AgentRuntime
 from ai_ecosystem.core.secrets import DictSecretsProvider
@@ -78,7 +77,7 @@ def test_adversarial_model_output_contained(tmp_path):
     from ai_ecosystem.core.errors import PlanValidationError
 
     try:
-        plan = backend.plan("Be evil.", ["terminal.execute"])
+        backend.plan("Be evil.", ["terminal.execute"])
         validated = True
     except PlanValidationError:
         validated = False

@@ -10,7 +10,7 @@ as OCI (never in logs, events, prompts, or messages).
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.cloud.jobs import ComputeJob, JobStatus
 from ai_ecosystem.cloud.providers import (
@@ -35,7 +35,7 @@ class DatasetPolicy:
 
     def __init__(
         self,
-        allowed_kinds: Optional[list[str]] = None,
+        allowed_kinds: list[str] | None = None,
         max_bytes: int = 10_000_000,
     ) -> None:
         self.allowed_kinds = list(allowed_kinds or ["dataset", "notebook", "model"])
@@ -69,7 +69,7 @@ def _contains_secrets(payload: Any) -> bool:
     if isinstance(payload, dict):
         return any(looks_secret(str(key)) or _contains_secrets(value)
                    for key, value in payload.items())
-    if isinstance(payload, (list, tuple)):
+    if isinstance(payload, list | tuple):
         return any(_contains_secrets(item) for item in payload)
     return looks_like_secret_value(payload)
 
@@ -173,7 +173,7 @@ class ExternalProvider(CloudProvider):
         self,
         transport: MockNotebookTransport,
         secrets: SecretsProvider,
-        dataset_policy: Optional[DatasetPolicy] = None,
+        dataset_policy: DatasetPolicy | None = None,
         region: str = "",
     ) -> None:
         self._transport = transport
@@ -239,7 +239,7 @@ class ExternalProvider(CloudProvider):
                     CloudStatus.DEGRADED.value if reachable else CloudStatus.ERROR.value)}
 
     def submit_job(self, job: ComputeJob,
-                   datasets: Optional[list[dict]] = None) -> ComputeJob:
+                   datasets: list[dict] | None = None) -> ComputeJob:
         """Policy-gate datasets, then submit (connected only)."""
         if self._status is not CloudStatus.CONNECTED:
             raise CloudUnavailableError(f"{self.name} is not connected")

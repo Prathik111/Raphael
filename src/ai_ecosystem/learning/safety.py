@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import Counter
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.models.base import Entity
@@ -180,7 +180,7 @@ class LearningGovernor:
         return repository.update(existing)
 
     @staticmethod
-    def load(repository: Any) -> "LearningGovernor":
+    def load(repository: Any) -> LearningGovernor:
         """Restore posture (defaults when never saved)."""
         state = repository.get("global")
         if state is None:

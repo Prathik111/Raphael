@@ -10,7 +10,7 @@ activity keeps names, states, and durations only.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -92,7 +92,7 @@ class _ToolClock:
 class EventAdapter:
     """Folds the runtime event stream into per-task view models."""
 
-    def __init__(self, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, bus: EventBus | None = None) -> None:
         self._tasks: dict[str, TaskView] = {}
         self._clocks: dict[str, _ToolClock] = {}
         if bus is not None:
@@ -222,7 +222,7 @@ class EventAdapter:
             self._tasks.clear()
             self._clocks.clear()
 
-    def snapshot(self, task_id: str) -> Optional[TaskView]:
+    def snapshot(self, task_id: str) -> TaskView | None:
         """Current view for one task (None when never observed)."""
         return self._tasks.get(task_id)
 

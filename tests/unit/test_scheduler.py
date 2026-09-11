@@ -1,7 +1,7 @@
 """Gate 39: durable priority scheduler over the compute router."""
 
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 

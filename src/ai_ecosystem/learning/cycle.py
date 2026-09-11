@@ -10,11 +10,10 @@ construction (no imports, no parameters, no code paths).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
-from ai_ecosystem.core.events.bus import Event, EventBus
-from ai_ecosystem.core.models.enums import EventType
+from ai_ecosystem.core.events.bus import EventBus
 from ai_ecosystem.learning.models import (
     LearningProposal,
     ProposalStatus,
@@ -33,11 +32,11 @@ class LearningPipeline:
     def __init__(
         self,
         proposals: Any,
-        engine: Optional[ProposalEngine] = None,
-        detector: Optional[PatternDetector] = None,
-        governor: Optional[LearningGovernor] = None,
+        engine: ProposalEngine | None = None,
+        detector: PatternDetector | None = None,
+        governor: LearningGovernor | None = None,
         min_confidence: float = 0.3,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._proposals = proposals
         self._engine = engine or ProposalEngine(bus)
@@ -70,7 +69,7 @@ class LearningPipeline:
         return True, "proposal valid"
 
     def approve(self, proposal_id: str, target: str = "memory",
-                stores: Optional[dict[str, Any]] = None,
+                stores: dict[str, Any] | None = None,
                 project_id: str = "") -> Any:
         """Adopt a validated proposal (explicit operator action)."""
         proposal = self._proposals.get(proposal_id)
@@ -109,7 +108,7 @@ class LearningPipeline:
         return self._proposals.update(rejected)
 
     def rollback(self, proposal_id: str,
-                 stores: Optional[dict[str, Any]] = None) -> bool:
+                 stores: dict[str, Any] | None = None) -> bool:
         """Reverse an adoption (memory delete / preference revert)."""
         proposal = self._proposals.get(proposal_id)
         if proposal is None:

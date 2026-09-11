@@ -11,7 +11,8 @@ import json
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 
 @dataclass
@@ -89,7 +90,7 @@ class BenchmarkRunner:
 def default_suite() -> BenchmarkRunner:
     """The standard suite wiring real subsystems (in-memory where noted)."""
     from ai_ecosystem.agent.executor import ParallelExecutor
-    from ai_ecosystem.agent.multi import AgentDefinition, AgentManager, AgentRegistry
+    from ai_ecosystem.agent.multi import AgentDefinition, AgentRegistry
     from ai_ecosystem.agent.multi.messages import MessageBus
     from ai_ecosystem.agent.multi.messages import AgentMessage, MessageType
     from ai_ecosystem.agent.planner.validator import PlanValidator
@@ -125,7 +126,7 @@ def default_suite() -> BenchmarkRunner:
     from ai_ecosystem.core.runtime import AgentRuntime
     from ai_ecosystem.interface import EventAdapter, WorkspaceManager
     from ai_ecosystem.interface import SqliteWorkspaceRepository
-    from ai_ecosystem.personalization.memory import MemoryCandidate, MemoryStore
+    from ai_ecosystem.personalization.memory import MemoryStore
     from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry, ToolRunner
 
     runner = BenchmarkRunner()

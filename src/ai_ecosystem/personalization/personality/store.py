@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import ResourceNotFoundError
 from ai_ecosystem.core.events.bus import Event, EventBus
@@ -17,7 +16,7 @@ from ai_ecosystem.personalization.personality.profiles import (
 class PersonalityStore:
     """Single active personality profile (versioned, evented)."""
 
-    def __init__(self, db: Database, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, db: Database, bus: EventBus | None = None) -> None:
         self._table = _SnapshotTable(db, "personalities", PersonalityProfile)
         self._bus = bus
 
@@ -47,7 +46,7 @@ class PersonalityStore:
 class PreferenceStore:
     """Global + per-project preference profiles with override merge."""
 
-    def __init__(self, db: Database, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, db: Database, bus: EventBus | None = None) -> None:
         self._table = _SnapshotTable(db, "preferences", PreferenceProfile)
         self._bus = bus
 
@@ -58,7 +57,7 @@ class PreferenceStore:
             return PreferenceProfile()
         return sorted(candidates, key=lambda p: p.version)[-1]
 
-    def get_project(self, project_id: str) -> Optional[PreferenceProfile]:
+    def get_project(self, project_id: str) -> PreferenceProfile | None:
         """Latest project profile, or None when the project has none."""
         candidates = [
             p for p in self._table.list()

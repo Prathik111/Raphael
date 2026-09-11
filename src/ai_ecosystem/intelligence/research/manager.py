@@ -8,7 +8,6 @@ to be autonomous fact-checking.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.base import utcnow
@@ -34,8 +33,8 @@ class ResearchManager:
         runner: ToolRunner,
         registry: ToolRegistry,
         search_tool: str = "web.search",
-        bus: Optional[EventBus] = None,
-        collector: Optional[SourceCollector] = None,
+        bus: EventBus | None = None,
+        collector: SourceCollector | None = None,
     ) -> None:
         self._collector = collector or SourceCollector(runner, registry, search_tool)
         self._extractor = EvidenceExtractor()
@@ -112,7 +111,7 @@ class ResearchManager:
 
 
 def verify_research(
-    result: ResearchResult, max_age_days: float = 30.0, now: Optional[datetime] = None
+    result: ResearchResult, max_age_days: float = 30.0, now: datetime | None = None
 ) -> VerificationResult:
     """Check source existence, metadata validity, freshness, and support.
 

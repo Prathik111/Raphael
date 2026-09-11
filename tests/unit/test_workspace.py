@@ -10,7 +10,6 @@ from ai_ecosystem.core.models.enums import EventType
 from ai_ecosystem.core.persistence import Database
 from ai_ecosystem.interface import (
     DataRef,
-    NodeLayout,
     NodeState,
     NodeType,
     SqliteWorkspaceRepository,

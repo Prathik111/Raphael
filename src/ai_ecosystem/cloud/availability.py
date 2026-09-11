@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -50,7 +50,7 @@ _MAX_CAPABILITIES = 100
 _MAX_CAPABILITY_CHARS = 256
 
 
-def _check_heartbeat(device_id: str, capabilities: Optional[list[str]],
+def _check_heartbeat(device_id: str, capabilities: list[str] | None,
                      pressure: str, runtime: str) -> list[str]:
     """Validate heartbeat shape (presence carries no personal data)."""
     if not device_id:
@@ -73,7 +73,7 @@ def _check_heartbeat(device_id: str, capabilities: Optional[list[str]],
 class PCAvailabilityService:
     """Heartbeat/lease tracker over the existing database."""
 
-    def __init__(self, repository: Any, bus: Optional[EventBus] = None,
+    def __init__(self, repository: Any, bus: EventBus | None = None,
                  lease_timeout_s: float = 60.0) -> None:
         if lease_timeout_s <= 0:
             raise DomainValidationError("lease_timeout_s must be positive")
@@ -82,10 +82,10 @@ class PCAvailabilityService:
         self._lease_timeout_s = lease_timeout_s
 
     def heartbeat(self, device_id: str, status: PCStatus = PCStatus.ONLINE,
-                  capabilities: Optional[list[str]] = None,
+                  capabilities: list[str] | None = None,
                   pressure: str = "UNKNOWN", reachable: bool = True,
                   runtime: str = "unknown",
-                  now: Optional[datetime] = None) -> DevicePresence:
+                  now: datetime | None = None) -> DevicePresence:
         """Record presence (idempotent: duplicates just refresh the lease)."""
         caps = _check_heartbeat(device_id, capabilities, pressure, runtime)
         moment = now or utcnow()
@@ -124,7 +124,7 @@ class PCAvailabilityService:
         """Fetch one device (raises when unknown)."""
         return self._require(device_id)
 
-    def is_available(self, device_id: str, now: Optional[datetime] = None) -> bool:
+    def is_available(self, device_id: str, now: datetime | None = None) -> bool:
         """True for fresh ONLINE/AVAILABLE rows (lease-checked)."""
         presence = self._find(device_id)
         if presence is None:
@@ -133,7 +133,7 @@ class PCAvailabilityService:
             return False
         return not self._expired(presence, now or utcnow())
 
-    def poll(self, now: Optional[datetime] = None) -> list[DevicePresence]:
+    def poll(self, now: datetime | None = None) -> list[DevicePresence]:
         """Expire stale leases (no aggressive polling thread involved)."""
         moment = now or utcnow()
         expired = []
@@ -162,7 +162,7 @@ class PCAvailabilityService:
         age = (now - presence.last_seen).total_seconds()
         return age > self._lease_timeout_s
 
-    def _find(self, device_id: str) -> Optional[DevicePresence]:
+    def _find(self, device_id: str) -> DevicePresence | None:
         for presence in self._repo.list():
             if presence.device_id == device_id:
                 return presence
@@ -191,7 +191,7 @@ class SqlitePresenceRepository:
         """Persist a presence row."""
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[DevicePresence]:
+    def get(self, item_id: str) -> DevicePresence | None:
         """Fetch by record id."""
         return self._t.get(item_id)
 
@@ -208,7 +208,7 @@ class SqlitePresenceRepository:
         return self._t.list()
 
 
-def presence_age_s(presence: DevicePresence, now: Optional[datetime] = None) -> float:
+def presence_age_s(presence: DevicePresence, now: datetime | None = None) -> float:
     """Seconds since the last heartbeat (lease math helper)."""
     moment = now or utcnow()
     return max(0.0, (moment - presence.last_seen).total_seconds())

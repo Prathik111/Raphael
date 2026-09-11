@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import ToolResult
@@ -29,7 +29,7 @@ class VerificationTarget:
 class Finding:
     """One strategy's verdict: passed / failed / cannot-tell."""
 
-    passed: Optional[bool]  # True / False / None (inconclusive)
+    passed: bool | None  # True / False / None (inconclusive)
     evidence: list[str] = field(default_factory=list)
     reason: str = ""
 

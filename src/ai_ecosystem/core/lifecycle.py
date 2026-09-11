@@ -9,7 +9,7 @@ SQLite's online backup API (consistent snapshots, no dump parsing).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 
 def startup_recovery(db: Any, runtime: Any = None,

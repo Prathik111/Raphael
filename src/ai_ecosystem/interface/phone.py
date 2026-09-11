@@ -10,7 +10,7 @@ capture, no local execution on either end.
 from __future__ import annotations
 
 import secrets as secrets_lib
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
@@ -23,7 +23,7 @@ class PhoneClient:
     """Authenticated thin client over a RuntimeAPI instance."""
 
     def __init__(self, gateway: EcosystemGateway, api: RuntimeAPI,
-                 bus: Optional[EventBus] = None) -> None:
+                 bus: EventBus | None = None) -> None:
         self._gateway = gateway
         self._api = api
         self._bus = bus

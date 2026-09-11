@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import time
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
-from ai_ecosystem.core.models.base import Entity, utcnow
+from ai_ecosystem.core.models.base import Entity
 from ai_ecosystem.core.models.enums import EventType
 from ai_ecosystem.learning.safety import LearningRisk
 
@@ -79,9 +80,9 @@ class ProactiveEngine:
 
     def __init__(
         self,
-        config: Optional[ProactiveConfig] = None,
-        bus: Optional[EventBus] = None,
-        clock: Optional[Callable[[], float]] = None,
+        config: ProactiveConfig | None = None,
+        bus: EventBus | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._config = config or ProactiveConfig()
         self._bus = bus
@@ -102,7 +103,7 @@ class ProactiveEngine:
 
     def evaluate(self, trigger_id: str, subject: str = "",
                  risk: LearningRisk = LearningRisk.LOW,
-                 summary: str = "") -> Optional[ProactiveProposal]:
+                 summary: str = "") -> ProactiveProposal | None:
         """Turn one fired trigger into a proposal (or None: suppressed)."""
         trigger = self._triggers.get(trigger_id)
         if trigger is None or not self._config.enabled or not trigger.enabled:
@@ -148,7 +149,7 @@ class ProactiveEngine:
         return proposal
 
     def execute(self, proposal_id: str, execute_fn: Callable[[], Any],
-                verify_fn: Optional[Callable[[Any], bool]] = None) -> ProactiveProposal:
+                verify_fn: Callable[[Any], bool] | None = None) -> ProactiveProposal:
         """Run an approved proposal through injected callables."""
         proposal = self._require(proposal_id)
         if proposal.state is not ProposalState.APPROVED:

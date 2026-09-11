@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError, ResourceNotFoundError
 from ai_ecosystem.core.events.bus import Event, EventBus
@@ -39,8 +38,8 @@ def _freshness(created_at: datetime, now: datetime) -> float:
 class MemoryStore:
     """Manages memory lifecycle over a MemoryRepository."""
 
-    def __init__(self, repository: MemoryRepository, bus: Optional[EventBus] = None,
-                 importance_threshold: float = 0.3, database: Optional[Database] = None) -> None:
+    def __init__(self, repository: MemoryRepository, bus: EventBus | None = None,
+                 importance_threshold: float = 0.3, database: Database | None = None) -> None:
         self._repo = repository
         self._bus = bus
         self._threshold = importance_threshold
@@ -97,7 +96,7 @@ class MemoryStore:
         })
         return created
 
-    def retrieve(self, scope: MemoryScope, scope_id: str = "", memory_type: Optional[MemoryType] = None,
+    def retrieve(self, scope: MemoryScope, scope_id: str = "", memory_type: MemoryType | None = None,
                  query: str = "", limit: int = 10, project_id: str = "", include_archived: bool = False) -> list[Memory]:
         """Retrieve relevant, non-expired memories. Results remain untrusted DATA."""
         query_words = keywords(query)
@@ -127,9 +126,7 @@ class MemoryStore:
             return True
         if memory.scope is scope and memory.scope_id == scope_id:
             return True
-        if project_id and memory.scope is MemoryScope.PROJECT and memory.scope_id == project_id:
-            return True
-        return False
+        return bool(project_id and memory.scope is MemoryScope.PROJECT and memory.scope_id == project_id)
 
     @staticmethod
     def _relevance(query_words: set[str], memory: Memory) -> float:
@@ -149,8 +146,8 @@ class MemoryStore:
         hits.sort(key=lambda item: (-item[0], item[1].created_at.isoformat()))
         return [memory for _, memory in hits[:max(0, limit)]]
 
-    def update(self, memory_id: str, content: Optional[str] = None, confidence: Optional[float] = None,
-               importance: Optional[float] = None) -> Memory:
+    def update(self, memory_id: str, content: str | None = None, confidence: float | None = None,
+               importance: float | None = None) -> Memory:
         memory = self._repo.get(memory_id)
         if memory is None:
             raise ResourceNotFoundError("Memory", memory_id)
@@ -230,15 +227,14 @@ class MemoryStore:
             self.archive(memory_id)
         return created
 
-    def purge_expired(self, now: Optional[datetime] = None) -> list[str]:
+    def purge_expired(self, now: datetime | None = None) -> list[str]:
         moment = now or utcnow()
         purged = []
         for memory in self._repo.list():
             expired_by_date = memory.expires_at is not None and memory.expires_at <= moment
             expired_by_retention = memory.retention_days is not None and (moment - memory.created_at).total_seconds() / 86400.0 > memory.retention_days
-            if expired_by_date or expired_by_retention:
-                if self.delete(memory.id):
-                    purged.append(memory.id)
+            if (expired_by_date or expired_by_retention) and self.delete(memory.id):
+                purged.append(memory.id)
         return purged
 
     def list_cloud_eligible(self) -> list[Memory]:

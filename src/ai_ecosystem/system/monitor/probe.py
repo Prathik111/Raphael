@@ -11,9 +11,9 @@ import os
 import platform
 import shutil
 import socket
-import sys
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from ai_ecosystem.core.models.base import utcnow
 from ai_ecosystem.system.monitor.models import (
@@ -56,7 +56,7 @@ class SystemProbe(ABC):
 class MockProbe(SystemProbe):
     """Deterministic probe for tests (no hardware dependence)."""
 
-    def __init__(self, snapshot: Optional[SystemSnapshot] = None) -> None:
+    def __init__(self, snapshot: SystemSnapshot | None = None) -> None:
         self._snapshot = snapshot or SystemSnapshot(
             operating_system="MockOS", architecture="x86_64")
         self.calls = 0
@@ -80,9 +80,9 @@ class LocalSystemProbe(SystemProbe):
 
     def __init__(
         self,
-        checkers: Optional[dict[str, Callable[[], bool]]] = None,
-        gpu_provider: Optional[Callable[[], list[GpuInfo]]] = None,
-        network_target: Optional[tuple[str, int]] = None,
+        checkers: dict[str, Callable[[], bool]] | None = None,
+        gpu_provider: Callable[[], list[GpuInfo]] | None = None,
+        network_target: tuple[str, int] | None = None,
     ) -> None:
         self._checkers = dict(checkers or {})
         self._gpu_provider = gpu_provider

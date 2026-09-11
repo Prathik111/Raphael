@@ -7,7 +7,7 @@ still plans, validates, and authorizes its own work.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.agent.executor.executor import OverallStatus
 from ai_ecosystem.agent.multi.definitions import AgentTask
@@ -17,7 +17,6 @@ from ai_ecosystem.agent.multi.messages import (
     MessageBus,
     MessageType,
 )
-from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.enums import EventType, VerificationStatus
 
@@ -51,7 +50,7 @@ class Coordinator:
         manager: AgentManager,
         messages: MessageBus,
         verifier: Any = None,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._manager = manager
         self._messages = messages

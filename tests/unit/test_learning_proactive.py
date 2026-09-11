@@ -1,6 +1,5 @@
 """Gates 32-34: learning pipeline, safety governor, proactive engine."""
 
-import time
 
 import pytest
 
@@ -8,12 +7,11 @@ from ai_ecosystem.agent import (
     ProactiveConfig,
     ProactiveEngine,
     ProactiveTrigger,
-    ProposalState,
     TriggerKind,
 )
 from ai_ecosystem.core.errors import DomainValidationError
 from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models.enums import EventType, MemoryScope
+from ai_ecosystem.core.models.enums import EventType
 from ai_ecosystem.core.persistence import Database, SqliteMemoryRepository
 from ai_ecosystem.learning import (
     DriftDetector,
@@ -22,18 +20,16 @@ from ai_ecosystem.learning import (
     LearningPipeline,
     LearningProposal,
     LearningRisk,
-    ObservationMode,
-    ObservationPolicy,
     ProposalKind,
     ProposalStatus,
     UsageEvent,
     check_not_security,
     classify_change,
 )
-from ai_ecosystem.learning.observer import UsageObserver
 from ai_ecosystem.learning.safety import LearningPolicyState
 from ai_ecosystem.personalization.memory import MemoryStore
 from ai_ecosystem.personalization.personality import PreferenceStore
+import contextlib
 
 
 @pytest.fixture()
@@ -151,7 +147,6 @@ def test_policy_enforcement():
 
 
 def test_risk_classification():
-    from ai_ecosystem.learning import LearningProposal
 
     assert classify_change(
         ProposalKind.COMMUNICATION, "be concise") is LearningRisk.LOW
@@ -213,12 +208,10 @@ def test_policy_immutability(db):
     pipeline = _pipeline(db, governor=governor)
     for _ in range(3):
         for proposal in pipeline.generate(_events()):
-            try:
+            with contextlib.suppress(DomainValidationError):
                 pipeline.approve(
                     proposal.id, "memory",
                     {"memories": MemoryStore(SqliteMemoryRepository(db))})
-            except DomainValidationError:
-                pass
     after = AuthorizationManager(registry).policy.model_dump()
     assert before == after
 

@@ -10,7 +10,7 @@ Model/project switches are recorded intents, never silent reconfig.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -53,7 +53,7 @@ class SimulatedDevice:
         self._clock = clock or _time.time
         self._counter = 0
 
-    def packet(self, command: str, payload: Optional[dict] = None,
+    def packet(self, command: str, payload: dict | None = None,
                protocol_version: str = PROTOCOL_VERSION) -> dict:
         """Build and sign a packet dict."""
         from ai_ecosystem.interface.gateway import hmac_sign
@@ -75,7 +75,7 @@ class HardwareGateway:
         self,
         gateway: EcosystemGateway,
         api: RuntimeAPI,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
         clock: Any = None,
     ) -> None:
         import time as _time

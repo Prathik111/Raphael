@@ -9,9 +9,9 @@ is no background recording, no audio storage, and a master switch.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
-from ai_ecosystem.core.errors.exceptions import AiEcosystemError, DomainValidationError
+from ai_ecosystem.core.errors.exceptions import AiEcosystemError
 from ai_ecosystem.interface.phone import PhoneClient
 
 
@@ -40,7 +40,7 @@ class TTSProvider(ABC):
 class MockSTT(STTProvider):
     """Scripted transcripts for tests (optionally failing)."""
 
-    def __init__(self, transcripts: Optional[dict[str, str]] = None,
+    def __init__(self, transcripts: dict[str, str] | None = None,
                  fail: bool = False) -> None:
         self._transcripts = dict(transcripts or {})
         self._fail = fail
