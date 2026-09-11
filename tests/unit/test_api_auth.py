@@ -12,15 +12,13 @@ from ai_ecosystem.interface.serve import build_stack, load_or_create_token
 @pytest.fixture(autouse=True)
 def _no_ambient_model(monkeypatch):
     """Tests must never reach a real model from ambient environment."""
-    for var in ("AI_ECO_MODEL_ENDPOINT", "AI_ECO_MODEL_API_KEY",
-                "AI_ECO_MODEL_NAME"):
+    for var in ("AI_ECO_MODEL_ENDPOINT", "AI_ECO_MODEL_API_KEY", "AI_ECO_MODEL_NAME"):
         monkeypatch.delenv(var, raising=False)
 
 
 def _stack(tmp_path, token="test-token-123"):
     config = AppConfig(db_path=str(tmp_path / "auth.db"), api_port=0)
-    stack = build_stack(config, workspace=str(tmp_path / "ws"),
-                        auth_token=token)
+    stack = build_stack(config, workspace=str(tmp_path / "ws"), auth_token=token)
     return stack
 
 
@@ -66,15 +64,15 @@ def test_preflight_needs_no_token_but_grants_listed_origins(tmp_path):
         base = server.url
 
         def options(origin):
-            req = urllib.request.Request(base + "/tasks", method="OPTIONS",
-                                         headers={"Origin": origin})
+            req = urllib.request.Request(
+                base + "/tasks", method="OPTIONS", headers={"Origin": origin}
+            )
             with urllib.request.urlopen(req) as response:
                 return response.status, dict(response.headers)
 
         status, headers = options("http://tauri.localhost")
         assert status == 204
-        assert headers.get("Access-Control-Allow-Origin") == \
-            "http://tauri.localhost"
+        assert headers.get("Access-Control-Allow-Origin") == "http://tauri.localhost"
         _, evil = options("https://evil.test")
         assert "Access-Control-Allow-Origin" not in evil
     finally:
@@ -89,17 +87,19 @@ def test_cors_grant_requires_allowlisted_origin(tmp_path):
         base = server.url
         req = urllib.request.Request(
             base + "/health",
-            headers={"Origin": "https://evil.test",
-                     "Authorization": "Bearer test-token-123"})
+            headers={"Origin": "https://evil.test", "Authorization": "Bearer test-token-123"},
+        )
         with urllib.request.urlopen(req) as response:
             assert "Access-Control-Allow-Origin" not in dict(response.headers)
         good = urllib.request.Request(
             base + "/health",
-            headers={"Origin": "http://tauri.localhost",
-                     "Authorization": "Bearer test-token-123"})
+            headers={"Origin": "http://tauri.localhost", "Authorization": "Bearer test-token-123"},
+        )
         with urllib.request.urlopen(good) as response:
-            assert dict(response.headers).get(
-                "Access-Control-Allow-Origin") == "http://tauri.localhost"
+            assert (
+                dict(response.headers).get("Access-Control-Allow-Origin")
+                == "http://tauri.localhost"
+            )
     finally:
         server.stop()
         stack.runtime.shutdown()

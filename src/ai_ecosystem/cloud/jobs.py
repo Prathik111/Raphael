@@ -48,10 +48,10 @@ class ComputeJob(Entity):
 
 _ALLOWED_MOVES: dict[JobStatus, frozenset[JobStatus]] = {
     # QUEUED->FAILED covers pre-run refusal (validation, auth, policy).
-    JobStatus.QUEUED: frozenset({JobStatus.RUNNING, JobStatus.FAILED,
-                                 JobStatus.CANCELLED}),
-    JobStatus.RUNNING: frozenset({JobStatus.SUCCEEDED, JobStatus.FAILED,
-                                  JobStatus.CANCELLED, JobStatus.TIMED_OUT}),
+    JobStatus.QUEUED: frozenset({JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELLED}),
+    JobStatus.RUNNING: frozenset(
+        {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT}
+    ),
     JobStatus.SUCCEEDED: frozenset(),
     JobStatus.FAILED: frozenset(),
     JobStatus.CANCELLED: frozenset(),
@@ -84,15 +84,16 @@ class SqliteComputeJobRepository:
             raise ResourceNotFoundError("ComputeJob", job_id)
         return job
 
-    def mark(self, job_id: str, status: JobStatus, error: str = "",
-             result_reference: str = "") -> ComputeJob:
+    def mark(
+        self, job_id: str, status: JobStatus, error: str = "", result_reference: str = ""
+    ) -> ComputeJob:
         """Advance lifecycle with timestamps (strict transition map)."""
         job = self.require(job_id)
-        terminal = {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED,
-                    JobStatus.TIMED_OUT}
+        terminal = {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.TIMED_OUT}
         if status not in _ALLOWED_MOVES.get(job.status, frozenset()):
             raise DomainValidationError(
-                f"illegal job transition: {job.status.value} -> {status.value}")
+                f"illegal job transition: {job.status.value} -> {status.value}"
+            )
         job.status = status
         job.error = error
         if result_reference:
@@ -108,8 +109,12 @@ class SqliteComputeJobRepository:
     def cancel(self, job_id: str) -> ComputeJob:
         """Cancel a non-terminal job."""
         job = self.require(job_id)
-        if job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED,
-                          JobStatus.CANCELLED, JobStatus.TIMED_OUT):
+        if job.status in (
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+            JobStatus.TIMED_OUT,
+        ):
             raise DomainValidationError(f"job {job_id!r} already terminal")
         return self.mark(job_id, JobStatus.CANCELLED)
 

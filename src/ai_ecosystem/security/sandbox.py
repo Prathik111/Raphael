@@ -197,7 +197,9 @@ class _WindowsJob:
     def assign(self, process: mp.Process) -> None:
         if self.handle is None or process.pid is None:
             return
-        access = self.PROCESS_SET_QUOTA | self.PROCESS_TERMINATE | self.PROCESS_QUERY_LIMITED_INFORMATION
+        access = (
+            self.PROCESS_SET_QUOTA | self.PROCESS_TERMINATE | self.PROCESS_QUERY_LIMITED_INFORMATION
+        )
         process_handle = self._kernel32.OpenProcess(access, 0, process.pid)
         if not process_handle:
             error = ctypes.get_last_error()

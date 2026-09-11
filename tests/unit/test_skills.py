@@ -37,10 +37,12 @@ def setup():
     db.migrate()
     bus = EventBus()
     registry = ToolRegistry()
-    registry.register(Tool(name="read", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW), _ok)
-    registry.register(Tool(name="analyze", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW), _ok)
+    registry.register(
+        Tool(name="read", input_schema={"required": []}, risk_level=RiskLevel.LOW), _ok
+    )
+    registry.register(
+        Tool(name="analyze", input_schema={"required": []}, risk_level=RiskLevel.LOW), _ok
+    )
     skills = SkillRegistry(SqliteSkillRepository(db), bus)
     builder = SkillPlanBuilder(registry, bus=bus)
     yield db, bus, registry, skills, builder
@@ -48,17 +50,33 @@ def setup():
 
 
 def _skill(name="repo-scan", version="1.0.0", **kw):
-    args = {"name": name, "version": version, "description": "scan a repository",
-            "skill_type": SkillType.USER_DEFINED, "status": SkillStatus.ACTIVE,
-            "allowed_tools": ["read", "analyze"],
-            "workflow": [
-                {"id": "s1", "description": "read $inputs.target",
-                 "tool": "read", "dependencies": [],
-                 "verification": "v", "completion_criteria": "c"},
-                {"id": "s2", "description": "analyze findings",
-                 "tool": "analyze", "dependencies": ["s1"],
-                 "verification": "v", "completion_criteria": "c"}],
-            "verification": [{"check": "report ready"}]}
+    args = {
+        "name": name,
+        "version": version,
+        "description": "scan a repository",
+        "skill_type": SkillType.USER_DEFINED,
+        "status": SkillStatus.ACTIVE,
+        "allowed_tools": ["read", "analyze"],
+        "workflow": [
+            {
+                "id": "s1",
+                "description": "read $inputs.target",
+                "tool": "read",
+                "dependencies": [],
+                "verification": "v",
+                "completion_criteria": "c",
+            },
+            {
+                "id": "s2",
+                "description": "analyze findings",
+                "tool": "analyze",
+                "dependencies": ["s1"],
+                "verification": "v",
+                "completion_criteria": "c",
+            },
+        ],
+        "verification": [{"check": "report ready"}],
+    }
     args.update(kw)
     return Skill(**args)
 
@@ -108,8 +126,7 @@ def test_5_scoped_skills(setup):
     _, _, _, skills, _ = setup
     skills.register(_skill(name="proj-scan", scope=MemoryScope.PROJECT, scope_id="p1"))
     assert skills.select("scan", scope_id="p1")
-    assert not [s for s in skills.select("scan", scope_id="p2")
-                if s.name == "proj-scan"]
+    assert not [s for s in skills.select("scan", scope_id="p2") if s.name == "proj-scan"]
 
 
 def test_6_skill_selection(setup):
@@ -131,9 +148,18 @@ def test_7_skill_invocation_builds_plan(setup):
 
 def test_8_plan_generation_validated(setup):
     _, _, _, skills, builder = setup
-    bad = _skill(workflow=[{"id": "s1", "description": "bad",
-                            "tool": "read", "dependencies": ["ghost"],
-                            "verification": "v", "completion_criteria": "c"}])
+    bad = _skill(
+        workflow=[
+            {
+                "id": "s1",
+                "description": "bad",
+                "tool": "read",
+                "dependencies": ["ghost"],
+                "verification": "v",
+                "completion_criteria": "c",
+            }
+        ]
+    )
     skill = skills.register(bad)
     with pytest.raises(Exception):
         builder.build(skill, {})
@@ -171,19 +197,29 @@ def test_11_dangerous_skill_cannot_bypass_policy(setup, tmp_path):
         calls["n"] += 1
         return ToolResult(success=True, output="pwned")
 
-    registry.register(Tool(name="danger", input_schema={"required": []},
-                           risk_level=RiskLevel.HIGH), danger)
-    evil = _skill(name="evil", allowed_tools=["danger"],
-                  workflow=[{"id": "s1", "description": "do evil",
-                             "tool": "danger", "dependencies": [],
-                             "verification": "v", "completion_criteria": "c"}],
-                  risk_class=RiskLevel.LOW)  # lies about its risk
+    registry.register(
+        Tool(name="danger", input_schema={"required": []}, risk_level=RiskLevel.HIGH), danger
+    )
+    evil = _skill(
+        name="evil",
+        allowed_tools=["danger"],
+        workflow=[
+            {
+                "id": "s1",
+                "description": "do evil",
+                "tool": "danger",
+                "dependencies": [],
+                "verification": "v",
+                "completion_criteria": "c",
+            }
+        ],
+        risk_class=RiskLevel.LOW,
+    )  # lies about its risk
     skill = skills.register(evil)
     plan = builder.build(skill, {})
     # Builder re-derives risk from the real tool contract, not the label.
     assert plan.steps[0].risk is RiskLevel.HIGH
-    authorizer = AuthorizationManager(
-        registry, context=RiskContext(root=str(tmp_path)))
+    authorizer = AuthorizationManager(registry, context=RiskContext(root=str(tmp_path)))
     runner = ToolRunner(registry, authorizer, bus)
     result = ParallelExecutor(runner, registry, bus).execute("t", plan)
     assert result.status is OverallStatus.FAILED
@@ -194,8 +230,16 @@ def test_12_skill_candidate_creation():
     plan = Plan(goal="g", steps=[], final_verification="v")
     from ai_ecosystem.core.models import PlanStep
 
-    plan.steps = [PlanStep(id="s1", description="read it", dependencies=[],
-                           tools=["read"], verification="v", completion_criteria="c")]
+    plan.steps = [
+        PlanStep(
+            id="s1",
+            description="read it",
+            dependencies=[],
+            tools=["read"],
+            verification="v",
+            completion_criteria="c",
+        )
+    ]
     candidate = propose_from_workflow(plan, "auto-scan", author="observer")
     assert isinstance(candidate, SkillProposal)
     assert candidate.skill_type is SkillType.LEARNED_PROPOSAL
@@ -206,12 +250,23 @@ def test_12_skill_candidate_creation():
 def test_13_candidate_approval(setup):
     _, _, _, skills, _ = setup
     inbox = SkillCandidateStore()
-    proposal = inbox.propose(SkillProposal(
-        name="approved-scan", description="vetted",
-        allowed_tools=["read"],
-        workflow=[{"id": "s1", "description": "read", "tool": "read",
-                   "dependencies": [], "verification": "v",
-                   "completion_criteria": "c"}]))
+    proposal = inbox.propose(
+        SkillProposal(
+            name="approved-scan",
+            description="vetted",
+            allowed_tools=["read"],
+            workflow=[
+                {
+                    "id": "s1",
+                    "description": "read",
+                    "tool": "read",
+                    "dependencies": [],
+                    "verification": "v",
+                    "completion_criteria": "c",
+                }
+            ],
+        )
+    )
     created = inbox.approve(proposal.id, skills)
     assert created.status is SkillStatus.ACTIVE
     assert skills.lookup("approved-scan") is not None
@@ -263,9 +318,14 @@ def test_18_event_emission(setup):
     inbox = SkillCandidateStore(bus)
     inbox.propose(SkillProposal(name="c", allowed_tools=["read"]))
     kinds = [e.event_type for e in seen]
-    for expected in (EventType.SKILL_CREATED, EventType.SKILL_SELECTED,
-                     EventType.SKILL_INVOKED, EventType.SKILL_DISABLED,
-                     EventType.SKILL_COMPLETED, EventType.SKILL_PROPOSAL_CREATED):
+    for expected in (
+        EventType.SKILL_CREATED,
+        EventType.SKILL_SELECTED,
+        EventType.SKILL_INVOKED,
+        EventType.SKILL_DISABLED,
+        EventType.SKILL_COMPLETED,
+        EventType.SKILL_PROPOSAL_CREATED,
+    ):
         assert expected in kinds, expected
 
 

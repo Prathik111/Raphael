@@ -41,9 +41,7 @@ def db():
 
 
 def _observer(db, mode, bus=None):
-    return UsageObserver(
-        ObservationPolicy(mode=mode),
-        SqliteUsageEventRepository(db), bus)
+    return UsageObserver(ObservationPolicy(mode=mode), SqliteUsageEventRepository(db), bus)
 
 
 def _seed(observer, tool="filesystem.read", n=4, success=True):
@@ -107,8 +105,11 @@ def test_6_repeated_workflow_detection(db):
 def test_7_confidence_calculation(db):
     observer = _observer(db, ObservationMode.SESSION_ONLY)
     _seed(observer, n=3)
-    pattern = next(p for p in PatternDetector().detect(observer.session_events())
-                   if p.pattern_type == "frequently_used_tool")
+    pattern = next(
+        p
+        for p in PatternDetector().detect(observer.session_events())
+        if p.pattern_type == "frequently_used_tool"
+    )
     assert pattern.confidence == round(3 / (3 + 5.0), 3)
     assert pattern.evidence_count == 3
 
@@ -116,8 +117,11 @@ def test_7_confidence_calculation(db):
 def test_8_proposal_creation_and_9_provenance(db):
     observer = _observer(db, ObservationMode.SESSION_ONLY)
     _seed(observer, n=5)
-    pattern = next(p for p in PatternDetector().detect(observer.session_events())
-                   if p.pattern_type == "frequently_used_tool")
+    pattern = next(
+        p
+        for p in PatternDetector().detect(observer.session_events())
+        if p.pattern_type == "frequently_used_tool"
+    )
     proposal = ProposalEngine().propose(pattern)
     assert proposal.status is ProposalStatus.PROPOSED
     assert proposal.pattern_id == pattern.id
@@ -140,8 +144,11 @@ def test_10_proposal_rejection(db):
 def test_11_memory_integration(db):
     observer = _observer(db, ObservationMode.LEARNING_ENABLED)
     _seed(observer, n=3)
-    pattern = next(p for p in PatternDetector().detect(observer.session_events())
-                   if p.pattern_type == "frequently_used_tool")
+    pattern = next(
+        p
+        for p in PatternDetector().detect(observer.session_events())
+        if p.pattern_type == "frequently_used_tool"
+    )
     engine = ProposalEngine()
     proposal = engine.propose(pattern)
     memories = MemoryStore(SqliteMemoryRepository(db), database=db)
@@ -154,8 +161,11 @@ def test_11_memory_integration(db):
 def test_12_preference_integration(db):
     observer = _observer(db, ObservationMode.LEARNING_ENABLED)
     _seed(observer, tool="git.status", n=3)
-    pattern = next(p for p in PatternDetector().detect(observer.session_events())
-                   if p.pattern_type == "frequently_used_tool")
+    pattern = next(
+        p
+        for p in PatternDetector().detect(observer.session_events())
+        if p.pattern_type == "frequently_used_tool"
+    )
     proposal = ProposalEngine().propose(pattern)
     preferences = PreferenceStore(db)
     created = ProposalEngine().adopt_to_preferences(proposal, preferences, "p1")
@@ -204,8 +214,9 @@ def test_15_restart_persistence(tmp_path):
     path = str(tmp_path / "usage.db")
     first = Database(path)
     first.migrate()
-    observer = UsageObserver(ObservationPolicy(mode=ObservationMode.LOCAL_PERSISTENCE),
-                             SqliteUsageEventRepository(first))
+    observer = UsageObserver(
+        ObservationPolicy(mode=ObservationMode.LOCAL_PERSISTENCE), SqliteUsageEventRepository(first)
+    )
     for _ in range(3):
         observer.observe_tool("filesystem.read", True)
     patterns = PatternDetector().detect(observer.session_events())
@@ -226,10 +237,12 @@ def test_15_restart_persistence(tmp_path):
 def test_16_deterministic_results(db):
     observer = _observer(db, ObservationMode.SESSION_ONLY)
     _seed(observer, n=4)
-    first = [(p.pattern_type, p.confidence) for p in
-             PatternDetector().detect(observer.session_events())]
-    second = [(p.pattern_type, p.confidence) for p in
-              PatternDetector().detect(observer.session_events())]
+    first = [
+        (p.pattern_type, p.confidence) for p in PatternDetector().detect(observer.session_events())
+    ]
+    second = [
+        (p.pattern_type, p.confidence) for p in PatternDetector().detect(observer.session_events())
+    ]
     assert first == second
 
 
@@ -257,6 +270,8 @@ def test_usage_perf_smoke(db):
     started = time.monotonic()
     patterns = PatternDetector().detect(observer.session_events())
     detect = time.monotonic() - started
-    print(f"\nusage smoke: 2000 ingested in {ingest:.2f}s, "
-          f"{len(patterns)} patterns in {detect:.2f}s")
+    print(
+        f"\nusage smoke: 2000 ingested in {ingest:.2f}s, "
+        f"{len(patterns)} patterns in {detect:.2f}s"
+    )
     assert ingest < 5 and detect < 5

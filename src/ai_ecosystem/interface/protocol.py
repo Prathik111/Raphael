@@ -92,8 +92,7 @@ class ProtocolValidator:
             raise ProtocolError("envelope has no message type")
         major = str(envelope.protocol_version).split(".")[0]
         if major != SUPPORTED_MAJOR:
-            raise ProtocolError(
-                f"protocol version {envelope.protocol_version!r} incompatible")
+            raise ProtocolError(f"protocol version {envelope.protocol_version!r} incompatible")
         now = self._clock()
         created = envelope.created_at.timestamp()
         if abs(now - created) > SKEW_TOLERANCE_S:
@@ -117,12 +116,20 @@ class ProtocolValidator:
             raise ProtocolError("envelope expired")
 
 
-def envelope_for(sender: str, sender_type: str, message_type: str,
-                 payload: dict | None = None,
-                 correlation_id: str = "",
-                 auth: AuthRef | None = None) -> EcosystemEnvelope:
+def envelope_for(
+    sender: str,
+    sender_type: str,
+    message_type: str,
+    payload: dict | None = None,
+    correlation_id: str = "",
+    auth: AuthRef | None = None,
+) -> EcosystemEnvelope:
     """Build a well-formed envelope (timestamps handled by the model)."""
     return EcosystemEnvelope(
-        sender=sender, sender_type=sender_type, message_type=message_type,
-        payload=dict(payload or {}), correlation_id=correlation_id,
-        auth=auth or AuthRef())
+        sender=sender,
+        sender_type=sender_type,
+        message_type=message_type,
+        payload=dict(payload or {}),
+        correlation_id=correlation_id,
+        auth=auth or AuthRef(),
+    )

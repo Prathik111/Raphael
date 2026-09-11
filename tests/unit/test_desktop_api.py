@@ -136,15 +136,12 @@ def _assert_http_error(callable_, attempts: int = 6) -> None:
         except ApiError:
             return  # the required outcome
         raise AssertionError("expected ApiError, call unexpectedly succeeded")
-    raise AssertionError(
-        f"transport unstable after {attempts} attempts")
+    raise AssertionError(f"transport unstable after {attempts} attempts")
 
 
 def test_10_frontend_cannot_directly_execute_tools(served):
-    _assert_http_error(
-        lambda: served.post("/tools/execute", {"tool": "terminal.execute"}))
-    _assert_http_error(
-        lambda: served.post("/policy/grant", {"tool": "terminal.execute"}))
+    _assert_http_error(lambda: served.post("/tools/execute", {"tool": "terminal.execute"}))
+    _assert_http_error(lambda: served.post("/policy/grant", {"tool": "terminal.execute"}))
     import ai_ecosystem.interface.server as module
 
     routes = open(module.__file__).read()
@@ -155,13 +152,13 @@ def test_10_frontend_cannot_directly_execute_tools(served):
 def test_11_secrets_never_reach_frontend(api, tmp_path):
     from ai_ecosystem.intelligence import MockModelProvider, ModelCapabilities
 
-    provider = MockModelProvider("secret-llm",
-                                 ModelCapabilities(structured_output=True))
+    provider = MockModelProvider("secret-llm", ModelCapabilities(structured_output=True))
     runtime_api, _, _ = api
     runtime_api.create_task("Seed task.")
     wired = RuntimeAPI(runtime_api._runtime, models=[provider])
-    assert wired.get_models() == [{"provider_id": "secret-llm",
-                                   "capabilities": provider.capabilities.model_dump()}]
+    assert wired.get_models() == [
+        {"provider_id": "secret-llm", "capabilities": provider.capabilities.model_dump()}
+    ]
     assert wired.get_skills() == []
     assert wired.get_agent_status() == {"tasks": {"CREATED": 1}}
 
@@ -178,22 +175,41 @@ def test_13_desktop_scaffold_integrity():
     assert "build" in package["scripts"] and "dev" in package["scripts"]
     tauri = json.loads((DESKTOP / "src-tauri" / "tauri.conf.json").read_text())
     assert tauri["app"]["withGlobalTauri"] is True
-    for required in ("src/App.tsx", "src/api.ts", "src/main.tsx",
-                     "src-tauri/Cargo.toml", "src-tauri/src/main.rs",
-                     "tsconfig.json", "vite.config.ts", "index.html"):
+    for required in (
+        "src/App.tsx",
+        "src/api.ts",
+        "src/main.tsx",
+        "src-tauri/Cargo.toml",
+        "src-tauri/src/main.rs",
+        "tsconfig.json",
+        "vite.config.ts",
+        "index.html",
+    ):
         assert (DESKTOP / required).is_file(), required
     # The shell must supervise the backend: reuse a healthy one, else
     # spawn the console script, wait for the port, kill on exit, and
     # expose the outcome to the UI via a command.
     shell = (DESKTOP / "src-tauri" / "src" / "main.rs").read_text()
-    for marker in ("ai-ecosystem-serve", "ai_ecosystem.interface.serve",
-                   "backend_status", "generate_handler", "CloseRequested"):
+    for marker in (
+        "ai-ecosystem-serve",
+        "ai_ecosystem.interface.serve",
+        "backend_status",
+        "generate_handler",
+        "CloseRequested",
+    ):
         assert marker in shell, marker
 
 
 def test_14_scaffold_contains_no_secrets_or_privileges():
-    forbidden = ("api_key", "apikey", "secret", "token", "password",
-                 "dangerouslySetInnerHTML", "__TAURI_INVOKE__(\"exec\"")
+    forbidden = (
+        "api_key",
+        "apikey",
+        "secret",
+        "token",
+        "password",
+        "dangerouslySetInnerHTML",
+        '__TAURI_INVOKE__("exec"',
+    )
     # Vendored / generated trees are not the scaffold: dependency sources,
     # lockfiles, build output, and compiled artifacts cannot carry OUR
     # secrets (and their .d.ts files legitimately name token/password
@@ -201,8 +217,7 @@ def test_14_scaffold_contains_no_secrets_or_privileges():
     skipped = {"node_modules", "dist", "target", ".git"}
     hits = []
     for path in sorted(DESKTOP.rglob("*")):
-        if any(part in skipped or part == "package-lock.json"
-               for part in path.parts):
+        if any(part in skipped or part == "package-lock.json" for part in path.parts):
             continue
         if path.is_file() and path.suffix in {".ts", ".tsx", ".json", ".rs", ".html"}:
             text = path.read_text(encoding="utf-8", errors="replace").lower()
@@ -211,9 +226,11 @@ def test_14_scaffold_contains_no_secrets_or_privileges():
     # type="password" is the masked credential input in Settings: correct
     # practice (the value is never in source), so it is allow-listed here.
     # "token" in api.ts is the credential variable name (not a secret).
-    hits = [h for h in hits if "csrf" not in h.lower()
-            and h != "App.tsx:password"
-            and h != "api.ts:token"]
+    hits = [
+        h
+        for h in hits
+        if "csrf" not in h.lower() and h != "App.tsx:password" and h != "api.ts:token"
+    ]
     assert hits == [], hits
 
 
@@ -229,6 +246,5 @@ def test_15_api_perf_smoke(served):
     started = time.monotonic()
     served.get("/tasks")
     list_s = time.monotonic() - started
-    print(f"\napi smoke: submit={submit_s:.3f}s events={event_s:.3f}s "
-          f"list={list_s:.3f}s")
+    print(f"\napi smoke: submit={submit_s:.3f}s events={event_s:.3f}s " f"list={list_s:.3f}s")
     assert events and submit_s < 5 and event_s < 5 and list_s < 5

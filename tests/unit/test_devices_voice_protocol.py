@@ -187,8 +187,7 @@ def test_hardware_commands(wired):
 def test_hardware_approval_and_denial(wired):
     hardware, device, _ = _paired_hardware(wired)
     task = hardware._api.create_task("Hardware task.")
-    approved = hardware.handle(device.packet(
-        "approve", {"task_id": task["task_id"]}))
+    approved = hardware.handle(device.packet("approve", {"task_id": task["task_id"]}))
     assert approved["grants"] == "nothing"  # advisory, never a grant
     denied = hardware.handle(device.packet("deny", {"task_id": task["task_id"]}))
     assert denied["state"] == TaskState.CANCELLED.value
@@ -229,8 +228,7 @@ def test_hardware_emergency_kill(wired):
 
 def test_voice_transcription(wired):
     phone, token = _paired_phone(wired)
-    session = VoiceSession(phone, token, MockSTT({"a1": "status of my tasks"}),
-                           MockTTS())
+    session = VoiceSession(phone, token, MockSTT({"a1": "status of my tasks"}), MockTTS())
     out = session.handle("a1")
     assert "tasks known" in out["reply"]
 
@@ -260,16 +258,14 @@ def test_voice_permission_request_readback(wired):
 def test_voice_cancellation(wired):
     phone, token = _paired_phone(wired)
     phone._api.create_task("Cancel the monthly report.")
-    session = VoiceSession(phone, token,
-                           MockSTT({"a1": "cancel the monthly report"}), MockTTS())
+    session = VoiceSession(phone, token, MockSTT({"a1": "cancel the monthly report"}), MockTTS())
     out = session.handle("a1")
     assert "Cancelled" in out["reply"]
 
 
 def test_voice_disabled(wired):
     phone, token = _paired_phone(wired)
-    session = VoiceSession(phone, token, MockSTT({"a1": "hi"}), MockTTS(),
-                           enabled=False)
+    session = VoiceSession(phone, token, MockSTT({"a1": "hi"}), MockTTS(), enabled=False)
     with pytest.raises(VoiceError, match="disabled"):
         session.handle("a1")
     session.set_enabled(True)
@@ -291,9 +287,14 @@ def _allow_all():
 
 def test_protocol_serialization():
     validator = _allow_all()
-    envelope = envelope_for("pc", "pc", "STATUS", {"ok": True},
-                            correlation_id="c1",
-                            auth=AuthRef(scheme="token", key_id="k1"))
+    envelope = envelope_for(
+        "pc",
+        "pc",
+        "STATUS",
+        {"ok": True},
+        correlation_id="c1",
+        auth=AuthRef(scheme="token", key_id="k1"),
+    )
     raw = validator.encode(envelope)
     back = validator.decode(raw)
     assert back.sender == "pc" and back.correlation_id == "c1"
@@ -329,8 +330,7 @@ def test_protocol_authentication():
 
 def test_protocol_authorization_context():
     validator = _allow_all()
-    envelope = envelope_for("pc", "pc", "X", auth=AuthRef(scheme="hmac",
-                                                          key_id="esp32-1"))
+    envelope = envelope_for("pc", "pc", "X", auth=AuthRef(scheme="hmac", key_id="esp32-1"))
     assert validator.validate(envelope).auth.key_id == "esp32-1"
 
 
@@ -365,8 +365,9 @@ def test_protocol_default_deny():
 def test_protocol_compatibility():
     v1 = _allow_all()
     v2 = _allow_all()
-    envelope = envelope_for("pc", "pc", "PING", {"n": 1}, correlation_id="c",
-                            auth=AuthRef(scheme="t", key_id="k"))
+    envelope = envelope_for(
+        "pc", "pc", "PING", {"n": 1}, correlation_id="c", auth=AuthRef(scheme="t", key_id="k")
+    )
     assert v2.decode(v1.encode(envelope)).payload == {"n": 1}
 
 

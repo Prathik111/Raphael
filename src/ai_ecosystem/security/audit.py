@@ -19,8 +19,7 @@ from pydantic import Field
 
 
 def _canonical(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                      default=str)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def _chain_hash(prev_hash: str, body: str) -> str:
@@ -33,8 +32,7 @@ _VOLATILE = {"record_hash", "updated_at"}
 
 
 def _body_of(record: AuditRecord) -> str:
-    return _canonical({k: v for k, v in record.model_dump().items()
-                       if k not in _VOLATILE})
+    return _canonical({k: v for k, v in record.model_dump().items() if k not in _VOLATILE})
 
 
 class AuditRecord(Entity):
@@ -69,10 +67,20 @@ class AuditLog:
         self._append_lock = threading.Lock()
         self._tail_hash: str | None = None
 
-    def record(self, action: str, actor: str = "", actor_type: str = "",
-               task_id: str = "", agent_id: str = "", resource: str = "",
-               decision: str = "", risk: str = "", authorization: str = "",
-               result: str = "", correlation_id: str = "") -> AuditRecord:
+    def record(
+        self,
+        action: str,
+        actor: str = "",
+        actor_type: str = "",
+        task_id: str = "",
+        agent_id: str = "",
+        resource: str = "",
+        decision: str = "",
+        risk: str = "",
+        authorization: str = "",
+        result: str = "",
+        correlation_id: str = "",
+    ) -> AuditRecord:
         """Append one record, linked to the previous hash.
 
         The read-tail/hash/append sequence holds a process lock so
@@ -86,11 +94,20 @@ class AuditLog:
                 self._tail_hash = previous[-1].record_hash if previous else "GENESIS"
             prev_hash = self._tail_hash
             record = AuditRecord(
-                timestamp=utcnow(), actor=actor, actor_type=actor_type,
-                task_id=task_id, agent_id=agent_id, action=action,
-                resource=resource, decision=decision, risk=risk,
-                authorization=authorization, result=result,
-                correlation_id=correlation_id, prev_hash=prev_hash)
+                timestamp=utcnow(),
+                actor=actor,
+                actor_type=actor_type,
+                task_id=task_id,
+                agent_id=agent_id,
+                action=action,
+                resource=resource,
+                decision=decision,
+                risk=risk,
+                authorization=authorization,
+                result=result,
+                correlation_id=correlation_id,
+                prev_hash=prev_hash,
+            )
             record.record_hash = _chain_hash(prev_hash, _body_of(record))
             created = self._t.create(record)
             self._tail_hash = created.record_hash
@@ -129,19 +146,26 @@ class AuditLog:
 
     @staticmethod
     def _hash_ok(record: AuditRecord) -> bool:
-        return record.record_hash == _chain_hash(record.prev_hash,
-                                                 _body_of(record))
+        return record.record_hash == _chain_hash(record.prev_hash, _body_of(record))
 
-    def query(self, actor: str = "", task_id: str = "", action: str = "",
-              correlation_id: str = "", limit: int = 100) -> list[AuditRecord]:
+    def query(
+        self,
+        actor: str = "",
+        task_id: str = "",
+        action: str = "",
+        correlation_id: str = "",
+        limit: int = 100,
+    ) -> list[AuditRecord]:
         """Filter records (all filters AND-combined, newest last)."""
         matches = [
-            record for record in self._t.list()
+            record
+            for record in self._t.list()
             if (not actor or record.actor == actor)
             and (not task_id or record.task_id == task_id)
             and (not action or record.action == action)
-            and (not correlation_id or record.correlation_id == correlation_id)]
-        return sorted(matches, key=lambda r: r.created_at)[-max(0, limit):]
+            and (not correlation_id or record.correlation_id == correlation_id)
+        ]
+        return sorted(matches, key=lambda r: r.created_at)[-max(0, limit) :]
 
     def export(self, path: str) -> int:
         """Write the chain to JSONL (rotation prerequisite)."""
@@ -157,12 +181,15 @@ class AuditLog:
         for record in self._t.list():
             self._t.delete(record.id)
         self._tail_hash = None  # fresh chain for checkpoint
-        self.record(action="audit.rotate", actor="system", actor_type="system",
-                    result=f"archived {count} records to {archive_path}")
+        self.record(
+            action="audit.rotate",
+            actor="system",
+            actor_type="system",
+            result=f"archived {count} records to {archive_path}",
+        )
         return count
 
-    def purge_older_than(self, days: float, archive_path: str,
-                           now: datetime | None = None) -> int:
+    def purge_older_than(self, days: float, archive_path: str, now: datetime | None = None) -> int:
         """Retention by archival rotation: export olds, then clear all.
 
         Physical deletion without export would break the chain, so
@@ -170,8 +197,11 @@ class AuditLog:
         Returns the number of archived records.
         """
         moment = now or utcnow()
-        olds = [record for record in self._t.list()
-                if (moment - record.created_at).total_seconds() / 86400.0 > days]
+        olds = [
+            record
+            for record in self._t.list()
+            if (moment - record.created_at).total_seconds() / 86400.0 > days
+        ]
         if not olds:
             return 0
         return self.rotate(archive_path)

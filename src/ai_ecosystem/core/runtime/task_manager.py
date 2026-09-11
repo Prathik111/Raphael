@@ -49,9 +49,7 @@ class TaskManager:
 
     def _create_task(self, title: str, goal: str) -> tuple[Task, ExecutionContext]:
         task = self._tasks.create(Task(title=title))
-        ctx = self._contexts.save(
-            ExecutionContext(task_id=task.id, goal=goal or title)
-        )
+        ctx = self._contexts.save(ExecutionContext(task_id=task.id, goal=goal or title))
         self._bus.publish(
             Event(
                 event_type=EventType.TASK_CREATED,
@@ -108,8 +106,7 @@ class AgentRuntime:
         self.tasks_repo = SqliteTaskRepository(self.db)
         self.contexts_repo = SqliteExecutionContextRepository(self.db)
         self.events_repo = SqliteEventRepository(self.db)
-        self.manager = TaskManager(self.tasks_repo, self.contexts_repo, self.bus,
-                                   self.db)
+        self.manager = TaskManager(self.tasks_repo, self.contexts_repo, self.bus, self.db)
 
     def submit_goal(self, goal: Goal) -> tuple[Task, ExecutionContext]:
         """Entry point: turn a user goal into a tracked task."""

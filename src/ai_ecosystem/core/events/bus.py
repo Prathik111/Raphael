@@ -160,8 +160,7 @@ class InMemoryEventStore(EventStore):
 
     def events_since(self, seq: int) -> list[tuple[int, Event]]:
         with self._lock:
-            return [(index, event) for index, event in enumerate(self._events)
-                    if index > seq]
+            return [(index, event) for index, event in enumerate(self._events) if index > seq]
 
     def attach(self, bus: EventBus, event_type: EventType | None = None) -> None:
         """Persist everything (or one type) published on ``bus``."""

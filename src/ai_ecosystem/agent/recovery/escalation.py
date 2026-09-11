@@ -31,13 +31,9 @@ class EscalationManager:
         self._bus = bus
         self.escalations: list[Escalation] = []
 
-    def escalate(
-        self, task_id: str, reason: str, evidence: list[str] | None = None
-    ) -> Escalation:
+    def escalate(self, task_id: str, reason: str, evidence: list[str] | None = None) -> Escalation:
         """Record an escalation and emit RECOVERY_EXHAUSTED."""
-        escalation = Escalation(
-            task_id=task_id, reason=reason, evidence=list(evidence or [])
-        )
+        escalation = Escalation(task_id=task_id, reason=reason, evidence=list(evidence or []))
         self.escalations.append(escalation)
         if self._bus is not None:
             self._bus.publish(

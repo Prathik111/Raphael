@@ -39,7 +39,9 @@ def test_legacy_v1_database_upgrades_to_v2(tmp_path):
     raw = sqlite3.connect(path)
     try:
         raw.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        raw.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        raw.execute(
+            "CREATE TABLE tasks (id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
         raw.execute("INSERT INTO meta (key, value) VALUES ('schema_version', '1')")
         raw.execute("INSERT INTO tasks (id, snapshot, updated_at) VALUES ('t1', '{}', 'now')")
         raw.commit()
@@ -105,10 +107,7 @@ def test_transaction_commit(db):
 
 def test_concurrent_access(db):
     repo = SqliteTaskRepository(db)
-    threads = [
-        threading.Thread(target=lambda: repo.create(Task(title=f"t{i}")))
-        for i in range(20)
-    ]
+    threads = [threading.Thread(target=lambda: repo.create(Task(title=f"t{i}"))) for i in range(20)]
     for t in threads:
         t.start()
     for t in threads:

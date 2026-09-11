@@ -28,8 +28,14 @@ def _ok(args):
 
 
 def _step(sid, tool, deps=()):
-    return PlanStep(id=sid, description=sid, dependencies=list(deps),
-                    tools=[tool], verification="v", completion_criteria="c")
+    return PlanStep(
+        id=sid,
+        description=sid,
+        dependencies=list(deps),
+        tools=[tool],
+        verification="v",
+        completion_criteria="c",
+    )
 
 
 def _plan(tool, sid="s1"):
@@ -44,35 +50,55 @@ def world(tmp_path):
     runtime = AgentRuntime(path)
     bus = runtime.bus
     registry = ToolRegistry()
-    registry.register(Tool(name="research", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW), _ok)
-    registry.register(Tool(name="code", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW), _ok)
-    registry.register(Tool(name="inspect", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW), _ok)
+    registry.register(
+        Tool(name="research", input_schema={"required": []}, risk_level=RiskLevel.LOW), _ok
+    )
+    registry.register(
+        Tool(name="code", input_schema={"required": []}, risk_level=RiskLevel.LOW), _ok
+    )
+    registry.register(
+        Tool(name="inspect", input_schema={"required": []}, risk_level=RiskLevel.LOW), _ok
+    )
     calls = {"danger": 0}
 
     def danger(args):
         calls["danger"] += 1
         return ToolResult(success=True, output="pwned")
 
-    registry.register(Tool(name="danger", input_schema={"required": []},
-                           risk_level=RiskLevel.HIGH), danger)
+    registry.register(
+        Tool(name="danger", input_schema={"required": []}, risk_level=RiskLevel.HIGH), danger
+    )
     agents = AgentRegistry(db, bus)
     defs = {}
-    for name, role, tools in (("r1", "research", ["research"]),
-                              ("c1", "coding", ["code"]),
-                              ("s1", "system", ["inspect"])):
-        created = agents.register(AgentDefinition(
-            id=f"{name}-id", name=name, role=role, capabilities=[role, "analysis"],
-            allowed_tools=list(tools)))
+    for name, role, tools in (
+        ("r1", "research", ["research"]),
+        ("c1", "coding", ["code"]),
+        ("s1", "system", ["inspect"]),
+    ):
+        created = agents.register(
+            AgentDefinition(
+                id=f"{name}-id",
+                name=name,
+                role=role,
+                capabilities=[role, "analysis"],
+                allowed_tools=list(tools),
+            )
+        )
         defs[name] = created
     manager = AgentManager(agents, runtime, registry, max_workers=2, bus=bus)
     for agent_id in ("r1-id", "c1-id", "s1-id"):
         manager.spawn(agent_id)
-    yield {"db": db, "runtime": runtime, "bus": bus, "registry": registry,
-           "agents": agents, "manager": manager, "defs": defs, "calls": calls,
-           "path": path}
+    yield {
+        "db": db,
+        "runtime": runtime,
+        "bus": bus,
+        "registry": registry,
+        "agents": agents,
+        "manager": manager,
+        "defs": defs,
+        "calls": calls,
+        "path": path,
+    }
     runtime.shutdown()
     db.close()
 
@@ -111,8 +137,10 @@ def test_5_agent_lifecycle(world):
 
 def test_6_supervisor_delegation(world):
     supervisor = Supervisor(world["manager"])
-    specs = [SubtaskSpec("r1-id", "find facts", _plan("research")),
-             SubtaskSpec("c1-id", "write code", _plan("code"))]
+    specs = [
+        SubtaskSpec("r1-id", "find facts", _plan("research")),
+        SubtaskSpec("c1-id", "write code", _plan("code")),
+    ]
     outcome = supervisor.run_goal("ship it", specs)
     assert len(outcome.task_ids) == 2
     assert len(outcome.succeeded) == 2
@@ -121,8 +149,9 @@ def test_6_supervisor_delegation(world):
 
 def test_7_child_task_creation(world):
     manager = world["manager"]
-    record = manager.submit("c1-id", "sub work", _plan("code"),
-                            parent_agent="supervisor", parent_task="root-1")
+    record = manager.submit(
+        "c1-id", "sub work", _plan("code"), parent_agent="supervisor", parent_task="root-1"
+    )
     assert record.parent_agent == "supervisor"
     assert record.parent_task == "root-1"
 
@@ -153,9 +182,20 @@ def test_9_parallel_agent_execution(world):
         definition.allowed_tools = ["meet"]
         table.update(definition)
     manager = world["manager"]
-    plan = Plan(goal="g", steps=[PlanStep(
-        id="s1", description="meet", dependencies=[], tools=["meet"],
-        verification="v", completion_criteria="c")], final_verification="v")
+    plan = Plan(
+        goal="g",
+        steps=[
+            PlanStep(
+                id="s1",
+                description="meet",
+                dependencies=[],
+                tools=["meet"],
+                verification="v",
+                completion_criteria="c",
+            )
+        ],
+        final_verification="v",
+    )
     r1 = manager.submit("r1-id", "meet up", plan)
     r2 = manager.submit("c1-id", "meet up", plan)
     results = manager.run_all([r1.id, r2.id])
@@ -184,13 +224,11 @@ def test_10_concurrency_limits():
     registry.register(Tool(name="slow", input_schema={"required": []}), slow)
     agents = AgentRegistry(db)
     for index in range(3):
-        agents.register(AgentDefinition(id=f"a{index}", name=f"a{index}",
-                                        allowed_tools=["slow"]))
+        agents.register(AgentDefinition(id=f"a{index}", name=f"a{index}", allowed_tools=["slow"]))
     manager = AgentManager(agents, runtime, registry, max_workers=1)
     for index in range(3):
         manager.spawn(f"a{index}")
-    records = [manager.submit(f"a{index}", "go slow", _plan("slow"))
-               for index in range(3)]
+    records = [manager.submit(f"a{index}", "go slow", _plan("slow")) for index in range(3)]
     try:
         results = manager.run_all([r.id for r in records])
     finally:
@@ -218,8 +256,8 @@ def test_12_unauthorized_escalation_blocked(world):
     permission = second._authorizer.authorize("t", world["registry"].get("code"), call)
     assert permission.decision.value == "GRANTED"
     denied = first._authorizer.authorize(
-        "t", world["registry"].get("code"),
-        world["registry"].build_call("t", "code", {}))
+        "t", world["registry"].get("code"), world["registry"].build_call("t", "code", {})
+    )
     assert denied.decision.value == "DENIED"
 
 
@@ -238,9 +276,10 @@ def test_13_agent_failure_propagation(world):
     table.update(definition)
     supervisor = Supervisor(world["manager"])
     bad = Plan(goal="g", steps=[_step("s1", "broken")], final_verification="v")
-    outcome = supervisor.run_goal("mixed", [
-        SubtaskSpec("r1-id", "fine", _plan("research")),
-        SubtaskSpec("c1-id", "broken", bad)])
+    outcome = supervisor.run_goal(
+        "mixed",
+        [SubtaskSpec("r1-id", "fine", _plan("research")), SubtaskSpec("c1-id", "broken", bad)],
+    )
     assert len(outcome.succeeded) == 1
     assert len(outcome.failed) == 1
 
@@ -300,12 +339,14 @@ def test_17_deterministic_scheduling(world):
     supervisor = Supervisor(world["manager"])
 
     def attempt():
-        specs = [SubtaskSpec("r1-id", "a", _plan("research")),
-                 SubtaskSpec("c1-id", "b", _plan("code"))]
+        specs = [
+            SubtaskSpec("r1-id", "a", _plan("research")),
+            SubtaskSpec("c1-id", "b", _plan("code")),
+        ]
         outcome = supervisor.run_goal("go", specs)
         owners = sorted(
-            world["manager"].task_repository.by_task(tid).owner_agent
-            for tid in outcome.task_ids)
+            world["manager"].task_repository.by_task(tid).owner_agent for tid in outcome.task_ids
+        )
         return owners, sorted(outcome.succeeded) == sorted(outcome.task_ids)
 
     first, second = attempt(), attempt()
@@ -346,8 +387,7 @@ def test_agent_lookup_perf_smoke(world):
 
 def test_multi_agent_scheduling_perf_smoke(world):
     manager = world["manager"]
-    records = [manager.submit("r1-id", f"job {i}", _plan("research"))
-               for i in range(6)]
+    records = [manager.submit("r1-id", f"job {i}", _plan("research")) for i in range(6)]
     started = time.monotonic()
     results = manager.run_all([r.id for r in records])
     elapsed = time.monotonic() - started
@@ -356,4 +396,3 @@ def test_multi_agent_scheduling_perf_smoke(world):
     # Smoke bound only guards pathology (deadlock/hang), not speed:
     # full-suite CPU contention can stretch trivial tasks.
     assert elapsed < 30
-
