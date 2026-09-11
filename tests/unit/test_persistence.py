@@ -107,7 +107,10 @@ def test_transaction_commit(db):
 
 def test_concurrent_access(db):
     repo = SqliteTaskRepository(db)
-    threads = [threading.Thread(target=lambda: repo.create(Task(title=f"t{i}"))) for i in range(20)]
+    threads = [
+        threading.Thread(target=lambda i=i: repo.create(Task(title=f"t{i}")))
+        for i in range(20)
+    ]
     for t in threads:
         t.start()
     for t in threads:
