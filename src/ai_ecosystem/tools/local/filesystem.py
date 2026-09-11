@@ -1,12 +1,8 @@
-"""Filesystem tools, confined to a root directory (defense in depth).
-
-Even though the policy layer (Gate 6) also rejects escapes, the tools
-themselves refuse to touch anything outside ``root`` so a policy bug
-alone cannot cause an escape.
-"""
+"""Filesystem tools confined to a canonical workspace root."""
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
@@ -18,14 +14,21 @@ MAX_READ_BYTES = 1_000_000
 MAX_LIST_ENTRIES = 5_000
 
 
+def _root(root: str | Path) -> Path:
+    resolved = Path(root).expanduser().resolve()
+    if not resolved.is_dir():
+        raise ToolExecutionError("filesystem", f"allowed root is not a directory: {resolved}")
+    return resolved
+
+
 def _resolve(root: Path, raw: str) -> Path:
+    if not isinstance(raw, str):
+        raise ToolExecutionError("filesystem", "path must be a string")
     candidate = (root / raw).resolve()
     try:
-        candidate.relative_to(root.resolve())
+        candidate.relative_to(root)
     except ValueError:
-        raise ToolExecutionError(
-            "filesystem", f"path {raw!r} escapes the allowed root"
-        ) from None
+        raise ToolExecutionError("filesystem", f"path {raw!r} escapes the allowed root") from None
     return candidate
 
 
@@ -37,24 +40,18 @@ def _read(arguments: dict, root: Path) -> ToolResult:
     if not target.is_file():
         raise ToolExecutionError("filesystem.read", f"not a file: {raw!r}")
     try:
-        if target.stat().st_size > MAX_READ_BYTES:
-            raise ToolExecutionError(
-                "filesystem.read",
-                f"file too large ({target.stat().st_size} bytes)")
+        size = target.stat().st_size
     except OSError as exc:
-        raise ToolExecutionError(
-            "filesystem.read", f"cannot stat {raw!r}") from exc
+        raise ToolExecutionError("filesystem.read", f"cannot stat {raw!r}") from exc
+    if size > MAX_READ_BYTES:
+        raise ToolExecutionError("filesystem.read", f"file too large ({size} bytes)")
     data = target.read_bytes()
-    if len(data) > MAX_READ_BYTES:  # raced growth between stat and read
-        raise ToolExecutionError(
-            "filesystem.read", f"file too large ({len(data)} bytes)"
-        )
+    if len(data) > MAX_READ_BYTES:
+        raise ToolExecutionError("filesystem.read", f"file too large ({len(data)} bytes)")
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
-        raise ToolExecutionError(
-            "filesystem.read", f"not decodable as UTF-8: {raw!r}"
-        ) from None
+        raise ToolExecutionError("filesystem.read", f"not decodable as UTF-8: {raw!r}") from None
     return ToolResult(success=True, output=text)
 
 
@@ -78,40 +75,19 @@ def _exists(arguments: dict, root: Path) -> ToolResult:
 
 
 def filesystem_tools(root: str | Path) -> list[tuple[Tool, ToolHandler]]:
-    """Build (contract, handler) pairs for filesystem.read/list/exists."""
-    base = Path(root)
+    """Build spawn-safe (contract, handler) pairs; no lambdas/closures."""
+    base = _root(root)
     return [
-        (
-            Tool(
-                name="filesystem.read",
-                description="Read a UTF-8 text file under the allowed root.",
-                input_schema={"required": ["path"],
-                              "properties": {"path": "string"}},
-                risk_level=RiskLevel.LOW,
-                capabilities=["read-only"],
-            ),
-            lambda args: _read(args, base),
-        ),
-        (
-            Tool(
-                name="filesystem.list",
-                description="List directory entries under the allowed root.",
-                input_schema={"required": [],
-                              "properties": {"path": "string"}},
-                risk_level=RiskLevel.LOW,
-                capabilities=["read-only"],
-            ),
-            lambda args: _list(args, base),
-        ),
-        (
-            Tool(
-                name="filesystem.exists",
-                description="Check whether a path exists under the allowed root.",
-                input_schema={"required": ["path"],
-                              "properties": {"path": "string"}},
-                risk_level=RiskLevel.LOW,
-                capabilities=["read-only"],
-            ),
-            lambda args: _exists(args, base),
-        ),
+        (Tool(name="filesystem.read", description="Read a UTF-8 text file under the allowed root.",
+              input_schema={"required": ["path"], "properties": {"path": "string"}},
+              risk_level=RiskLevel.LOW, capabilities=["read-only"]),
+         partial(_read, root=base)),
+        (Tool(name="filesystem.list", description="List directory entries under the allowed root.",
+              input_schema={"required": [], "properties": {"path": "string"}},
+              risk_level=RiskLevel.LOW, capabilities=["read-only"]),
+         partial(_list, root=base)),
+        (Tool(name="filesystem.exists", description="Check whether a path exists under the allowed root.",
+              input_schema={"required": ["path"], "properties": {"path": "string"}},
+              risk_level=RiskLevel.LOW, capabilities=["read-only"]),
+         partial(_exists, root=base)),
     ]
