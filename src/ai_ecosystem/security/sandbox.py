@@ -1,38 +1,19 @@
-"""Sandboxing: isolation where the platform permits it (Gate 30).
-
-Honest scope for userspace Python on a general OS:
-
-ENFORCED: per-call timeouts, cwd confinement for subprocess tools,
-secret-scrubbed environment under a process-wide lock, sequential
-execution within one provider, network-category denial.
-ADVISORY (recorded, not enforced): memory/disk/CPU/process caps --
-true enforcement needs OS primitives (job objects, cgroups, containers)
-owned by a later platform gate.
-
-Sandboxing never replaces authorization: sandboxed calls still pass
-the full policy path first, and tools flagged requires_sandbox fail
-closed when no provider is configured.
-
-Caveat: environment scrubbing is process-wide for the call duration
-(other threads briefly see the scrubbed view). Callers that need the
-full environment must run inside the sandbox call or accept this.
-"""
+"""Process-isolated sandbox provider with fail-closed network policy."""
 
 from __future__ import annotations
 
+import multiprocessing as mp
 import os
+import queue
 import threading
+import time
 from abc import ABC, abstractmethod
-from concurrent.futures import TimeoutError as FuturesTimeoutError
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from ai_ecosystem.core.errors.exceptions import (
-    DomainValidationError,
-    ToolExecutionError,
-    ToolTimeoutError,
-)
+from ai_ecosystem.core.errors.exceptions import DomainValidationError, ToolExecutionError, ToolTimeoutError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.secrets import looks_secret
 
@@ -46,61 +27,78 @@ class SandboxProfile(BaseModel):
     fs_root: str = ""
     allow_network: bool = False
     timeout_s: float = 60.0
-    max_memory_mb: int = 0  # advisory: needs OS primitives
-    max_disk_mb: int = 0  # advisory: needs OS primitives
-    max_cpu_s: float = 0.0  # advisory: needs OS primitives
-    max_processes: int = 1  # enforced: provider serializes per profile
+    max_memory_mb: int = 0
+    max_disk_mb: int = 0
+    max_cpu_s: float = 0.0
+    max_processes: int = 1
 
 
 class SandboxProvider(ABC):
-    """Runs a handler under a profile's enforced guarantees."""
-
     @abstractmethod
-    def run(self, tool: Tool, handler: ToolHandler, arguments: dict,
-            profile: SandboxProfile, timeout_s: float) -> ToolResult:
-        """Execute with isolation; raise ToolError subclasses on failure."""
+    def run(
+        self,
+        tool: Tool,
+        handler: ToolHandler,
+        arguments: dict,
+        profile: SandboxProfile,
+        timeout_s: float,
+        cancel_token: Any = None,
+    ) -> ToolResult:
         raise NotImplementedError
 
 
 class SandboxUnavailableError(ToolExecutionError):
-    """A sandboxed tool was invoked with no provider configured."""
-
     def __init__(self, tool: str) -> None:
         super().__init__(tool, "sandbox required but no provider configured")
 
 
-def _run_daemon(handler: ToolHandler, arguments: dict,
-                deadline: float, tool_name: str) -> ToolResult:
-    """Run a handler on a daemon thread with a hard deadline.
+def _scrubbed_env(extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+    clean = {key: value for key, value in os.environ.items() if not looks_secret(key)}
+    clean.update(extra or {})
+    return clean
 
-    Daemon workers cannot hang pool shutdown or interpreter exit;
-    late results are discarded by the caller treating timeout first.
-    """
-    box: dict[str, Any] = {}
 
-    def target() -> None:
+def _worker(
+    handler: ToolHandler,
+    arguments: dict,
+    profile: SandboxProfile,
+    has_subprocess_capability: bool,
+    clean_env: dict[str, str],
+    result_queue: Any,
+) -> None:
+    """Worker entrypoint; must stay top-level for Windows spawn."""
+    try:
+        os.environ.clear()
+        os.environ.update(clean_env)
+        if profile.fs_root and has_subprocess_capability:
+            os.chdir(profile.fs_root)
+        result_queue.put((True, handler(arguments)))
+    except BaseException as exc:  # noqa: BLE001 - cross-process transport
+        result_queue.put((False, f"{type(exc).__name__}: {exc}"))
+
+
+def _terminate_process(process: mp.Process) -> None:
+    """Terminate the worker; POSIX workers also own a process group."""
+    if not process.is_alive():
+        return
+    if os.name == "posix":
         try:
-            box["result"] = handler(arguments)
-        except BaseException as exc:  # noqa: BLE001 -- re-raised below
-            box["error"] = exc
-
-    thread = threading.Thread(target=target, daemon=True,
-                              name=f"sandbox-{tool_name}")
-    thread.start()
-    thread.join(max(float(deadline), 0.0))
-    if thread.is_alive():
-        raise FuturesTimeoutError(f"sandboxed handler exceeded {deadline}s")
-    if "error" in box:
-        raise box["error"]
-    return box.get("result")
+            os.killpg(process.pid, 9)
+        except (ProcessLookupError, PermissionError, OSError):
+            process.kill()
+    else:
+        process.kill()
+    process.join(timeout=1.0)
 
 
 class LocalSandboxProvider(SandboxProvider):
-    """Process-wide serialized execution with scrubbed environment.
+    """Run sandboxed handlers in killable worker processes.
 
-    One lock per profile name: dangerous work never runs concurrently
-    with itself, and secret-bearing environment variables are removed
-    for the duration of the call (restored afterwards, even on crash).
+    Process isolation makes deadlines and cancellation enforceable for Python
+    handlers. The profile is fail-closed for network access and serializes a
+    profile to its configured process budget. True memory/disk/CPU quotas are
+    still platform-specific and are rejected only when a profile asks for a
+    nonzero quota that this implementation cannot enforce.
     """
 
     def __init__(self) -> None:
@@ -112,34 +110,87 @@ class LocalSandboxProvider(SandboxProvider):
             return self._locks.setdefault(profile, threading.RLock())
 
     def scrubbed_env(self, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
-        """Environment copy minus secret-bearing variables."""
-        clean = {key: value for key, value in os.environ.items()
-                 if not looks_secret(key)}
-        clean.update(extra or {})
-        return clean
+        return _scrubbed_env(extra)
 
-    def run(self, tool: Tool, handler: ToolHandler, arguments: dict,
-            profile: SandboxProfile, timeout_s: float) -> ToolResult:
-        """Enforce network denial, cwd, env scrub, timeout, serialization."""
-        if "network" in set(tool.capabilities) and not profile.allow_network:
+    def run(
+        self,
+        tool: Tool,
+        handler: ToolHandler,
+        arguments: dict,
+        profile: SandboxProfile,
+        timeout_s: float,
+        cancel_token: Any = None,
+    ) -> ToolResult:
+        if profile.max_processes != 1:
+            raise ToolExecutionError(tool.name, "local sandbox currently supports max_processes=1 only")
+        if profile.max_memory_mb or profile.max_cpu_s or profile.max_disk_mb:
             raise ToolExecutionError(
-                tool.name, "network use denied by sandbox profile "
-                           f"{profile.name!r}")
-        call_args = dict(arguments)
-        if profile.fs_root and "subprocess" in set(tool.capabilities):
-            call_args.setdefault("cwd", profile.fs_root)
-        deadline = min(timeout_s, profile.timeout_s) if profile.timeout_s > 0 \
-            else timeout_s
+                tool.name,
+                "requested resource quota is not enforceable by the local sandbox provider",
+            )
+        if tool.network_access and not profile.allow_network:
+            raise ToolExecutionError(tool.name, f"network use denied by sandbox profile {profile.name!r}")
+        if tool.secrets_access:
+            raise ToolExecutionError(tool.name, "secret access is not granted by the local sandbox profile")
+        deadline = min(timeout_s, profile.timeout_s) if profile.timeout_s > 0 else timeout_s
         lock = self._lock_for(profile.name)
         with lock:
-            previous = dict(os.environ)
-            scrubbed = self.scrubbed_env()
-            os.environ.clear()
-            os.environ.update(scrubbed)
+            ctx = mp.get_context("spawn") if os.name == "nt" else mp.get_context("fork")
+            result_queue = ctx.Queue(maxsize=1)
+            clean_env = _scrubbed_env()
+            original_env = dict(os.environ)
+            process = ctx.Process(
+                target=_worker,
+                args=(
+                    handler,
+                    dict(arguments),
+                    profile,
+                    "subprocess" in set(tool.capabilities),
+                    clean_env,
+                    result_queue,
+                ),
+                daemon=True,
+            )
+            if os.name == "posix":
+                original_popen = None
+                try:
+                    os.environ.clear()
+                    os.environ.update(clean_env)
+                    process.start()
+                finally:
+                    os.environ.clear()
+                    os.environ.update(original_env)
+            else:
+                try:
+                    os.environ.clear()
+                    os.environ.update(clean_env)
+                    process.start()
+                finally:
+                    os.environ.clear()
+                    os.environ.update(original_env)
+
             try:
-                return _run_daemon(handler, call_args, deadline, tool.name)
-            except FuturesTimeoutError:
-                raise ToolTimeoutError(tool.name, deadline) from None
+                started = time.monotonic()
+                while process.is_alive():
+                    if cancel_token is not None and getattr(cancel_token, "cancelled", False):
+                        _terminate_process(process)
+                        raise ToolExecutionError(tool.name, "execution cancelled")
+                    if time.monotonic() - started >= max(deadline, 0.0):
+                        _terminate_process(process)
+                        raise ToolTimeoutError(tool.name, deadline)
+                    time.sleep(0.02)
+                process.join(timeout=0.2)
+                try:
+                    ok, value = result_queue.get(timeout=0.2)
+                except queue.Empty as exc:
+                    raise ToolExecutionError(tool.name, "sandbox worker exited without a result") from exc
+                if not ok:
+                    raise ToolExecutionError(tool.name, value)
+                if not isinstance(value, ToolResult):
+                    raise DomainValidationError("sandbox worker returned a non-ToolResult")
+                return value
             finally:
-                os.environ.clear()
-                os.environ.update(previous)
+                if process.is_alive():
+                    _terminate_process(process)
+                result_queue.close()
+                result_queue.join_thread()
