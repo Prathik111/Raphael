@@ -15,7 +15,8 @@ import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
@@ -130,8 +131,8 @@ class SyncPolicy:
 
     def __init__(
         self,
-        defaults: Optional[dict[str, SyncClass]] = None,
-        overrides: Optional[dict[str, SyncClass]] = None,
+        defaults: dict[str, SyncClass] | None = None,
+        overrides: dict[str, SyncClass] | None = None,
         allow_restricted_download: bool = False,
     ) -> None:
         self._defaults = dict(defaults or _DEFAULT_CLASS)
@@ -171,7 +172,7 @@ class SyncTransport(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def pull(self, object_id: str) -> Optional[SyncObject]:
+    def pull(self, object_id: str) -> SyncObject | None:
         """Fetch one remote object (None when absent)."""
         raise NotImplementedError
 
@@ -205,7 +206,7 @@ class MockSyncTransport(SyncTransport):
         self.remote[obj.object_id] = obj.model_copy(deep=True)
         return obj.version
 
-    def pull(self, object_id: str) -> Optional[SyncObject]:
+    def pull(self, object_id: str) -> SyncObject | None:
         """Fetch a copy (None when absent)."""
         self._check()
         self.pulls += 1
@@ -218,9 +219,9 @@ class SyncManager:
 
     def __init__(
         self,
-        policy: Optional[SyncPolicy] = None,
-        transport: Optional[SyncTransport] = None,
-        bus: Optional[EventBus] = None,
+        policy: SyncPolicy | None = None,
+        transport: SyncTransport | None = None,
+        bus: EventBus | None = None,
         max_retries: int = 3,
     ) -> None:
         self._policy = policy or SyncPolicy()
@@ -287,7 +288,7 @@ class SyncManager:
         if local is None:
             raise DomainValidationError(f"unknown object {object_id!r}")
         try:
-            remote_versions = self._transport.list_versions()
+            self._transport.list_versions()
         except (ConnectionError, OSError) as exc:
             return SyncResult(object_id=object_id, object_type=local.object_type,
                               state=SyncState.FAILED, detail=str(exc))

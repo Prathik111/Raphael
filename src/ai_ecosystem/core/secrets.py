@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 
 class SecretsProvider(ABC):
     """Source of named credentials (read-only interface)."""
 
     @abstractmethod
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str) -> str | None:
         """Return the credential, or None when absent."""
         raise NotImplementedError
 
@@ -42,7 +42,7 @@ class EnvSecretsProvider(SecretsProvider):
     def __init__(self, prefix: str = "AI_ECO_") -> None:
         self._prefix = prefix
 
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str) -> str | None:
         """Look up PREFIX + name in the environment."""
         return os.environ.get(f"{self._prefix}{name}")
 
@@ -50,10 +50,10 @@ class EnvSecretsProvider(SecretsProvider):
 class DictSecretsProvider(SecretsProvider):
     """In-memory credentials for tests (never production secrets)."""
 
-    def __init__(self, values: Optional[dict[str, str]] = None) -> None:
+    def __init__(self, values: dict[str, str] | None = None) -> None:
         self._values = dict(values or {})
 
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str) -> str | None:
         """Look up a test credential."""
         return self._values.get(name)
 
@@ -113,9 +113,9 @@ def sanitize(value: Any) -> Any:
 
     if isinstance(value, dict):
         return {key: _redact_value(key, item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_sanitize_item(item) for item in value]
-    if isinstance(value, (set, frozenset)):
+    if isinstance(value, set | frozenset):
         return {_sanitize_item(item) for item in value}
     if isinstance(value, BaseException):
         return sanitize_exception(value)
@@ -136,7 +136,7 @@ def sanitize(value: Any) -> Any:
 def _sanitize_item(item: Any) -> Any:
     if isinstance(item, dict):
         return redact(item)
-    if isinstance(item, (list, tuple, set, frozenset)):
+    if isinstance(item, list | tuple | set | frozenset):
         return sanitize(item)
     return "***" if looks_like_secret_value(item) else item
 
@@ -154,8 +154,8 @@ def _redact_value(key: str, value: Any) -> Any:
         return "***"
     if isinstance(value, dict):
         return redact(value)
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_sanitize_item(item) for item in value]
-    if isinstance(value, (set, frozenset)):
+    if isinstance(value, set | frozenset):
         return {_sanitize_item(item) for item in value}
     return value

@@ -7,7 +7,7 @@ importing this module never pulls in execution or reasoning.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.agent.verifier.strategies import (
     ArtifactExistsStrategy,
@@ -35,9 +35,9 @@ class Verifier:
 
     def __init__(
         self,
-        strategies: Optional[dict[str, VerificationStrategy]] = None,
-        bus: Optional[EventBus] = None,
-        repository: Optional[SqliteVerificationRepository] = None,
+        strategies: dict[str, VerificationStrategy] | None = None,
+        bus: EventBus | None = None,
+        repository: SqliteVerificationRepository | None = None,
     ) -> None:
         defaults: dict[str, VerificationStrategy] = {
             CommandResultStrategy.name: CommandResultStrategy(),
@@ -55,7 +55,7 @@ class Verifier:
         """Registered strategy names (sorted)."""
         return sorted(self._strategies)
 
-    def with_test_command(self, runner: Any, registry: Any) -> "Verifier":
+    def with_test_command(self, runner: Any, registry: Any) -> Verifier:
         """Return a sibling verifier plus the test-command strategy."""
         strategies = dict(self._strategies)
         strategies[TestCommandStrategy.name] = TestCommandStrategy(runner, registry)

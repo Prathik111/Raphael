@@ -7,7 +7,6 @@ that, so usage observation (Gate 16) can never silently piggyback.
 
 from __future__ import annotations
 
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import AiEcosystemError
 from ai_ecosystem.core.events.bus import Event, EventBus
@@ -71,7 +70,7 @@ class SystemAwarenessManager:
     def __init__(
         self,
         probe: SystemProbe,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
         enabled: bool = True,
         include_host: bool = False,
     ) -> None:

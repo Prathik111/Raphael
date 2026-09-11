@@ -12,16 +12,13 @@ from ai_ecosystem.agent.multi import (
     AgentManager,
     AgentMessage,
     AgentRegistry,
-    AgentStatus,
     Coordinator,
     MessageBus,
     MessageType,
     SubtaskSpec,
-    Supervisor,
 )
 from ai_ecosystem.agent.verifier import Verifier
 from ai_ecosystem.core.errors import DomainValidationError
-from ai_ecosystem.core.events import Event, EventBus
 from ai_ecosystem.core.models import Plan, PlanStep, Tool, ToolResult
 from ai_ecosystem.core.models.base import utcnow
 from ai_ecosystem.core.models.enums import EventType, RiskLevel

@@ -12,7 +12,6 @@ proposal-without-policy-change, event trace, and restart safety.
 
 import time
 
-from ai_ecosystem.agent.executor import OverallStatus
 from ai_ecosystem.agent.multi import (
     AgentDefinition,
     AgentManager,
@@ -22,14 +21,12 @@ from ai_ecosystem.agent.multi import (
     SubtaskSpec,
 )
 from ai_ecosystem.agent.verifier import Verifier
-from ai_ecosystem.core.events import EventBus
 from ai_ecosystem.core.models import Plan, PlanStep, Tool, ToolResult
 from ai_ecosystem.core.models.enums import (
     EventType,
     MemoryScope,
     MemoryType,
     RiskLevel,
-    VerificationStatus,
 )
 from ai_ecosystem.core.persistence import (
     Database,
@@ -52,8 +49,6 @@ from ai_ecosystem.personalization.personality import (
     PersonalityStore,
     PreferenceStore,
 )
-from ai_ecosystem.security import Policy
-from ai_ecosystem.skills import SkillPlanBuilder, SkillRegistry
 from ai_ecosystem.system.monitor import SystemAwarenessManager
 from ai_ecosystem.system.monitor.probe import MockProbe
 from ai_ecosystem.system.monitor.models import (

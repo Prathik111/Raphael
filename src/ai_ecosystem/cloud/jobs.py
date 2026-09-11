@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -39,8 +39,8 @@ class ComputeJob(Entity):
     requested_capabilities: list[str] = Field(default_factory=list)
     status: JobStatus = JobStatus.QUEUED
     created_at: datetime = Field(default_factory=utcnow)
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     result_reference: str = ""
     error: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -73,7 +73,7 @@ class SqliteComputeJobRepository:
             raise DomainValidationError("only QUEUED jobs can be submitted")
         return self._t.create(job)
 
-    def get(self, job_id: str) -> Optional[ComputeJob]:
+    def get(self, job_id: str) -> ComputeJob | None:
         """Fetch by id (None when unknown)."""
         return self._t.get(job_id)
 

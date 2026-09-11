@@ -98,7 +98,8 @@ def _kit(tmp_path, tools, provider, replan_fn=None, with_research=False,
     research = ResearchManager(runner, registry, bus=bus) if with_research else None
     planner_factory = None
     if replan_fn is not None:
-        planner_factory = lambda: RecoveryPlanner(registry, replan_provider=replan_fn)
+        def planner_factory():
+            return RecoveryPlanner(registry, replan_provider=replan_fn)
     agent = SingleAgent(
         runtime=runtime, router=_router(provider),
         requirements=RoutingRequirements(), registry=registry, runner=runner,

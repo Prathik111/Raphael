@@ -6,7 +6,7 @@ import pytest
 
 from ai_ecosystem.agent.executor import OverallStatus, ParallelExecutor
 from ai_ecosystem.core.errors import DomainValidationError
-from ai_ecosystem.core.events import Event, EventBus
+from ai_ecosystem.core.events import EventBus
 from ai_ecosystem.core.models import Plan, Skill, Tool, ToolResult
 from ai_ecosystem.core.models.enums import (
     EventType,
@@ -24,7 +24,7 @@ from ai_ecosystem.skills import (
     SkillRegistry,
     propose_from_workflow,
 )
-from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry, ToolRunner
+from ai_ecosystem.tools import ToolRegistry, ToolRunner
 
 
 def _ok(args):

@@ -4,7 +4,7 @@ import pytest
 
 from ai_ecosystem.core.errors import DomainValidationError, ResourceNotFoundError
 from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models import Memory, Tool
+from ai_ecosystem.core.models import Memory
 from ai_ecosystem.core.models.enums import (
     EventType,
     MemoryScope,
@@ -21,7 +21,7 @@ from ai_ecosystem.personalization.memory import (
     MemoryStore,
 )
 from ai_ecosystem.security import AuthorizationManager, RiskContext
-from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry, ToolRunner
+from ai_ecosystem.tools import ToolRegistry, ToolRunner
 
 
 @pytest.fixture()
@@ -169,10 +169,9 @@ def test_14_transaction_rollback():
     db.migrate()
     try:
         repo = SqliteMemoryRepository(db)
-        with pytest.raises(RuntimeError):
-            with db.transaction():
-                repo.create(Memory(content="doomed"))
-                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError), db.transaction():
+            repo.create(Memory(content="doomed"))
+            raise RuntimeError("boom")
         assert repo.list() == []
     finally:
         db.close()

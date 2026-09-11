@@ -9,7 +9,7 @@ adoption targets only memory/preference stores passed in by the caller.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
@@ -45,9 +45,9 @@ class UsageObserver:
 
     def __init__(
         self,
-        policy: Optional[ObservationPolicy] = None,
+        policy: ObservationPolicy | None = None,
         repository: Any | None = None,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._policy = policy or ObservationPolicy()
         self._repository = repository
@@ -64,14 +64,14 @@ class UsageObserver:
         self._policy.mode = mode
 
     def observe_tool(self, tool: str, success: bool, duration_ms: float = 0.0,
-                     project: str = "", agent: str = "") -> Optional[UsageEvent]:
+                     project: str = "", agent: str = "") -> UsageEvent | None:
         """Record a tool use (name only -- never arguments or outputs)."""
         return self.record(UsageEvent(
             category="tool", action=tool, project_scope=project,
             agent_scope=agent, duration_ms=duration_ms, success=success))
 
     def observe_model(self, model: str, success: bool, task_kind: str = "",
-                      project: str = "") -> Optional[UsageEvent]:
+                      project: str = "") -> UsageEvent | None:
         """Record a model use (name only -- never prompts)."""
         return self.record(UsageEvent(
             category="model", action=model, project_scope=project,
@@ -79,13 +79,13 @@ class UsageObserver:
             metadata={"task_kind": task_kind} if task_kind else {}))
 
     def observe_task(self, outcome: str, success: bool, duration_ms: float = 0.0,
-                     project: str = "", agent: str = "") -> Optional[UsageEvent]:
+                     project: str = "", agent: str = "") -> UsageEvent | None:
         """Record a task outcome (no goal text, no results)."""
         return self.record(UsageEvent(
             category="task", action=outcome, project_scope=project,
             agent_scope=agent, duration_ms=duration_ms, success=success))
 
-    def record(self, event: UsageEvent) -> Optional[UsageEvent]:
+    def record(self, event: UsageEvent) -> UsageEvent | None:
         """Store per policy; returns None when observation is disabled.
 
         Session memory is capped (oldest dropped first); persistence
@@ -205,7 +205,7 @@ class ProposalEngine:
         "repeated_failure": ProposalKind.WORKFLOW_HINT,
     }
 
-    def __init__(self, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, bus: EventBus | None = None) -> None:
         self._bus = bus
 
     def propose(self, pattern: UsagePattern) -> LearningProposal:

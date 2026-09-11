@@ -11,18 +11,16 @@ from ai_ecosystem.agent.multi import (
     AgentManager,
     AgentRegistry,
     AgentStatus,
-    AgentTask,
     SubtaskSpec,
     Supervisor,
 )
 from ai_ecosystem.agent.verifier import Verifier
-from ai_ecosystem.core.errors import DomainValidationError, ResourceNotFoundError
-from ai_ecosystem.core.events import Event, EventBus
+from ai_ecosystem.core.errors import DomainValidationError
 from ai_ecosystem.core.models import Plan, PlanStep, Tool, ToolResult
 from ai_ecosystem.core.models.enums import EventType, RiskLevel
 from ai_ecosystem.core.persistence import Database
 from ai_ecosystem.core.runtime import AgentRuntime
-from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry
+from ai_ecosystem.tools import ToolRegistry
 
 
 def _ok(args):

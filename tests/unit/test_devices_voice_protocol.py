@@ -5,8 +5,7 @@ import time
 import pytest
 
 from ai_ecosystem.core.errors import DomainValidationError
-from ai_ecosystem.core.events import EventBus
-from ai_ecosystem.core.models.enums import EventType, TaskState
+from ai_ecosystem.core.models.enums import TaskState
 from ai_ecosystem.core.runtime import AgentRuntime
 from ai_ecosystem.interface import (
     ApiError,
@@ -14,7 +13,6 @@ from ai_ecosystem.interface import (
     GatewayError,
     HardwareGateway,
     PhoneClient,
-    ProtocolError,
     ProtocolValidator,
     RuntimeAPI,
     SimulatedDevice,
@@ -111,7 +109,7 @@ def test_write_scopes_require_nonce(wired):
 def test_phone_permission_request_view(wired):
     phone, token = _paired_phone(wired)
     assert phone.permission_requests(token) == []
-    task = phone._api.create_task("Phone task.")
+    phone._api.create_task("Phone task.")
     assert phone.permission_requests(token) == []  # none decided yet
 
 

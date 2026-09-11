@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.agent.recovery.classification import FailureClassifier
 from ai_ecosystem.agent.recovery.policy import RetryPolicy
@@ -53,7 +53,7 @@ class SourceCollector:
         runner: ToolRunner,
         registry: ToolRegistry,
         search_tool: str = "web.search",
-        retry_policy: Optional[RetryPolicy] = None,
+        retry_policy: RetryPolicy | None = None,
         max_attempts: int = 2,
     ) -> None:
         self._runner = runner

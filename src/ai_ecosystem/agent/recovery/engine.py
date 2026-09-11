@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.agent.executor.executor import ExecutionResult, OverallStatus
 from ai_ecosystem.agent.recovery.classification import (
@@ -70,7 +70,7 @@ class RecoveryOutcome:
     replans: int = 0
     plan_versions: list[str] = field(default_factory=list)
     audit: list[RecoveryRecord] = field(default_factory=list)
-    final_verification: Optional[VerificationResult] = None
+    final_verification: VerificationResult | None = None
     reason: str = ""
 
 
@@ -79,10 +79,10 @@ class RecoveryEngine:
 
     def __init__(
         self,
-        policy: Optional[RecoveryPolicy] = None,
-        planner: Optional[RecoveryPlanner] = None,
-        escalation: Optional[EscalationManager] = None,
-        bus: Optional[EventBus] = None,
+        policy: RecoveryPolicy | None = None,
+        planner: RecoveryPlanner | None = None,
+        escalation: EscalationManager | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._policy = policy or RecoveryPolicy()
         self._planner = planner
@@ -95,7 +95,7 @@ class RecoveryEngine:
         plan: Plan,
         execute_fn: ExecuteFn,
         verify_fn: VerifyFn,
-        arguments: Optional[dict[str, Any]] = None,
+        arguments: dict[str, Any] | None = None,
         max_attempts: int = 3,
     ) -> RecoveryOutcome:
         """Execute, verify, and recover until terminal (bounded)."""
@@ -108,10 +108,10 @@ class RecoveryEngine:
         plan: Plan,
         execute_fn: ExecuteFn,
         verify_fn: VerifyFn,
-        arguments: Optional[dict[str, Any]] = None,
+        arguments: dict[str, Any] | None = None,
         max_attempts: int = 3,
-        prior_result: Optional[ExecutionResult] = None,
-        prior_verification: Optional[VerificationResult] = None,
+        prior_result: ExecutionResult | None = None,
+        prior_verification: VerificationResult | None = None,
     ) -> RecoveryOutcome:
         """Like run(), but starts from an already-observed failure.
 
@@ -291,7 +291,7 @@ class RecoveryEngine:
     def _terminal(
         self, task_id: str, status: OutcomeStatus, attempt: int,
         retries: int, replans: int, versions: list[str],
-        audit: list[RecoveryRecord], verification: Optional[VerificationResult],
+        audit: list[RecoveryRecord], verification: VerificationResult | None,
         reason: str,
     ) -> RecoveryOutcome:
         return RecoveryOutcome(

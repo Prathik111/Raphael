@@ -11,6 +11,7 @@ from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.core.secrets import redact
 from ai_ecosystem.tools.registry.registry import ToolHandler
+import contextlib
 
 OUTPUT_CAP = 100_000
 CONTRACT_TIMEOUT_S = 120.0
@@ -54,10 +55,8 @@ def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
             return
         except (OSError, subprocess.TimeoutExpired):
             pass
-    try:
+    with contextlib.suppress(OSError):
         proc.kill()
-    except OSError:
-        pass
 
 
 def _run(arguments: dict, root: object,
@@ -88,10 +87,8 @@ def _run(arguments: dict, root: object,
         stdout, stderr = proc.communicate(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         _kill_process_tree(proc)
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
         raise ToolTimeoutError("terminal.execute", timeout_s) from None
     output = stdout + stderr
     if len(output) > OUTPUT_CAP:

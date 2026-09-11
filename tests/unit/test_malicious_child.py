@@ -7,7 +7,7 @@ permission grant, no RiskEngine bypass, no direct execution. Any
 attempted execution flows through the normal boundary and is denied.
 """
 
-from ai_ecosystem.agent.executor import OverallStatus, ParallelExecutor
+from ai_ecosystem.agent.executor import OverallStatus
 from ai_ecosystem.agent.multi import (
     AgentDefinition,
     AgentManager,

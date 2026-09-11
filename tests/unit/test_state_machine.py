@@ -19,7 +19,7 @@ def test_happy_path_is_valid():
         TaskState.VERIFYING,
         TaskState.COMPLETED,
     ]
-    for frm, to in zip(chain, chain[1:]):
+    for frm, to in zip(chain, chain[1:], strict=False):
         assert sm.is_valid_transition(frm, to), f"{frm} -> {to}"
 
 

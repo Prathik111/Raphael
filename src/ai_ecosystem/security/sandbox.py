@@ -10,7 +10,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -55,7 +55,7 @@ class SandboxUnavailableError(ToolExecutionError):
         super().__init__(tool, "sandbox required but no provider configured")
 
 
-def _scrubbed_env(extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+def _scrubbed_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     clean = {key: value for key, value in os.environ.items() if not looks_secret(key)}
     clean.update(extra or {})
     return clean
@@ -233,7 +233,7 @@ class LocalSandboxProvider(SandboxProvider):
         with self._meta_lock:
             return self._locks.setdefault(profile, threading.RLock())
 
-    def scrubbed_env(self, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+    def scrubbed_env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         return _scrubbed_env(extra)
 
     def run(

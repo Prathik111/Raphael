@@ -6,7 +6,6 @@ import time
 import pytest
 
 from ai_ecosystem.cloud import (
-    CloudAuthError,
     CloudStatus,
     CloudUnavailableError,
     ComputeJob,
@@ -15,11 +14,8 @@ from ai_ecosystem.cloud import (
     OCIModelProvider,
     OCIProvider,
     SqliteComputeJobRepository,
-    redact_event,
 )
 from ai_ecosystem.core.errors import DomainValidationError, ModelUnavailableError
-from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models.enums import EventType
 from ai_ecosystem.core.persistence import Database
 from ai_ecosystem.core.secrets import DictSecretsProvider, redact
 from ai_ecosystem.intelligence import (

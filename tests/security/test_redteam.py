@@ -15,7 +15,6 @@ from ai_ecosystem.agent.multi import (
 )
 from ai_ecosystem.agent.planner.backend import ModelReasoningBackend
 from ai_ecosystem.cloud import (
-    ComputeRequirements,
     MockOCITransport,
     MockSyncTransport,
     OCIProvider,
@@ -41,8 +40,7 @@ from ai_ecosystem.core.secrets import DictSecretsProvider
 from ai_ecosystem.intelligence import MockModelProvider, ModelResponse
 from ai_ecosystem.interface import WorkspaceManager, SqliteWorkspaceRepository
 from ai_ecosystem.personalization.memory import MemoryCandidate, MemoryStore
-from ai_ecosystem.scheduler import GlobalScheduler, ScheduledJob, ScheduledStatus
-from ai_ecosystem.scheduler import SqliteScheduledJobRepository
+from ai_ecosystem.scheduler import GlobalScheduler
 from ai_ecosystem.security import AuditLog, AuthorizationManager, RiskContext
 from ai_ecosystem.skills import SkillRegistry
 from ai_ecosystem.tools import ToolRegistry, ToolRunner
@@ -259,7 +257,6 @@ def test_invariant_no_handler_runs_without_grant(arsenal):
         assert result.success is False
     assert arsenal["calls"]["danger"] == 0
     # And the audit trail saw the denials (runner auditor hook).
-    from ai_ecosystem.security import AuditLog
     from ai_ecosystem.tools import ToolRunner as TR
 
     db = Database(":memory:")
