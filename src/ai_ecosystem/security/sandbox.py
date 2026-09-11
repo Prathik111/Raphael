@@ -13,7 +13,11 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
-from ai_ecosystem.core.errors.exceptions import DomainValidationError, ToolExecutionError, ToolTimeoutError
+from ai_ecosystem.core.errors.exceptions import (
+    DomainValidationError,
+    ToolExecutionError,
+    ToolTimeoutError,
+)
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.secrets import looks_secret
 
@@ -21,8 +25,6 @@ ToolHandler = Callable[[dict], ToolResult]
 
 
 class SandboxProfile(BaseModel):
-    """Isolation contract for one class of tool executions."""
-
     name: str = "default"
     fs_root: str = ""
     allow_network: bool = False
@@ -92,14 +94,7 @@ def _terminate_process(process: mp.Process) -> None:
 
 
 class LocalSandboxProvider(SandboxProvider):
-    """Run sandboxed handlers in killable worker processes.
-
-    Process isolation makes deadlines and cancellation enforceable for Python
-    handlers. The profile is fail-closed for network access and serializes a
-    profile to its configured process budget. True memory/disk/CPU quotas are
-    still platform-specific and are rejected only when a profile asks for a
-    nonzero quota that this implementation cannot enforce.
-    """
+    """Run sandboxed handlers in killable worker processes."""
 
     def __init__(self) -> None:
         self._locks: dict[str, threading.RLock] = {}
@@ -122,16 +117,22 @@ class LocalSandboxProvider(SandboxProvider):
         cancel_token: Any = None,
     ) -> ToolResult:
         if profile.max_processes != 1:
-            raise ToolExecutionError(tool.name, "local sandbox currently supports max_processes=1 only")
+            raise ToolExecutionError(
+                tool.name, "local sandbox currently supports max_processes=1 only"
+            )
         if profile.max_memory_mb or profile.max_cpu_s or profile.max_disk_mb:
             raise ToolExecutionError(
                 tool.name,
                 "requested resource quota is not enforceable by the local sandbox provider",
             )
         if tool.network_access and not profile.allow_network:
-            raise ToolExecutionError(tool.name, f"network use denied by sandbox profile {profile.name!r}")
+            raise ToolExecutionError(
+                tool.name, f"network use denied by sandbox profile {profile.name!r}"
+            )
         if tool.secrets_access:
-            raise ToolExecutionError(tool.name, "secret access is not granted by the local sandbox profile")
+            raise ToolExecutionError(
+                tool.name, "secret access is not granted by the local sandbox profile"
+            )
         deadline = min(timeout_s, profile.timeout_s) if profile.timeout_s > 0 else timeout_s
         lock = self._lock_for(profile.name)
         with lock:
@@ -149,25 +150,14 @@ class LocalSandboxProvider(SandboxProvider):
                     clean_env,
                     result_queue,
                 ),
-                daemon=True,
             )
-            if os.name == "posix":
-                original_popen = None
-                try:
-                    os.environ.clear()
-                    os.environ.update(clean_env)
-                    process.start()
-                finally:
-                    os.environ.clear()
-                    os.environ.update(original_env)
-            else:
-                try:
-                    os.environ.clear()
-                    os.environ.update(clean_env)
-                    process.start()
-                finally:
-                    os.environ.clear()
-                    os.environ.update(original_env)
+            try:
+                os.environ.clear()
+                os.environ.update(clean_env)
+                process.start()
+            finally:
+                os.environ.clear()
+                os.environ.update(original_env)
 
             try:
                 started = time.monotonic()
@@ -183,7 +173,9 @@ class LocalSandboxProvider(SandboxProvider):
                 try:
                     ok, value = result_queue.get(timeout=0.2)
                 except queue.Empty as exc:
-                    raise ToolExecutionError(tool.name, "sandbox worker exited without a result") from exc
+                    raise ToolExecutionError(
+                        tool.name, "sandbox worker exited without a result"
+                    ) from exc
                 if not ok:
                     raise ToolExecutionError(tool.name, value)
                 if not isinstance(value, ToolResult):
