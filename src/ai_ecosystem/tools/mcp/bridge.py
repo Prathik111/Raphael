@@ -8,7 +8,8 @@ duck-typed tool object, and only live server connections require it.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
@@ -42,7 +43,7 @@ def adapt_tool(
             return ToolResult(success=True, output=fn(dict(arguments)))
         except ToolExecutionError:
             raise
-        except Exception as exc:  # noqa: BLE001 -- isolate foreign tools
+        except Exception as exc:
             raise ToolExecutionError(name, str(exc)) from exc
 
     tool = Tool(

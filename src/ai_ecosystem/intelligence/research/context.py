@@ -17,8 +17,8 @@ class ContextBuilder:
         """Render the result as text with explicit source sections."""
         lines = [
             f"Research: {result.query}",
-            f"Confidence: {result.confidence:.2f} "
-            f"({len(result.evidence)} evidence from {len(result.sources)} sources)",
+            (f"Confidence: {result.confidence:.2f} "
+            f"({len(result.evidence)} evidence from {len(result.sources)} sources)"),
             "",
         ]
         by_source: dict[str, list] = {}

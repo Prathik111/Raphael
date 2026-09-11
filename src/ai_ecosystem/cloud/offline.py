@@ -10,7 +10,8 @@ so it simply is not there. Resume on the PC reuses versions/conflicts.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ai_ecosystem.agent.executor.executor import ExecutionResult, OverallStatus
 from ai_ecosystem.cloud.sync import SyncClass, SyncManager, SyncObject
@@ -30,9 +31,9 @@ class CloudAgent:
     def __init__(
         self,
         executor_factory: Callable[[], Any],
-        sync: Optional[SyncManager] = None,
-        allowed_tools: Optional[list[str]] = None,
-        bus: Optional[EventBus] = None,
+        sync: SyncManager | None = None,
+        allowed_tools: list[str] | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._executor_factory = executor_factory
         self._sync = sync
@@ -47,31 +48,36 @@ class CloudAgent:
                     return False, f"tool {tool!r} is not cloud-runnable"
         policy = self._sync.policy if self._sync is not None else None
         for obj in inputs:
-            sync_class = policy.classify(obj) if policy is not None else SyncClass.LOCAL_ONLY
+            sync_class = (
+                policy.classify(obj) if policy is not None else SyncClass.LOCAL_ONLY
+            )
             if sync_class is not SyncClass.SYNC_ALLOWED:
                 return False, f"object {obj.object_id!r} is {sync_class.value}"
         return True, "cloud-safe"
 
-    def accept(self, task_id: str, plan: Plan,
-               inputs: list[SyncObject]) -> None:
+    def accept(self, task_id: str, plan: Plan, inputs: list[SyncObject]) -> None:
         """Admit a task or raise CloudUnsafeError (never partial)."""
         safe, reason = self.is_cloud_safe(plan, inputs)
         if not safe:
             raise CloudUnsafeError(f"task {task_id!r} refused: {reason}")
         self._emit(EventType.AGENT_STARTED, task_id, {"agent": "cloud"})
 
-    def run_cloud_task(self, task_id: str, plan: Plan,
-                       arguments: Optional[dict] = None) -> ExecutionResult:
+    def run_cloud_task(
+        self, task_id: str, plan: Plan, arguments: dict | None = None
+    ) -> ExecutionResult:
         """Execute an admitted plan through the normal executor path."""
         executor = self._executor_factory()
         result = executor.execute(task_id, plan, arguments=arguments or {})
-        self._emit(EventType.AGENT_COMPLETED, task_id,
-                   {"agent": "cloud",
-                    "success": result.status is OverallStatus.COMPLETED})
+        self._emit(
+            EventType.AGENT_COMPLETED,
+            task_id,
+            {"agent": "cloud", "success": result.status is OverallStatus.COMPLETED},
+        )
         return result
 
-    def publish_results(self, task_id: str, result: ExecutionResult,
-                        objects: list[SyncObject]) -> Any:
+    def publish_results(
+        self, task_id: str, result: ExecutionResult, objects: list[SyncObject]
+    ) -> Any:
         """Sync result metadata back (uses the normal sync machinery).
 
         Forbidden objects are refused up front instead of relying on
@@ -81,13 +87,17 @@ class CloudAgent:
             raise CloudUnsafeError("cloud agent has no sync manager")
         for obj in objects:
             if self._sync.policy.classify(obj) is SyncClass.SYNC_FORBIDDEN:
-                raise CloudUnsafeError(
-                    f"object {obj.object_id!r} is forbidden to sync")
+                raise CloudUnsafeError(f"object {obj.object_id!r} is forbidden to sync")
         return self._sync.sync(objects)
 
-    def resume_handoff(self, task_id: str, local_version: str,
-                       remote_version: str, local_hash: str = "",
-                       remote_hash: str = "") -> str:
+    def resume_handoff(
+        self,
+        task_id: str,
+        local_version: str,
+        remote_version: str,
+        local_hash: str = "",
+        remote_hash: str = "",
+    ) -> str:
         """Compare versions AND hashes for PC resume.
 
         Equal versions with differing known hashes still conflict:
@@ -102,7 +112,8 @@ class CloudAgent:
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
             self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload))
+                Event(event_type=event_type, task_id=task_id, payload=payload)
+            )
 
 
 def cloud_safe_plan(plan: Plan, allowed_tools: set[str]) -> tuple[bool, str]:

@@ -26,12 +26,12 @@ from ai_ecosystem.security.sandbox import (
 )
 
 __all__ = [
+    "CAPABILITY_RISK",
+    "DANGEROUS_CAPABILITIES",
     "AuditLog",
     "AuditRecord",
     "AuthorizationManager",
-    "CAPABILITY_RISK",
     "ComponentTrust",
-    "DANGEROUS_CAPABILITIES",
     "LocalSandboxProvider",
     "PermissionEngine",
     "Policy",

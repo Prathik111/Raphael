@@ -1,5 +1,7 @@
 """Gate 1: state-machine transitions (valid, invalid, terminal)."""
 
+import itertools
+
 import pytest
 
 from ai_ecosystem.core.errors import InvalidStateTransitionError
@@ -19,7 +21,7 @@ def test_happy_path_is_valid():
         TaskState.VERIFYING,
         TaskState.COMPLETED,
     ]
-    for frm, to in zip(chain, chain[1:]):
+    for frm, to in itertools.pairwise(chain):
         assert sm.is_valid_transition(frm, to), f"{frm} -> {to}"
 
 

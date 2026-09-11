@@ -39,9 +39,13 @@ def test_legacy_v1_database_upgrades_to_v2(tmp_path):
     raw = sqlite3.connect(path)
     try:
         raw.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        raw.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        raw.execute(
+            "CREATE TABLE tasks (id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
         raw.execute("INSERT INTO meta (key, value) VALUES ('schema_version', '1')")
-        raw.execute("INSERT INTO tasks (id, snapshot, updated_at) VALUES ('t1', '{}', 'now')")
+        raw.execute(
+            "INSERT INTO tasks (id, snapshot, updated_at) VALUES ('t1', '{}', 'now')"
+        )
         raw.commit()
     finally:
         raw.close()
@@ -90,10 +94,9 @@ def test_plan_memory_skill_round_trips(db):
 
 def test_transaction_rollback(db):
     repo = SqliteTaskRepository(db)
-    with pytest.raises(RuntimeError):
-        with db.transaction():
-            repo.create(Task(title="doomed"))
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError), db.transaction():
+        repo.create(Task(title="doomed"))
+        raise RuntimeError("boom")
     assert repo.list() == []
 
 

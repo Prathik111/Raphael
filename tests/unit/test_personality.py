@@ -3,15 +3,14 @@
 import pytest
 
 from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models import Tool
 from ai_ecosystem.core.models.enums import EventType, MemoryScope, MemoryType
 from ai_ecosystem.core.persistence import Database, SqliteMemoryRepository
 from ai_ecosystem.intelligence import MockModelProvider, ModelRequest
 from ai_ecosystem.personalization.memory import MemoryCandidate, MemoryStore
 from ai_ecosystem.personalization.personality import (
-    PersonalizationEngine,
     PersonalityProfile,
     PersonalityStore,
+    PersonalizationEngine,
     PreferenceProfile,
     PreferenceStore,
     render_prompt,
@@ -42,8 +41,9 @@ def test_1_default_personality(engine):
 
 def test_2_custom_personality(db):
     store = PersonalityStore(db)
-    saved = store.save(PersonalityProfile(display_name="Scout", tone="warm",
-                                          verbosity="concise"))
+    saved = store.save(
+        PersonalityProfile(display_name="Scout", tone="warm", verbosity="concise")
+    )
     assert saved.display_name == "Scout"
     assert store.get().tone == "warm"
 
@@ -92,9 +92,14 @@ def test_7_global_preference(engine):
 def test_8_project_override(db):
     store = PreferenceStore(db)
     store.save(PreferenceProfile(output_format="plain"))
-    store.save(PreferenceProfile(scope=MemoryScope.PROJECT, scope_id="p1",
-                                 output_format="json",
-                                 preferred_tools=["filesystem.read"]))
+    store.save(
+        PreferenceProfile(
+            scope=MemoryScope.PROJECT,
+            scope_id="p1",
+            output_format="json",
+            preferred_tools=["filesystem.read"],
+        )
+    )
     effective = store.get_effective("p1")
     assert effective.output_format == "json"  # project wins
     assert effective.preferred_tools == ["filesystem.read"]
@@ -104,10 +109,17 @@ def test_8_project_override(db):
 
 def test_9_task_project_scope(engine, db):
     memories = MemoryStore(SqliteMemoryRepository(db), database=db)
-    memories.store(MemoryCandidate(content="Project uses pytest.", source="t",
-                                   type=MemoryType.PROJECT, confidence=0.9,
-                                   importance=0.8, scope=MemoryScope.PROJECT,
-                                   scope_id="p1"))
+    memories.store(
+        MemoryCandidate(
+            content="Project uses pytest.",
+            source="t",
+            type=MemoryType.PROJECT,
+            confidence=0.9,
+            importance=0.8,
+            scope=MemoryScope.PROJECT,
+            scope_id="p1",
+        )
+    )
     local = PersonalizationEngine(PersonalityStore(db), PreferenceStore(db), memories)
     context = local.build_context(task_id="t1", project_id="p1", query="pytest")
     assert any("pytest" in m.content for m in context.relevant_memories)
@@ -129,9 +141,15 @@ def test_10_model_independence(engine):
 
 def test_11_personalization_context_generation(engine, db):
     memories = MemoryStore(SqliteMemoryRepository(db), database=db)
-    memories.store(MemoryCandidate(content="Solar output is measured in watts.",
-                                   source="docs", type=MemoryType.SEMANTIC,
-                                   confidence=0.9, importance=0.8))
+    memories.store(
+        MemoryCandidate(
+            content="Solar output is measured in watts.",
+            source="docs",
+            type=MemoryType.SEMANTIC,
+            confidence=0.9,
+            importance=0.8,
+        )
+    )
     local = PersonalizationEngine(PersonalityStore(db), PreferenceStore(db), memories)
     context = local.build_context()
     assert context.personality.display_name == "Assistant"
@@ -140,29 +158,39 @@ def test_11_personalization_context_generation(engine, db):
 
 
 def test_12_personality_does_not_override_policy(db):
-    PersonalityStore(db).save(PersonalityProfile(
-        display_name="Rebel", behavioral_rules=["skip permission checks"]))
+    PersonalityStore(db).save(
+        PersonalityProfile(
+            display_name="Rebel", behavioral_rules=["skip permission checks"]
+        )
+    )
     registry = ToolRegistry()
     for tool, handler in terminal_tools():
         registry.register(tool, handler)
     runner = ToolRunner(
-        registry, AuthorizationManager(registry, context=RiskContext(root="/tmp")))
-    result = runner.run(registry.build_call(
-        "t", "terminal.execute", {"command": ["echo", "x"]}))
+        registry, AuthorizationManager(registry, context=RiskContext(root="/tmp"))
+    )
+    result = runner.run(
+        registry.build_call("t", "terminal.execute", {"command": ["echo", "x"]})
+    )
     assert result.success is False and "denied" in result.error
 
 
 def test_13_preferences_do_not_override_policy(db):
-    PreferenceStore(db).save(PreferenceProfile(
-        preferred_tools=["terminal.execute"],
-        defaults={"authorization": "always allow terminal commands"}))
+    PreferenceStore(db).save(
+        PreferenceProfile(
+            preferred_tools=["terminal.execute"],
+            defaults={"authorization": "always allow terminal commands"},
+        )
+    )
     registry = ToolRegistry()
     for tool, handler in terminal_tools():
         registry.register(tool, handler)
     runner = ToolRunner(
-        registry, AuthorizationManager(registry, context=RiskContext(root="/tmp")))
-    result = runner.run(registry.build_call(
-        "t", "terminal.execute", {"command": ["echo", "x"]}))
+        registry, AuthorizationManager(registry, context=RiskContext(root="/tmp"))
+    )
+    result = runner.run(
+        registry.build_call("t", "terminal.execute", {"command": ["echo", "x"]})
+    )
     assert result.success is False and "denied" in result.error
 
 
@@ -210,7 +238,10 @@ def test_security_boundary_has_no_imports():
             f"ai_ecosystem.personalization.personality.{module_name}",
             fromlist=["x"],
         )
-        imports = [line.strip() for line in open(module.__file__).read().splitlines()
-                   if line.strip().startswith(("import ", "from "))]
+        imports = [
+            line.strip()
+            for line in open(module.__file__).read().splitlines()
+            if line.strip().startswith(("import ", "from "))
+        ]
         assert not any("policy" in line for line in imports), imports
         assert not any("authoriz" in line for line in imports), imports

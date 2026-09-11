@@ -45,11 +45,13 @@ def _resolve_cwd(raw: object, root: object) -> str | None:
         return str(root) if root is not None else None
     if not isinstance(raw, str):
         raise ToolExecutionError(
-            "terminal.execute", "'cwd' must be an existing directory")
+            "terminal.execute", "'cwd' must be an existing directory"
+        )
     candidate = Path(raw)
     if not candidate.is_dir():
         raise ToolExecutionError(
-            "terminal.execute", "'cwd' must be an existing directory")
+            "terminal.execute", "'cwd' must be an existing directory"
+        )
     if root is not None:
         resolved = candidate.resolve()
         try:
@@ -88,9 +90,7 @@ def _run(arguments: dict, root: object) -> ToolResult:
             "terminal.execute", "'timeout_s' must be a number"
         ) from None
     if not (timeout_s > 0) or timeout_s != timeout_s:
-        raise ToolExecutionError(
-            "terminal.execute", "'timeout_s' must be positive"
-        )
+        raise ToolExecutionError("terminal.execute", "'timeout_s' must be positive")
     # The contract timeout is the ceiling: a caller cannot extend the
     # hold on a worker beyond what the registry advertises.
     timeout_s = min(timeout_s, CONTRACT_TIMEOUT_S)

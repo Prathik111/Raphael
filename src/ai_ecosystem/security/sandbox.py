@@ -23,13 +23,13 @@ from __future__ import annotations
 import os
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from typing import Any, Callable, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ai_ecosystem.core.errors.exceptions import (
-    DomainValidationError,
     ToolExecutionError,
     ToolTimeoutError,
 )
@@ -56,8 +56,14 @@ class SandboxProvider(ABC):
     """Runs a handler under a profile's enforced guarantees."""
 
     @abstractmethod
-    def run(self, tool: Tool, handler: ToolHandler, arguments: dict,
-            profile: SandboxProfile, timeout_s: float) -> ToolResult:
+    def run(
+        self,
+        tool: Tool,
+        handler: ToolHandler,
+        arguments: dict,
+        profile: SandboxProfile,
+        timeout_s: float,
+    ) -> ToolResult:
         """Execute with isolation; raise ToolError subclasses on failure."""
         raise NotImplementedError
 
@@ -69,8 +75,9 @@ class SandboxUnavailableError(ToolExecutionError):
         super().__init__(tool, "sandbox required but no provider configured")
 
 
-def _run_daemon(handler: ToolHandler, arguments: dict,
-                deadline: float, tool_name: str) -> ToolResult:
+def _run_daemon(
+    handler: ToolHandler, arguments: dict, deadline: float, tool_name: str
+) -> ToolResult:
     """Run a handler on a daemon thread with a hard deadline.
 
     Daemon workers cannot hang pool shutdown or interpreter exit;
@@ -84,8 +91,7 @@ def _run_daemon(handler: ToolHandler, arguments: dict,
         except BaseException as exc:  # noqa: BLE001 -- re-raised below
             box["error"] = exc
 
-    thread = threading.Thread(target=target, daemon=True,
-                              name=f"sandbox-{tool_name}")
+    thread = threading.Thread(target=target, daemon=True, name=f"sandbox-{tool_name}")
     thread.start()
     thread.join(max(float(deadline), 0.0))
     if thread.is_alive():
@@ -111,25 +117,33 @@ class LocalSandboxProvider(SandboxProvider):
         with self._meta_lock:
             return self._locks.setdefault(profile, threading.RLock())
 
-    def scrubbed_env(self, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+    def scrubbed_env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         """Environment copy minus secret-bearing variables."""
-        clean = {key: value for key, value in os.environ.items()
-                 if not looks_secret(key)}
+        clean = {
+            key: value for key, value in os.environ.items() if not looks_secret(key)
+        }
         clean.update(extra or {})
         return clean
 
-    def run(self, tool: Tool, handler: ToolHandler, arguments: dict,
-            profile: SandboxProfile, timeout_s: float) -> ToolResult:
+    def run(
+        self,
+        tool: Tool,
+        handler: ToolHandler,
+        arguments: dict,
+        profile: SandboxProfile,
+        timeout_s: float,
+    ) -> ToolResult:
         """Enforce network denial, cwd, env scrub, timeout, serialization."""
         if "network" in set(tool.capabilities) and not profile.allow_network:
             raise ToolExecutionError(
-                tool.name, "network use denied by sandbox profile "
-                           f"{profile.name!r}")
+                tool.name, f"network use denied by sandbox profile {profile.name!r}"
+            )
         call_args = dict(arguments)
         if profile.fs_root and "subprocess" in set(tool.capabilities):
             call_args.setdefault("cwd", profile.fs_root)
-        deadline = min(timeout_s, profile.timeout_s) if profile.timeout_s > 0 \
-            else timeout_s
+        deadline = (
+            min(timeout_s, profile.timeout_s) if profile.timeout_s > 0 else timeout_s
+        )
         lock = self._lock_for(profile.name)
         with lock:
             previous = dict(os.environ)

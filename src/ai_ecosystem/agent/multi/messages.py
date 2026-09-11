@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -51,7 +51,7 @@ class AgentMessage(Entity):
     correlation_id: str = ""
     ttl_hops: int = 8
     hops: int = 0
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
 
 
 class MessageBus:
@@ -59,7 +59,7 @@ class MessageBus:
 
     def __init__(
         self,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
         repository: Any | None = None,
         max_payload_bytes: int = MAX_PAYLOAD_BYTES,
         max_inbox: int = 100,
@@ -85,22 +85,30 @@ class MessageBus:
         pair = (message.id, message.recipient)
         if pair in self._seen_pairs:
             raise DomainValidationError(
-                f"duplicate message {message.id!r} to {message.recipient!r}")
+                f"duplicate message {message.id!r} to {message.recipient!r}"
+            )
         inbox = self._inboxes[message.recipient]
         if len(inbox) >= self._max_inbox:
             raise DomainValidationError(
-                f"inbox for {message.recipient!r} is full ({self._max_inbox})")
+                f"inbox for {message.recipient!r} is full ({self._max_inbox})"
+            )
         self._seen_pairs.add(pair)
         inbox.append(message)
         if self._repository is not None:
             self._repository.create(message)
-        self._emit(EventType.AGENT_MESSAGE_SENT, message.task_id,
-                   {"message_id": message.id, "sender": message.sender,
-                    "recipient": message.recipient,
-                    "type": message.message_type.value})
+        self._emit(
+            EventType.AGENT_MESSAGE_SENT,
+            message.task_id,
+            {
+                "message_id": message.id,
+                "sender": message.sender,
+                "recipient": message.recipient,
+                "type": message.message_type.value,
+            },
+        )
         return message
 
-    def receive(self, agent_id: str) -> Optional[AgentMessage]:
+    def receive(self, agent_id: str) -> AgentMessage | None:
         """Pop the oldest message for an agent (None when empty)."""
         self._require_registered(agent_id)
         inbox = self._inboxes[agent_id]
@@ -108,11 +116,17 @@ class MessageBus:
             return None
         message = inbox.popleft()
         if self._expired(message):
-            self._emit(EventType.AGENT_MESSAGE_REJECTED, message.task_id,
-                       {"message_id": message.id, "reason": "expired on receive"})
+            self._emit(
+                EventType.AGENT_MESSAGE_REJECTED,
+                message.task_id,
+                {"message_id": message.id, "reason": "expired on receive"},
+            )
             return self.receive(agent_id)
-        self._emit(EventType.AGENT_MESSAGE_RECEIVED, message.task_id,
-                   {"message_id": message.id, "recipient": agent_id})
+        self._emit(
+            EventType.AGENT_MESSAGE_RECEIVED,
+            message.task_id,
+            {"message_id": message.id, "recipient": agent_id},
+        )
         return message
 
     def forward(self, message: AgentMessage, recipient: str) -> AgentMessage:
@@ -125,18 +139,23 @@ class MessageBus:
         """
         if message.hops + 1 > self._max_hops:
             raise DomainValidationError(
-                f"message {message.id!r} exceeded {self._max_hops} hops")
+                f"message {message.id!r} exceeded {self._max_hops} hops"
+            )
         if message.ttl_hops <= 1:
-            raise DomainValidationError(
-                f"message {message.id!r} ttl exhausted")
+            raise DomainValidationError(f"message {message.id!r} ttl exhausted")
         key = (message.correlation_id or message.id, message.sender, recipient)
         self._forwarded[key] = self._forwarded.get(key, 0) + 1
         if self._forwarded[key] > self._max_hops:
             raise DomainValidationError(
-                f"forwarding loop detected for {message.correlation_id!r}")
+                f"forwarding loop detected for {message.correlation_id!r}"
+            )
         relayed = message.model_copy(
-            update={"recipient": recipient, "hops": message.hops + 1,
-                    "ttl_hops": message.ttl_hops - 1})
+            update={
+                "recipient": recipient,
+                "hops": message.hops + 1,
+                "ttl_hops": message.ttl_hops - 1,
+            }
+        )
         relayed.id = message.id
         return self.send(relayed)
 
@@ -145,18 +164,30 @@ class MessageBus:
         self._require_registered(agent_id)
         return len(self._inboxes[agent_id])
 
-    def handoff(self, sender: str, recipient: str, task_id: str,
-                result_summary: str, correlation_id: str = "") -> AgentMessage:
+    def handoff(
+        self,
+        sender: str,
+        recipient: str,
+        task_id: str,
+        result_summary: str,
+        correlation_id: str = "",
+    ) -> AgentMessage:
         """Transfer a task result as validated data (never as orders)."""
-        message = self.send(AgentMessage(
-            sender=sender, recipient=recipient, task_id=task_id,
-            message_type=MessageType.HANDOFF,
-            payload={"result": result_summary},
-            correlation_id=correlation_id or task_id,
-        ))
-        self._emit(EventType.AGENT_HANDOFF, task_id,
-                   {"message_id": message.id, "sender": sender,
-                    "recipient": recipient})
+        message = self.send(
+            AgentMessage(
+                sender=sender,
+                recipient=recipient,
+                task_id=task_id,
+                message_type=MessageType.HANDOFF,
+                payload={"result": result_summary},
+                correlation_id=correlation_id or task_id,
+            )
+        )
+        self._emit(
+            EventType.AGENT_HANDOFF,
+            task_id,
+            {"message_id": message.id, "sender": sender, "recipient": recipient},
+        )
         return message
 
     def history(self, correlation_id: str) -> list[AgentMessage]:
@@ -213,13 +244,17 @@ class MessageBus:
             raise DomainValidationError(f"unknown agent {agent_id!r}")
 
     def _reject(self, message: AgentMessage, reason: str) -> None:
-        self._emit(EventType.AGENT_MESSAGE_REJECTED, message.task_id,
-                   {"message_id": message.id, "reason": reason})
+        self._emit(
+            EventType.AGENT_MESSAGE_REJECTED,
+            message.task_id,
+            {"message_id": message.id, "reason": reason},
+        )
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
             self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload))
+                Event(event_type=event_type, task_id=task_id, payload=payload)
+            )
 
 
 def expire_in(seconds: float) -> datetime:

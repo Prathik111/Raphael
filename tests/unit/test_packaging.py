@@ -104,12 +104,15 @@ def test_first_run_no_cloud_forced():
 
 def test_upgrade(tmp_path):
     assert plan_upgrade("0.1.0", "0.2.0") == {
-        "action": "upgrade", "migrate": True, "preserve_data": True}
+        "action": "upgrade",
+        "migrate": True,
+        "preserve_data": True,
+    }
     db_path = str(tmp_path / "app.db")
     db = Database(db_path)
     db.migrate()
-    from ai_ecosystem.core.persistence import SqliteMemoryRepository
     from ai_ecosystem.core.models import Memory
+    from ai_ecosystem.core.persistence import SqliteMemoryRepository
 
     SqliteMemoryRepository(db).create(Memory(content="precious"))
     db.close()
@@ -239,7 +242,8 @@ def test_desktop_startup_files():
     installer_text = installer.read_text(encoding="utf-8", errors="replace")
     assert "ai-ecosystem-desktop.exe" in installer_text
     assert "ai-ecosystem.exe" not in installer_text.replace(
-        "ai-ecosystem-desktop.exe", "")
+        "ai-ecosystem-desktop.exe", ""
+    )
 
 
 def test_model_configuration(tmp_path, monkeypatch):
@@ -263,8 +267,9 @@ def test_offline_operation(tmp_path):
         down = SyncManager(transport=MockSyncTransport(down=True))
         from ai_ecosystem.cloud import make_sync_object
 
-        report = down.sync([make_sync_object("task", created["task_id"],
-                                             {"state": "CREATED"})])
+        report = down.sync(
+            [make_sync_object("task", created["task_id"], {"state": "CREATED"})]
+        )
         assert report.state.value == "FAILED"  # sync fails, local work fine
         assert api.get_task(created["task_id"])["state"] == "CREATED"
     finally:

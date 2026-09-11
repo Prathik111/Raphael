@@ -15,9 +15,9 @@ as raw tracebacks to callers.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Protocol
 
 from ai_ecosystem.core.errors.exceptions import (
     AuthorizationDeniedError,
@@ -71,8 +71,7 @@ def _safe_output_snippet(output: Any, limit: int = 500) -> str:
     return text
 
 
-def _run_with_deadline(handler: Any, arguments: dict,
-                       timeout_s: float) -> Any:
+def _run_with_deadline(handler: Any, arguments: dict, timeout_s: float) -> Any:
     """Run a handler with a hard deadline that never blocks the caller.
 
     The worker is a daemon thread, so an overrunning handler cannot hang
@@ -148,10 +147,10 @@ class ToolRunner:
         self,
         registry: ToolRegistry,
         authorizer: Authorizer,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
         sandbox: Any = None,
-        sandbox_profiles: Optional[dict[str, Any]] = None,
-        auditor: Optional[Callable[[dict], None]] = None,
+        sandbox_profiles: dict[str, Any] | None = None,
+        auditor: Callable[[dict], None] | None = None,
     ) -> None:
         self._registry = registry
         self._authorizer = authorizer
@@ -160,17 +159,19 @@ class ToolRunner:
         self._sandbox_profiles = dict(sandbox_profiles or {})
         self._auditor = auditor
 
-    def _emit(
-        self, event_type: EventType, task_id: str, payload: dict
-    ) -> None:
+    def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
             self._bus.publish(
                 Event(event_type=event_type, task_id=task_id, payload=payload)
             )
 
     def _fail(
-        self, call: ToolCall, event_type: EventType, error: str,
-        tool: Tool | None = None, permission: Permission | None = None,
+        self,
+        call: ToolCall,
+        event_type: EventType,
+        error: str,
+        tool: Tool | None = None,
+        permission: Permission | None = None,
     ) -> ToolResult:
         error = _safe_error(error)
         call.status = ToolCallStatus.FAILED
@@ -186,7 +187,7 @@ class ToolRunner:
             task_id=call.task_id, tool_call_id=call.id, success=False, error=error
         )
 
-    def _validate(self, tool: Tool, call: ToolCall) -> Optional[str]:
+    def _validate(self, tool: Tool, call: ToolCall) -> str | None:
         problems = check_arguments(tool, dict(call.arguments))
         if problems:
             return "; ".join(problems)
@@ -215,12 +216,14 @@ class ToolRunner:
         A cancelled token fails fast before touching the handler: steps
         cancelled while queued never start work.
         """
-        if cancel_token is not None and getattr(
-                cancel_token, "cancelled", False):
+        if cancel_token is not None and getattr(cancel_token, "cancelled", False):
             call.status = ToolCallStatus.FAILED
             return ToolResult(
-                task_id=call.task_id, tool_call_id=call.id, success=False,
-                error="cancelled before execution")
+                task_id=call.task_id,
+                tool_call_id=call.id,
+                success=False,
+                error="cancelled before execution",
+            )
         tool = self._registry.get(call.tool)
         if tool is None:
             return self._fail(
@@ -229,8 +232,11 @@ class ToolRunner:
         self._emit(
             EventType.TOOL_REQUESTED,
             call.task_id,
-            {"tool": call.tool, "call_id": call.id,
-             "arguments": _safe_payload(dict(call.arguments))},
+            {
+                "tool": call.tool,
+                "call_id": call.id,
+                "arguments": _safe_payload(dict(call.arguments)),
+            },
         )
 
         problem = self._validate(tool, call)
@@ -278,8 +284,7 @@ class ToolRunner:
         if tool.requires_sandbox:
             return self._run_sandboxed(call, tool, handler, permission)
         try:
-            result = _run_with_deadline(handler, dict(call.arguments),
-                                        tool.timeout_s)
+            result = _run_with_deadline(handler, dict(call.arguments), tool.timeout_s)
         except FuturesTimeoutError:
             timeout = ToolTimeoutError(call.tool, tool.timeout_s)
             return self._fail(call, EventType.TOOL_FAILED, str(timeout))
@@ -288,9 +293,7 @@ class ToolRunner:
         except DomainValidationError as exc:
             return self._fail(call, EventType.TOOL_FAILED, str(exc))
         except Exception as exc:  # noqa: BLE001 -- isolate handler bugs
-            return self._fail(
-                call, EventType.TOOL_FAILED, f"handler crashed: {exc}"
-            )
+            return self._fail(call, EventType.TOOL_FAILED, f"handler crashed: {exc}")
 
         if not isinstance(result, ToolResult):
             return self._fail(
@@ -306,76 +309,101 @@ class ToolRunner:
         self._emit(
             EventType.TOOL_COMPLETED if result.success else EventType.TOOL_FAILED,
             call.task_id,
-            {"tool": call.tool, "call_id": call.id,
-             "output_snippet": _safe_output_snippet(result.output),
-             "error": _safe_error(result.error or "")},
+            {
+                "tool": call.tool,
+                "call_id": call.id,
+                "output_snippet": _safe_output_snippet(result.output),
+                "error": _safe_error(result.error or ""),
+            },
         )
         self._audit(call, tool, permission, result.success, result.error or "")
         return result
 
-    def _run_sandboxed(self, call: ToolCall, tool: Tool,
-                       handler: Any, permission: Permission) -> ToolResult:
+    def _run_sandboxed(
+        self, call: ToolCall, tool: Tool, handler: Any, permission: Permission
+    ) -> ToolResult:
         """Sandboxed branch: fail closed without a provider, audit always."""
 
         if self._sandbox is None:
-            error = (f"tool {call.tool!r} requires sandbox "
-                     f"{tool.sandbox_profile!r}: no provider configured")
+            error = (
+                f"tool {call.tool!r} requires sandbox "
+                f"{tool.sandbox_profile!r}: no provider configured"
+            )
             call.status = ToolCallStatus.FAILED
-            self._emit(EventType.TOOL_FAILED, call.task_id,
-                       {"tool": call.tool, "call_id": call.id, "error": error})
+            self._emit(
+                EventType.TOOL_FAILED,
+                call.task_id,
+                {"tool": call.tool, "call_id": call.id, "error": error},
+            )
             self._audit(call, tool, permission, False, error)
-            return ToolResult(task_id=call.task_id, tool_call_id=call.id,
-                              success=False, error=error)
+            return ToolResult(
+                task_id=call.task_id, tool_call_id=call.id, success=False, error=error
+            )
         profile = self._sandbox_profiles.get(tool.sandbox_profile)
         if profile is None:
-            error = (f"tool {call.tool!r} requires unknown sandbox profile "
-                     f"{tool.sandbox_profile!r}")
+            error = (
+                f"tool {call.tool!r} requires unknown sandbox profile "
+                f"{tool.sandbox_profile!r}"
+            )
             return self._fail(call, EventType.TOOL_FAILED, error)
         try:
-            result = self._sandbox.run(tool, handler, dict(call.arguments),
-                                       profile, tool.timeout_s)
+            result = self._sandbox.run(
+                tool, handler, dict(call.arguments), profile, tool.timeout_s
+            )
         except ToolError as exc:
             return self._fail(call, EventType.TOOL_FAILED, str(exc))
         except DomainValidationError as exc:
             return self._fail(call, EventType.TOOL_FAILED, str(exc))
         except Exception as exc:  # noqa: BLE001 -- isolate sandbox bugs
-            return self._fail(call, EventType.TOOL_FAILED,
-                              f"sandbox crashed: {exc}")
+            return self._fail(call, EventType.TOOL_FAILED, f"sandbox crashed: {exc}")
         if not isinstance(result, ToolResult):
-            return self._fail(call, EventType.TOOL_FAILED,
-                              "sandbox returned a non-result")
+            return self._fail(
+                call, EventType.TOOL_FAILED, "sandbox returned a non-result"
+            )
         result.task_id = call.task_id
         result.tool_call_id = call.id
-        call.status = (ToolCallStatus.COMPLETED if result.success
-                       else ToolCallStatus.FAILED)
+        call.status = (
+            ToolCallStatus.COMPLETED if result.success else ToolCallStatus.FAILED
+        )
         self._emit(
             EventType.TOOL_COMPLETED if result.success else EventType.TOOL_FAILED,
-            call.task_id, {"tool": call.tool, "call_id": call.id})
-        self._audit(call, tool, permission, result.success, result.error or "",
-                    sandboxed=True)
+            call.task_id,
+            {"tool": call.tool, "call_id": call.id},
+        )
+        self._audit(
+            call, tool, permission, result.success, result.error or "", sandboxed=True
+        )
         return result
 
-    def _audit(self, call: ToolCall, tool: Any, permission: Any,
-               success: bool, error: str, sandboxed: bool = False) -> None:
+    def _audit(
+        self,
+        call: ToolCall,
+        tool: Any,
+        permission: Any,
+        success: bool,
+        error: str,
+        sandboxed: bool = False,
+    ) -> None:
         if self._auditor is None:
             return
         try:
             name = tool.name if isinstance(tool, Tool) else str(tool)
-            risk = (tool.risk_level.value if isinstance(tool, Tool)
-                    else "UNKNOWN")
+            risk = tool.risk_level.value if isinstance(tool, Tool) else "UNKNOWN"
             decision = getattr(permission, "decision", None)
             granted = getattr(decision, "value", None) == "GRANTED"
-            self._auditor({
-                "action": "tool.execute",
-                "task_id": call.task_id,
-                "tool": name,
-                "call_id": call.id,
-                "decision": "GRANTED" if granted else "DENIED",
-                "risk": risk,
-                "reason": (permission.reason if permission is not None else error),
-                "success": success,
-                "error": error,
-                "sandboxed": sandboxed,
-            })
+            self._auditor(
+                {
+                    "action": "tool.execute",
+                    "task_id": call.task_id,
+                    "tool": name,
+                    "call_id": call.id,
+                    "decision": "GRANTED" if granted else "DENIED",
+                    "risk": risk,
+                    "reason": (permission.reason if permission is not None else error),
+                    "success": success,
+                    "error": error,
+                    "sandboxed": sandboxed,
+                }
+            )
         except Exception:  # noqa: BLE001 -- auditing never breaks execution
             pass

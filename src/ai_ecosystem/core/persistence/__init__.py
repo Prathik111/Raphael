@@ -40,6 +40,7 @@ from ai_ecosystem.core.persistence.sqlite import (
 )
 
 __all__ = [
+    "SCHEMA_VERSION",
     "AgentRepository",
     "Database",
     "DbEventStore",
@@ -51,7 +52,6 @@ __all__ = [
     "MessageRepository",
     "PlanRepository",
     "Repository",
-    "SCHEMA_VERSION",
     "SkillRepository",
     "SnapshotRepository",
     "SqliteAgentRepository",

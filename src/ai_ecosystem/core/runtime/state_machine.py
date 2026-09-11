@@ -20,7 +20,8 @@ from ai_ecosystem.core.errors.exceptions import InvalidStateTransitionError
 from ai_ecosystem.core.models.enums import TaskState
 
 TERMINAL_STATES = frozenset(
-    {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED})
+    {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED}
+)
 
 ALLOWED_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
     TaskState.CREATED: frozenset({TaskState.UNDERSTANDING}),
@@ -40,8 +41,7 @@ ALLOWED_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
 # Any non-terminal state may escalate to FAILED or CANCELLED.
 for _state, _targets in list(ALLOWED_TRANSITIONS.items()):
     if _state not in TERMINAL_STATES:
-        ALLOWED_TRANSITIONS[_state] = _targets | {
-            TaskState.FAILED, TaskState.CANCELLED}
+        ALLOWED_TRANSITIONS[_state] = _targets | {TaskState.FAILED, TaskState.CANCELLED}
 
 
 def is_valid_transition(from_state: TaskState, to_state: TaskState) -> bool:

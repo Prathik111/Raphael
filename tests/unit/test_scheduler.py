@@ -1,7 +1,7 @@
 """Gate 39: durable priority scheduler over the compute router."""
 
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
@@ -23,12 +23,20 @@ from ai_ecosystem.scheduler import (
 
 
 def _router():
-    return ComputeRouter({
-        "local": ProviderCapabilities(name="local", local=True, ram_gb=16.0,
-                                      cost_per_hour=0.0, latency_class="fast"),
-        "oci": ProviderCapabilities(name="oci", ram_gb=64.0,
-                                    cost_per_hour=2.0, latency_class="standard"),
-    })
+    return ComputeRouter(
+        {
+            "local": ProviderCapabilities(
+                name="local",
+                local=True,
+                ram_gb=16.0,
+                cost_per_hour=0.0,
+                latency_class="fast",
+            ),
+            "oci": ProviderCapabilities(
+                name="oci", ram_gb=64.0, cost_per_hour=2.0, latency_class="standard"
+            ),
+        }
+    )
 
 
 @pytest.fixture()
@@ -37,9 +45,11 @@ def setup():
     db.migrate()
     repo = SqliteScheduledJobRepository(db)
     calls = []
-    scheduler = GlobalScheduler(repo, _router(),
-                                dispatch=lambda job, target: calls.append(
-                                    (job.id, target.provider)) or "done")
+    scheduler = GlobalScheduler(
+        repo,
+        _router(),
+        dispatch=lambda job, target: calls.append((job.id, target.provider)) or "done",
+    )
     yield scheduler, repo, calls
     db.close()
 
@@ -144,9 +154,9 @@ def test_fairness_fifo_for_equal_priority(setup):
 def test_policy_rejection(setup):
     router = ComputeRouter(
         {"local": ProviderCapabilities(name="local", local=True, ram_gb=1.0)},
-        policy=ComputePolicy(blocked_providers=["local"]))
-    scheduler = GlobalScheduler(setup[1], router,
-                                dispatch=lambda job, target: "never")
+        policy=ComputePolicy(blocked_providers=["local"]),
+    )
+    scheduler = GlobalScheduler(setup[1], router, dispatch=lambda job, target: "never")
     scheduler.submit(_job("blocked", requirements=ComputeRequirements(ram_gb=4.0)))
     ran = scheduler.tick()
     assert ran[0].status is ScheduledStatus.FAILED

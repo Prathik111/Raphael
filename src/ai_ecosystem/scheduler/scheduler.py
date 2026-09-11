@@ -12,9 +12,10 @@ policy rejections become explicit job states, and dispatch results
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -44,7 +45,7 @@ class ScheduledJob(Entity):
     goal: str = ""
     requirements: ComputeRequirements = Field(default_factory=ComputeRequirements)
     priority: int = 0
-    deadline: Optional[datetime] = None
+    deadline: datetime | None = None
     dependencies: list[str] = Field(default_factory=list)
     idempotency_key: str = ""
     agent_id: str = ""
@@ -67,10 +68,10 @@ class GlobalScheduler:
         self,
         repository: Any,
         router: ComputeRouter,
-        dispatch: Optional[DispatchFn] = None,
-        audit: Optional[Callable[[dict], None]] = None,
-        clock: Optional[Callable[[], float]] = None,
-        quiet_hours: Optional[tuple[int, int]] = None,
+        dispatch: DispatchFn | None = None,
+        audit: Callable[[dict], None] | None = None,
+        clock: Callable[[], float] | None = None,
+        quiet_hours: tuple[int, int] | None = None,
     ) -> None:
         import threading
 
@@ -109,7 +110,7 @@ class GlobalScheduler:
         self._note(job, "scheduler.cancel", "CANCELLED")
         return updated
 
-    def tick(self, now: Optional[datetime] = None) -> list[ScheduledJob]:
+    def tick(self, now: datetime | None = None) -> list[ScheduledJob]:
         """Run every ready job once, highest priority and oldest first."""
         moment = now or utcnow()
         ran = []
@@ -138,7 +139,9 @@ class GlobalScheduler:
 
     # -- internals ----------------------------------------------------------
 
-    def _ready(self, moment: datetime, apply_deadlines: bool = True) -> list[ScheduledJob]:
+    def _ready(
+        self, moment: datetime, apply_deadlines: bool = True
+    ) -> list[ScheduledJob]:
         by_id = {job.id: job for job in self._repo.list()}
         ready = []
         for job in by_id.values():
@@ -152,8 +155,10 @@ class GlobalScheduler:
                     self._note(job, "scheduler.deadline", "FAILED")
                 continue
             deps = [by_id.get(dep) for dep in job.dependencies]
-            if any(dep is None or dep.status is not ScheduledStatus.SUCCEEDED
-                   for dep in deps):
+            if any(
+                dep is None or dep.status is not ScheduledStatus.SUCCEEDED
+                for dep in deps
+            ):
                 continue
             if self._in_quiet_hours(moment):
                 continue  # quiet hours apply to every priority: no bypass
@@ -169,8 +174,9 @@ class GlobalScheduler:
         try:
             target = self._router.route(job.requirements)
         except RoutingError as exc:
-            return self._finish(job, ScheduledStatus.FAILED,
-                                f"routing failed: {exc}", "scheduler.route")
+            return self._finish(
+                job, ScheduledStatus.FAILED, f"routing failed: {exc}", "scheduler.route"
+            )
         job.routed_provider = target.provider
         self._repo.update(job)
         try:
@@ -182,13 +188,19 @@ class GlobalScheduler:
                 self._repo.update(job)
                 self._note(job, "scheduler.retry", "QUEUED")
                 return job
-            return self._finish(job, ScheduledStatus.FAILED,
-                                f"attempts exhausted: {exc}", "scheduler.retry")
-        return self._finish(job, ScheduledStatus.SUCCEEDED, summary,
-                            "scheduler.dispatch")
+            return self._finish(
+                job,
+                ScheduledStatus.FAILED,
+                f"attempts exhausted: {exc}",
+                "scheduler.retry",
+            )
+        return self._finish(
+            job, ScheduledStatus.SUCCEEDED, summary, "scheduler.dispatch"
+        )
 
-    def _finish(self, job: ScheduledJob, status: ScheduledStatus,
-                summary: str, action: str) -> ScheduledJob:
+    def _finish(
+        self, job: ScheduledJob, status: ScheduledStatus, summary: str, action: str
+    ) -> ScheduledJob:
         job.status = status
         job.result_summary = summary
         job.touch()
@@ -219,10 +231,16 @@ class GlobalScheduler:
         if self._audit is None:
             return
         try:
-            self._audit({"action": action, "task_id": job.id,
-                         "resource": job.routed_provider or "scheduler",
-                         "decision": outcome, "result": job.result_summary,
-                         "agent_id": job.agent_id})
+            self._audit(
+                {
+                    "action": action,
+                    "task_id": job.id,
+                    "resource": job.routed_provider or "scheduler",
+                    "decision": outcome,
+                    "result": job.result_summary,
+                    "agent_id": job.agent_id,
+                }
+            )
         except Exception:  # noqa: BLE001 -- auditing never breaks scheduling
             pass
 
@@ -239,7 +257,7 @@ class SqliteScheduledJobRepository:
         """Queue a job."""
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[ScheduledJob]:
+    def get(self, item_id: str) -> ScheduledJob | None:
         """Fetch by id."""
         return self._t.get(item_id)
 

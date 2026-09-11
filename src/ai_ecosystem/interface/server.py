@@ -16,7 +16,7 @@ import hmac
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from ai_ecosystem.core.errors.exceptions import (
@@ -30,11 +30,13 @@ MAX_BODY_BYTES = 1_000_000
 #: Origins allowed to read API responses. The Tauri webview serves the
 #: UI from these schemes; anything else gets no CORS grant (the fetch
 #: still needs the bearer token, so this is defense in depth).
-ALLOWED_ORIGINS = frozenset({
-    "http://tauri.localhost",
-    "tauri://localhost",
-    "http://localhost:1420",  # `npm run dev` against a local backend
-})
+ALLOWED_ORIGINS = frozenset(
+    {
+        "http://tauri.localhost",
+        "tauri://localhost",
+        "http://localhost:1420",  # `npm run dev` against a local backend
+    }
+)
 
 
 class ApiUnavailableError(AiEcosystemError):
@@ -43,17 +45,22 @@ class ApiUnavailableError(AiEcosystemError):
 
 def _error_code(exc: Exception) -> tuple[int, str]:
     if isinstance(exc, ApiError):
-        table = {"malformed_request": 400, "invalid_transition": 409,
-                 "unsupported": 501, "unavailable": 503,
-                 "unauthorized": 401, "forbidden": 403,
-                 "queue_full": 429}
+        table = {
+            "malformed_request": 400,
+            "invalid_transition": 409,
+            "unsupported": 501,
+            "unavailable": 503,
+            "unauthorized": 401,
+            "forbidden": 403,
+            "queue_full": 429,
+        }
         return table.get(exc.code, 400), exc.code
     if isinstance(exc, ResourceNotFoundError):
         return 404, "not_found"
     return 500, "internal_error"
 
 
-def _authorized(headers: Any, auth_token: Optional[str]) -> bool:
+def _authorized(headers: Any, auth_token: str | None) -> bool:
     """True when no token is configured or the bearer matches exactly."""
     if not auth_token:
         return True
@@ -61,7 +68,7 @@ def _authorized(headers: Any, auth_token: Optional[str]) -> bool:
     return hmac.compare_digest(presented, f"Bearer {auth_token}")
 
 
-def _cors_origin(headers: Any) -> Optional[str]:
+def _cors_origin(headers: Any) -> str | None:
     """Echo the Origin only when it is explicitly allow-listed."""
     origin = headers.get("Origin")
     if origin in ALLOWED_ORIGINS:
@@ -71,7 +78,7 @@ def _cors_origin(headers: Any) -> Optional[str]:
 
 class _Handler(BaseHTTPRequestHandler):
     api: RuntimeAPI
-    auth_token: Optional[str] = None
+    auth_token: str | None = None
     # HTTP/1.0 + explicit close: avoids half-open keep-alive resets
     # (Windows loopback RST / WinError 10053 under rapid test traffic).
     protocol_version = "HTTP/1.0"
@@ -93,8 +100,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers",
-                         "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
         if self.command.upper() != "OPTIONS":
             self.wfile.write(body)
@@ -115,8 +121,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(204, {})  # CORS preflight: headers carry the grant
             return
         if not _authorized(self.headers, self.auth_token):
-            self._send(401, {"code": "unauthorized",
-                             "message": "missing or invalid bearer token"})
+            self._send(
+                401,
+                {"code": "unauthorized", "message": "missing or invalid bearer token"},
+            )
             return
         parsed = urlparse(self.path)
         parts = [p for p in parsed.path.split("/") if p]
@@ -133,25 +141,41 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, self.api.list_tasks())
             elif method == "GET" and len(parts) == 2 and parts[0] == "tasks":
                 self._send(200, self.api.get_task(parts[1]))
-            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" \
-                    and parts[2] == "status":
+            elif (
+                method == "GET"
+                and len(parts) == 3
+                and parts[0] == "tasks"
+                and parts[2] == "status"
+            ):
                 self._send(200, self.api.get_task_status(parts[1]))
-            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" \
-                    and parts[2] == "result":
+            elif (
+                method == "GET"
+                and len(parts) == 3
+                and parts[0] == "tasks"
+                and parts[2] == "result"
+            ):
                 self._send(200, self.api.get_task_result(parts[1]))
-            elif method == "POST" and len(parts) == 3 and parts[0] == "tasks" \
-                    and parts[2] == "cancel":
+            elif (
+                method == "POST"
+                and len(parts) == 3
+                and parts[0] == "tasks"
+                and parts[2] == "cancel"
+            ):
                 self._send(200, self.api.cancel_task(parts[1]))
-            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" \
-                    and parts[2] == "events":
+            elif (
+                method == "GET"
+                and len(parts) == 3
+                and parts[0] == "tasks"
+                and parts[2] == "events"
+            ):
                 try:
                     since = int(query.get("since", ["0"])[0] or 0)
                 except (TypeError, ValueError):
-                    raise ApiError("malformed_request",
-                                   "'since' must be an integer") from None
+                    raise ApiError(
+                        "malformed_request", "'since' must be an integer"
+                    ) from None
                 if since < 0:
-                    raise ApiError("malformed_request",
-                                   "'since' must be >= 0")
+                    raise ApiError("malformed_request", "'since' must be >= 0")
                 self._send(200, self.api.get_task_events(parts[1], since))
             elif method == "GET" and parts == ["agents", "status"]:
                 self._send(200, self.api.get_agent_status())
@@ -172,7 +196,8 @@ class _Handler(BaseHTTPRequestHandler):
                 import logging
 
                 logging.getLogger("ai_ecosystem.server").warning(
-                    "internal error on %s: %s", self.path, exc)
+                    "internal error on %s: %s", self.path, exc
+                )
                 message = "internal error"
             else:
                 message = str(exc)
@@ -186,17 +211,25 @@ class _Handler(BaseHTTPRequestHandler):
 class LocalHttpServer:
     """Threaded localhost server exposing RuntimeAPI over HTTP."""
 
-    def __init__(self, api: RuntimeAPI, host: str = "127.0.0.1", port: int = 0,
-                 allow_remote: bool = False,
-                 auth_token: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        api: RuntimeAPI,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        allow_remote: bool = False,
+        auth_token: str | None = None,
+    ) -> None:
         if not allow_remote and host not in ("127.0.0.1", "localhost", "::1"):
-            raise ApiError("malformed_request",
-                           f"refusing non-loopback bind {host!r} without "
-                           "allow_remote=True (the API has no auth layer)")
-        handler = type("BoundHandler", (_Handler,),
-                       {"api": api, "auth_token": auth_token})
+            raise ApiError(
+                "malformed_request",
+                f"refusing non-loopback bind {host!r} without "
+                "allow_remote=True (the API has no auth layer)",
+            )
+        handler = type(
+            "BoundHandler", (_Handler,), {"api": api, "auth_token": auth_token}
+        )
         self._server = ThreadingHTTPServer((host, port), handler)
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
@@ -204,10 +237,9 @@ class LocalHttpServer:
         host, port = self._server.server_address
         return f"http://{host}:{port}"
 
-    def start(self) -> "LocalHttpServer":
+    def start(self) -> LocalHttpServer:
         """Serve in a background thread."""
-        self._thread = threading.Thread(target=self._server.serve_forever,
-                                        daemon=True)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self
 
@@ -222,8 +254,9 @@ class LocalHttpServer:
 class ApiClient:
     """Minimal test/operator client for the local API."""
 
-    def __init__(self, base_url: str, timeout_s: float = 5.0,
-                 auth_token: Optional[str] = None) -> None:
+    def __init__(
+        self, base_url: str, timeout_s: float = 5.0, auth_token: str | None = None
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout_s
         self._auth_token = auth_token
@@ -237,7 +270,8 @@ class ApiClient:
         if self._auth_token:
             headers["Authorization"] = f"Bearer {self._auth_token}"
         request = urllib.request.Request(
-            self._base + path, data=data, method=method, headers=headers)
+            self._base + path, data=data, method=method, headers=headers
+        )
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
@@ -245,8 +279,9 @@ class ApiClient:
             detail = exc.read().decode("utf-8", "replace")
             try:
                 payload = json.loads(detail)
-                raise ApiError(payload.get("code", "http_error"),
-                               payload.get("message", detail)) from exc
+                raise ApiError(
+                    payload.get("code", "http_error"), payload.get("message", detail)
+                ) from exc
             except (ValueError, AttributeError):
                 raise ApiError("http_error", f"{exc.code}: {detail}") from exc
         except OSError as exc:

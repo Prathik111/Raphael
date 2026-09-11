@@ -7,7 +7,7 @@ import pytest
 
 from ai_ecosystem.core.errors import DomainValidationError, ToolExecutionError
 from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models import Tool, ToolCall, ToolResult
+from ai_ecosystem.core.models import Tool, ToolResult
 from ai_ecosystem.core.models.enums import EventType, RiskLevel
 from ai_ecosystem.tools import (
     DenyAllAuthorizer,
@@ -102,9 +102,7 @@ def test_git_status_and_diff(registry, tmp_path):
     _git_repo(tmp_path)
     (tmp_path / "f.txt").write_text("x")
     runner = ToolRunner(registry, GrantAllAuthorizer())
-    status = runner.run(
-        registry.build_call("t", "git.status", {"cwd": str(tmp_path)})
-    )
+    status = runner.run(registry.build_call("t", "git.status", {"cwd": str(tmp_path)}))
     assert status.success and "f.txt" in status.output
     diff = runner.run(registry.build_call("t", "git.diff", {"cwd": str(tmp_path)}))
     assert diff.success
@@ -112,9 +110,7 @@ def test_git_status_and_diff(registry, tmp_path):
 
 def test_git_outside_repo_fails(registry, tmp_path):
     runner = ToolRunner(registry, GrantAllAuthorizer())
-    result = runner.run(
-        registry.build_call("t", "git.status", {"cwd": str(tmp_path)})
-    )
+    result = runner.run(registry.build_call("t", "git.status", {"cwd": str(tmp_path)}))
     assert result.success is False
 
 
@@ -176,9 +172,13 @@ def test_terminal_cwd_jailed_to_root(tmp_path):
     outside = str(tmp_path.parent)
 
     def run(cwd):
-        return runner.run(reg.build_call(
-            "t", "terminal.execute",
-            {"command": [sys.executable, "-c", "print('hi')"], "cwd": cwd}))
+        return runner.run(
+            reg.build_call(
+                "t",
+                "terminal.execute",
+                {"command": [sys.executable, "-c", "print('hi')"], "cwd": cwd},
+            )
+        )
 
     assert run(str(tmp_path)).success is True
     escaped = run(outside)
@@ -194,12 +194,21 @@ def test_terminal_env_scrubs_credentials(tmp_path, monkeypatch):
     for tool, handler in rooted(tmp_path):
         reg.register(tool, handler)
     runner = ToolRunner(reg, GrantAllAuthorizer())
-    result = runner.run(reg.build_call(
-        "t", "terminal.execute",
-        {"command": [sys.executable, "-c",
-                     "import os; print('KEY:' + os.environ.get("
-                     "'AI_ECO_MODEL_API_KEY', 'ABSENT')); print('VAR:' + "
-                     "os.environ.get('TOTALLY_INNOCENT_VAR', 'ABSENT'))"]}))
+    result = runner.run(
+        reg.build_call(
+            "t",
+            "terminal.execute",
+            {
+                "command": [
+                    sys.executable,
+                    "-c",
+                    ("import os; print('KEY:' + os.environ.get("
+                    "'AI_ECO_MODEL_API_KEY', 'ABSENT')); print('VAR:' + "
+                    "os.environ.get('TOTALLY_INNOCENT_VAR', 'ABSENT'))"),
+                ]
+            },
+        )
+    )
     assert result.success is True
     assert "sk-test-0123456789abcdef" not in result.output
     assert "VAR:visible" in result.output
@@ -214,9 +223,13 @@ def test_terminal_truncation_marked():
         for tool, handler in terminal.terminal_tools():
             reg.register(tool, handler)
         runner = ToolRunner(reg, GrantAllAuthorizer())
-        result = runner.run(reg.build_call(
-            "t", "terminal.execute",
-            {"command": [sys.executable, "-c", "print('x' * 100)"]}))
+        result = runner.run(
+            reg.build_call(
+                "t",
+                "terminal.execute",
+                {"command": [sys.executable, "-c", "print('x' * 100)"]},
+            )
+        )
     finally:
         terminal.OUTPUT_CAP = old_cap
     assert result.success is True
@@ -314,7 +327,8 @@ def test_respond_returns_text_unchanged():
     assert registry.get("agent.respond").risk_level is RiskLevel.LOW
     runner = ToolRunner(registry, GrantAllAuthorizer())
     result = runner.run(
-        registry.build_call("t", "agent.respond", {"text": "Hello there!"}))
+        registry.build_call("t", "agent.respond", {"text": "Hello there!"})
+    )
     assert result.success is True
     assert result.output == "Hello there!"
 
@@ -326,8 +340,10 @@ def test_respond_rejects_missing_or_huge_text():
     for tool, handler in respond_tools():
         registry.register(tool, handler)
     runner = ToolRunner(registry, GrantAllAuthorizer())
-    assert runner.run(
-        registry.build_call("t", "agent.respond", {})).success is False
-    assert runner.run(
-        registry.build_call(
-            "t", "agent.respond", {"text": "x" * 9000})).success is False
+    assert runner.run(registry.build_call("t", "agent.respond", {})).success is False
+    assert (
+        runner.run(
+            registry.build_call("t", "agent.respond", {"text": "x" * 9000})
+        ).success
+        is False
+    )

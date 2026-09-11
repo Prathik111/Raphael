@@ -1,6 +1,5 @@
 """Gates 29-31: trust tiers, sandbox isolation, tamper-evident audit."""
 
-import json
 import os
 import time
 
@@ -26,9 +25,10 @@ from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry, ToolRunner
 
 def _registry():
     registry = ToolRegistry()
-    registry.register(Tool(name="ok", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW),
-                      lambda args: ToolResult(success=True, output="ok"))
+    registry.register(
+        Tool(name="ok", input_schema={"required": []}, risk_level=RiskLevel.LOW),
+        lambda args: ToolResult(success=True, output="ok"),
+    )
     return registry
 
 
@@ -43,10 +43,15 @@ def test_no_self_elevation():
     trust = ComponentTrust()
     assert trust.level_of("plugin-x") is TrustLevel.UNTRUSTED
     with pytest.raises(DomainValidationError):
-        trust.assign("plugin-x", TrustLevel.TRUSTED, actor="plugin-x",
-                     actor_trust=TrustLevel.LIMITED)
-    trust.assign("plugin-x", TrustLevel.LIMITED, actor="operator",
-                 actor_trust=TrustLevel.SYSTEM)
+        trust.assign(
+            "plugin-x",
+            TrustLevel.TRUSTED,
+            actor="plugin-x",
+            actor_trust=TrustLevel.LIMITED,
+        )
+    trust.assign(
+        "plugin-x", TrustLevel.LIMITED, actor="operator", actor_trust=TrustLevel.SYSTEM
+    )
     assert trust.level_of("plugin-x") is TrustLevel.LIMITED
     with pytest.raises(DomainValidationError):
         trust.require("plugin-x", TrustLevel.TRUSTED)
@@ -84,8 +89,7 @@ def test_sandbox_filesystem_restriction(tmp_path):
         seen["exists"] = _os.path.isdir(args.get("cwd", ""))
         return ToolResult(success=True, output="probed")
 
-    tool = Tool(name="walk", input_schema={"required": []},
-                capabilities=["subprocess"])
+    tool = Tool(name="walk", input_schema={"required": []}, capabilities=["subprocess"])
     provider.run(tool, probe, {}, SandboxProfile(name="t", fs_root=str(tmp_path)), 5.0)
     assert seen["cwd"] == str(tmp_path)
     assert seen["exists"] is True
@@ -93,13 +97,22 @@ def test_sandbox_filesystem_restriction(tmp_path):
 
 def test_sandbox_network_restriction():
     provider = LocalSandboxProvider()
-    tool = Tool(name="fetch", input_schema={"required": []},
-                capabilities=["network"])
+    tool = Tool(name="fetch", input_schema={"required": []}, capabilities=["network"])
     with pytest.raises(Exception, match="network use denied"):
-        provider.run(tool, lambda args: ToolResult(success=True),
-                     {}, SandboxProfile(name="t", allow_network=False), 5.0)
-    result = provider.run(tool, lambda args: ToolResult(success=True, output="net"),
-                          {}, SandboxProfile(name="t", allow_network=True), 5.0)
+        provider.run(
+            tool,
+            lambda args: ToolResult(success=True),
+            {},
+            SandboxProfile(name="t", allow_network=False),
+            5.0,
+        )
+    result = provider.run(
+        tool,
+        lambda args: ToolResult(success=True, output="net"),
+        {},
+        SandboxProfile(name="t", allow_network=True),
+        5.0,
+    )
     assert result.success
 
 
@@ -115,8 +128,13 @@ def test_sandbox_env_scrub():
         return ToolResult(success=True, output="ok")
 
     try:
-        provider.run(Tool(name="probe", input_schema={"required": []}), probe, {},
-                     SandboxProfile(name="t"), 5.0)
+        provider.run(
+            Tool(name="probe", input_schema={"required": []}),
+            probe,
+            {},
+            SandboxProfile(name="t"),
+            5.0,
+        )
     finally:
         os.environ.pop("AI_ECO_TEST_SECRET_KEY", None)
     assert seen["leaked"] is None
@@ -130,30 +148,50 @@ def test_sandbox_cleanup_on_crash():
         raise RuntimeError("handler exploded")
 
     with pytest.raises(RuntimeError):
-        provider.run(Tool(name="boom", input_schema={"required": []}), boom, {},
-                     SandboxProfile(name="t"), 5.0)
+        provider.run(
+            Tool(name="boom", input_schema={"required": []}),
+            boom,
+            {},
+            SandboxProfile(name="t"),
+            5.0,
+        )
     # Lock released: the provider still works afterwards.
-    result = provider.run(Tool(name="ok", input_schema={"required": []}),
-                          lambda args: ToolResult(success=True, output="ok"),
-                          {}, SandboxProfile(name="t"), 5.0)
+    result = provider.run(
+        Tool(name="ok", input_schema={"required": []}),
+        lambda args: ToolResult(success=True, output="ok"),
+        {},
+        SandboxProfile(name="t"),
+        5.0,
+    )
     assert result.success
 
 
 def test_sandbox_requires_authorization_first(tmp_path):
     """Sandboxing composes with policy; it never replaces it."""
     registry = ToolRegistry()
-    registry.register(Tool(name="danger", input_schema={"required": []},
-                           risk_level=RiskLevel.HIGH, requires_sandbox=True,
-                           sandbox_profile="strict"),
-                      lambda args: ToolResult(success=True, output="pwned"))
+    registry.register(
+        Tool(
+            name="danger",
+            input_schema={"required": []},
+            risk_level=RiskLevel.HIGH,
+            requires_sandbox=True,
+            sandbox_profile="strict",
+        ),
+        lambda args: ToolResult(success=True, output="pwned"),
+    )
     from ai_ecosystem.security import Policy, PolicyEngine, RiskContext
 
     authorizer = AuthorizationManager(
-        registry, policy_engine=PolicyEngine(Policy(name="default")),
-        context=RiskContext(root=str(tmp_path)))
-    runner = ToolRunner(registry, authorizer,
-                        sandbox=LocalSandboxProvider(),
-                        sandbox_profiles={"strict": SandboxProfile(name="strict")})
+        registry,
+        policy_engine=PolicyEngine(Policy(name="default")),
+        context=RiskContext(root=str(tmp_path)),
+    )
+    runner = ToolRunner(
+        registry,
+        authorizer,
+        sandbox=LocalSandboxProvider(),
+        sandbox_profiles={"strict": SandboxProfile(name="strict")},
+    )
     result = runner.run(registry.build_call("t", "danger", {}))
     assert result.success is False  # HIGH denied by default policy first
     assert "denied" in result.error
@@ -161,9 +199,15 @@ def test_sandbox_requires_authorization_first(tmp_path):
 
 def test_sandbox_fail_closed_without_provider():
     registry = ToolRegistry()
-    registry.register(Tool(name="danger", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW, requires_sandbox=True),
-                      lambda args: ToolResult(success=True, output="x"))
+    registry.register(
+        Tool(
+            name="danger",
+            input_schema={"required": []},
+            risk_level=RiskLevel.LOW,
+            requires_sandbox=True,
+        ),
+        lambda args: ToolResult(success=True, output="x"),
+    )
     runner = ToolRunner(registry, GrantAllAuthorizer())  # no sandbox
     result = runner.run(registry.build_call("t", "danger", {}))
     assert result.success is False
@@ -176,13 +220,22 @@ def test_sandboxed_execution_audited(tmp_path):
     try:
         log = AuditLog(db)
         registry = ToolRegistry()
-        registry.register(Tool(name="ok", input_schema={"required": []},
-                               risk_level=RiskLevel.LOW, requires_sandbox=True),
-                          lambda args: ToolResult(success=True, output="ok"))
-        runner = ToolRunner(registry, GrantAllAuthorizer(),
-                            sandbox=LocalSandboxProvider(),
-                            sandbox_profiles={"default": SandboxProfile()},
-                            auditor=log.as_recorder())
+        registry.register(
+            Tool(
+                name="ok",
+                input_schema={"required": []},
+                risk_level=RiskLevel.LOW,
+                requires_sandbox=True,
+            ),
+            lambda args: ToolResult(success=True, output="ok"),
+        )
+        runner = ToolRunner(
+            registry,
+            GrantAllAuthorizer(),
+            sandbox=LocalSandboxProvider(),
+            sandbox_profiles={"default": SandboxProfile()},
+            auditor=log.as_recorder(),
+        )
         assert runner.run(registry.build_call("t9", "ok", {})).success
         records = log.query(task_id="t9")
         assert len(records) == 1
@@ -196,12 +249,25 @@ def test_audit_record_creation_and_query(tmp_path):
     db.migrate()
     try:
         log = AuditLog(db)
-        log.record(action="tool.execute", actor="a1", actor_type="agent",
-                   task_id="t1", resource="filesystem.read", decision="GRANTED",
-                   risk="LOW", correlation_id="c1")
-        log.record(action="tool.execute", actor="a1", task_id="t2",
-                   resource="terminal.execute", decision="DENIED", risk="HIGH",
-                   correlation_id="c2")
+        log.record(
+            action="tool.execute",
+            actor="a1",
+            actor_type="agent",
+            task_id="t1",
+            resource="filesystem.read",
+            decision="GRANTED",
+            risk="LOW",
+            correlation_id="c1",
+        )
+        log.record(
+            action="tool.execute",
+            actor="a1",
+            task_id="t2",
+            resource="terminal.execute",
+            decision="DENIED",
+            risk="HIGH",
+            correlation_id="c2",
+        )
         assert len(log.query(actor="a1")) == 2
         assert len(log.query(task_id="t1")) == 1
         assert len(log.query(action="tool.execute", correlation_id="c2")) == 1
@@ -232,9 +298,11 @@ def test_audit_integrity_and_tampering(tmp_path):
         log.record(action="tool.execute", actor="a1")
         assert log.verify()[0] is True
         # Attacker rewrites history directly in the database.
-        db.execute("UPDATE audit_log SET snapshot = ? WHERE id = ?",
-                   ("{\"forged\": true}", first.id))
-        ok, offender = log.verify()
+        db.execute(
+            "UPDATE audit_log SET snapshot = ? WHERE id = ?",
+            ('{"forged": true}', first.id),
+        )
+        ok, _offender = log.verify()
         assert ok is False
     finally:
         db.close()
@@ -283,11 +351,13 @@ def test_runner_auditor_hook_covers_denials(tmp_path):
     try:
         log = AuditLog(db)
         registry = ToolRegistry()
-        registry.register(Tool(name="danger", input_schema={"required": []},
-                               risk_level=RiskLevel.HIGH),
-                          lambda args: ToolResult(success=True))
-        runner = ToolRunner(registry, DenyAllAuthorizer(),
-                            auditor=log.as_recorder())
+        registry.register(
+            Tool(
+                name="danger", input_schema={"required": []}, risk_level=RiskLevel.HIGH
+            ),
+            lambda args: ToolResult(success=True),
+        )
+        runner = ToolRunner(registry, DenyAllAuthorizer(), auditor=log.as_recorder())
         result = runner.run(registry.build_call("t-denied", "danger", {}))
         assert result.success is False
         denied = log.query(task_id="t-denied")

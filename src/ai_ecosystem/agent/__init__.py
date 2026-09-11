@@ -41,7 +41,7 @@ from ai_ecosystem.agent.recovery import (
     RecoveryPolicy,
     RetryPolicy,
 )
-from ai_ecosystem.agent.verifier import Verifier, VerificationStrategy
+from ai_ecosystem.agent.verifier import VerificationStrategy, Verifier
 
 __all__ = [
     "AgentConfig",

@@ -10,7 +10,7 @@ as OCI (never in logs, events, prompts, or messages).
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.cloud.jobs import ComputeJob, JobStatus
 from ai_ecosystem.cloud.providers import (
@@ -35,14 +35,13 @@ class DatasetPolicy:
 
     def __init__(
         self,
-        allowed_kinds: Optional[list[str]] = None,
+        allowed_kinds: list[str] | None = None,
         max_bytes: int = 10_000_000,
     ) -> None:
         self.allowed_kinds = list(allowed_kinds or ["dataset", "notebook", "model"])
         self.max_bytes = max_bytes
 
-    def check(self, name: str, kind: str, size_bytes: int,
-              payload: Any = None) -> None:
+    def check(self, name: str, kind: str, size_bytes: int, payload: Any = None) -> None:
         """Raise DatasetPolicyError unless the artifact may leave the PC."""
         if kind not in self.allowed_kinds:
             raise DatasetPolicyError(f"dataset kind {kind!r} is not uploadable")
@@ -51,24 +50,26 @@ class DatasetPolicy:
                 size_bytes = int(size_bytes)
             except (TypeError, ValueError):
                 raise DatasetPolicyError(
-                    f"dataset {name!r} has an invalid size") from None
+                    f"dataset {name!r} has an invalid size"
+                ) from None
         if size_bytes < 0:
             raise DatasetPolicyError(f"dataset {name!r} has a negative size")
         if size_bytes > self.max_bytes:
             raise DatasetPolicyError(
-                f"dataset {name!r} ({size_bytes} bytes) exceeds "
-                f"{self.max_bytes} limit")
+                f"dataset {name!r} ({size_bytes} bytes) exceeds {self.max_bytes} limit"
+            )
         if payload is not None and _contains_secrets(payload):
-            raise DatasetPolicyError(
-                f"dataset {name!r} appears to contain credentials")
+            raise DatasetPolicyError(f"dataset {name!r} appears to contain credentials")
 
 
 def _contains_secrets(payload: Any) -> bool:
     from ai_ecosystem.core.secrets import looks_like_secret_value
 
     if isinstance(payload, dict):
-        return any(looks_secret(str(key)) or _contains_secrets(value)
-                   for key, value in payload.items())
+        return any(
+            looks_secret(str(key)) or _contains_secrets(value)
+            for key, value in payload.items()
+        )
     if isinstance(payload, (list, tuple)):
         return any(_contains_secrets(item) for item in payload)
     return looks_like_secret_value(payload)
@@ -99,8 +100,14 @@ class MockNotebookTransport:
         self.ticks_to_timeout = ticks_to_timeout
         self.logs_text = logs_text
         self.result_ref = result_ref
-        self.calls = {"handshake": 0, "submit": 0, "status": 0,
-                      "cancel": 0, "logs": 0, "result": 0}
+        self.calls = {
+            "handshake": 0,
+            "submit": 0,
+            "status": 0,
+            "cancel": 0,
+            "logs": 0,
+            "result": 0,
+        }
         self._jobs: dict[str, dict] = {}
 
     def handshake(self, credential: str) -> dict[str, Any]:
@@ -173,7 +180,7 @@ class ExternalProvider(CloudProvider):
         self,
         transport: MockNotebookTransport,
         secrets: SecretsProvider,
-        dataset_policy: Optional[DatasetPolicy] = None,
+        dataset_policy: DatasetPolicy | None = None,
         region: str = "",
     ) -> None:
         self._transport = transport
@@ -199,7 +206,7 @@ class ExternalProvider(CloudProvider):
         except CredentialError as exc:
             self._status = CloudStatus.ERROR
             raise CloudAuthError(str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._status = CloudStatus.ERROR
             raise CloudAuthError(f"{self.name} authentication failed") from exc
         self._status = CloudStatus.CONNECTED
@@ -215,8 +222,11 @@ class ExternalProvider(CloudProvider):
     def status(self) -> ProviderInfo:
         """Describe without secrets."""
         return ProviderInfo(
-            provider=self.name, status=self._status, region=self._region,
-            capabilities=self.capabilities() if self._status is CloudStatus.CONNECTED
+            provider=self.name,
+            status=self._status,
+            region=self._region,
+            capabilities=self.capabilities()
+            if self._status is CloudStatus.CONNECTED
             else CloudCapabilities(),
             latency_ms=self._latency_ms,
         )
@@ -233,20 +243,28 @@ class ExternalProvider(CloudProvider):
         except Exception:  # noqa: BLE001
             reachable = False
         available = reachable and self._status is CloudStatus.CONNECTED
-        return {"provider": self.name, "reachable": reachable,
-                "available": available,
-                "status": self._status.value if available else (
-                    CloudStatus.DEGRADED.value if reachable else CloudStatus.ERROR.value)}
+        return {
+            "provider": self.name,
+            "reachable": reachable,
+            "available": available,
+            "status": self._status.value
+            if available
+            else (CloudStatus.DEGRADED.value if reachable else CloudStatus.ERROR.value),
+        }
 
-    def submit_job(self, job: ComputeJob,
-                   datasets: Optional[list[dict]] = None) -> ComputeJob:
+    def submit_job(
+        self, job: ComputeJob, datasets: list[dict] | None = None
+    ) -> ComputeJob:
         """Policy-gate datasets, then submit (connected only)."""
         if self._status is not CloudStatus.CONNECTED:
             raise CloudUnavailableError(f"{self.name} is not connected")
         for dataset in datasets or []:
             self._datasets.check(
-                str(dataset.get("name", "")), str(dataset.get("kind", "")),
-                int(dataset.get("size_bytes", 0)), dataset.get("payload"))
+                str(dataset.get("name", "")),
+                str(dataset.get("kind", "")),
+                int(dataset.get("size_bytes", 0)),
+                dataset.get("payload"),
+            )
         job.provider = self.name
         self._transport.submit(job.id, {"task_id": job.task_id})
         job.status = JobStatus.QUEUED
@@ -254,23 +272,32 @@ class ExternalProvider(CloudProvider):
 
     def poll_job(self, job: ComputeJob) -> ComputeJob:
         """Advance one tick and map the lifecycle onto the job."""
-        mapping = {"CREATED": JobStatus.QUEUED, "QUEUED": JobStatus.QUEUED,
-                   "RUNNING": JobStatus.RUNNING, "COMPLETED": JobStatus.SUCCEEDED,
-                   "FAILED": JobStatus.FAILED, "CANCELLED": JobStatus.CANCELLED,
-                   "TIMED_OUT": JobStatus.TIMED_OUT}
+        mapping = {
+            "CREATED": JobStatus.QUEUED,
+            "QUEUED": JobStatus.QUEUED,
+            "RUNNING": JobStatus.RUNNING,
+            "COMPLETED": JobStatus.SUCCEEDED,
+            "FAILED": JobStatus.FAILED,
+            "CANCELLED": JobStatus.CANCELLED,
+            "TIMED_OUT": JobStatus.TIMED_OUT,
+        }
         try:
             state = self._transport.status(job.id)
         except CloudError:
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise CloudUnavailableError(f"{self.name} poll failed") from exc
         job.status = mapping.get(state, JobStatus.FAILED)
         if job.status is JobStatus.RUNNING and job.started_at is None:
             from ai_ecosystem.core.models.base import utcnow
 
             job.started_at = utcnow()
-        if job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED,
-                            JobStatus.CANCELLED, JobStatus.TIMED_OUT):
+        if job.status in (
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+            JobStatus.TIMED_OUT,
+        ):
             from ai_ecosystem.core.models.base import utcnow
 
             job.completed_at = utcnow()
@@ -283,16 +310,19 @@ class ExternalProvider(CloudProvider):
 
     def cancel_job(self, job: ComputeJob) -> ComputeJob:
         """Cancel remotely and locally (terminal jobs refuse)."""
-        if job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED,
-                          JobStatus.CANCELLED, JobStatus.TIMED_OUT):
+        if job.status in (
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+            JobStatus.TIMED_OUT,
+        ):
             raise DomainValidationError(f"job {job.id!r} already terminal")
         try:
             self._transport.cancel(job.id)
         except CloudError:
             raise
-        except Exception as exc:  # noqa: BLE001 -- keep stores consistent
-            raise CloudUnavailableError(
-                f"{self.name} cancel failed: {exc}") from exc
+        except Exception as exc:
+            raise CloudUnavailableError(f"{self.name} cancel failed: {exc}") from exc
         job.status = JobStatus.CANCELLED
         from ai_ecosystem.core.models.base import utcnow
 
@@ -318,9 +348,14 @@ class KaggleProvider(ExternalProvider):
     def capabilities(self) -> CloudCapabilities:
         """Kaggle's free-tier shape (declared, mock-backed)."""
         return CloudCapabilities(
-            cpu="4 CPU", memory_gb=16.0, gpu="Tesla P100", storage_gb=20.0,
-            network=False, available_models=["kaggle-mock"],
-            available_tools=["notebook.execute"])
+            cpu="4 CPU",
+            memory_gb=16.0,
+            gpu="Tesla P100",
+            storage_gb=20.0,
+            network=False,
+            available_models=["kaggle-mock"],
+            available_tools=["notebook.execute"],
+        )
 
 
 class LightningProvider(ExternalProvider):
@@ -332,6 +367,11 @@ class LightningProvider(ExternalProvider):
     def capabilities(self) -> CloudCapabilities:
         """Lightning studio shape (declared, mock-backed)."""
         return CloudCapabilities(
-            cpu="8 CPU", memory_gb=32.0, gpu="A10G", storage_gb=50.0,
-            network=True, available_models=["lightning-mock"],
-            available_tools=["studio.execute"])
+            cpu="8 CPU",
+            memory_gb=32.0,
+            gpu="A10G",
+            storage_gb=50.0,
+            network=True,
+            available_models=["lightning-mock"],
+            available_tools=["studio.execute"],
+        )

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
-from typing import Optional
 
 from ai_ecosystem.agent.planner.validator import PlanValidator
 from ai_ecosystem.core.errors.exceptions import (
@@ -39,9 +38,9 @@ class RecoveryPlanner:
     def __init__(
         self,
         registry: ToolRegistry,
-        risk_engine: Optional[RiskEngine] = None,
-        policy_engine: Optional[PolicyEngine] = None,
-        replan_provider: Optional[ReplanProvider] = None,
+        risk_engine: RiskEngine | None = None,
+        policy_engine: PolicyEngine | None = None,
+        replan_provider: ReplanProvider | None = None,
         agent_id: str = "",
     ) -> None:
         self._registry = registry

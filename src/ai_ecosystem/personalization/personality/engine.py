@@ -8,8 +8,6 @@ risk, or policy code (separate modules, no imports between them).
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import Field
 
 from ai_ecosystem.core.events.bus import Event, EventBus
@@ -42,10 +40,10 @@ def render_prompt(context: PersonalizationContext, goal: str) -> str:
     """Render provider-agnostic prompt text from a context (deterministic)."""
     personality = context.personality
     lines = [
-        f"You are {personality.display_name}: {personality.tone} tone, "
-        f"{personality.formality} formality, {personality.verbosity} verbosity.",
-        f"Communicate {personality.communication_style}; "
-        f"humor {personality.humor}; proactivity {personality.proactivity}.",
+        (f"You are {personality.display_name}: {personality.tone} tone, "
+        f"{personality.formality} formality, {personality.verbosity} verbosity."),
+        (f"Communicate {personality.communication_style}; "
+        f"humor {personality.humor}; proactivity {personality.proactivity}."),
     ]
     for rule in personality.behavioral_rules:
         lines.append(f"Behavioral rule: {rule}")
@@ -69,8 +67,8 @@ class PersonalizationEngine:
         self,
         personalities: PersonalityStore,
         preferences: PreferenceStore,
-        memories: Optional[MemoryStore] = None,
-        bus: Optional[EventBus] = None,
+        memories: MemoryStore | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._personalities = personalities
         self._preferences = preferences
@@ -94,32 +92,52 @@ class PersonalizationEngine:
                 MemoryScope.GLOBAL, memory_type=MemoryType.SEMANTIC, limit=5
             )
             if project_id:
-                relevant.extend(self._memories.retrieve(
-                    MemoryScope.PROJECT, project_id, query=query,
-                    project_id=project_id, limit=5,
-                ))
+                relevant.extend(
+                    self._memories.retrieve(
+                        MemoryScope.PROJECT,
+                        project_id,
+                        query=query,
+                        project_id=project_id,
+                        limit=5,
+                    )
+                )
             if task_id:
-                relevant.extend(self._memories.retrieve(
-                    MemoryScope.TASK, task_id, query=query,
-                    project_id=project_id, limit=5,
-                ))
+                relevant.extend(
+                    self._memories.retrieve(
+                        MemoryScope.TASK,
+                        task_id,
+                        query=query,
+                        project_id=project_id,
+                        limit=5,
+                    )
+                )
             if agent_id:
-                relevant.extend(self._memories.retrieve(
-                    MemoryScope.AGENT, agent_id, query=query, limit=5
-                ))
+                relevant.extend(
+                    self._memories.retrieve(
+                        MemoryScope.AGENT, agent_id, query=query, limit=5
+                    )
+                )
         context = PersonalizationContext(
-            personality=personality, preferences=preferences,
-            facts=facts, relevant_memories=relevant[:10],
-            project_id=project_id, task_id=task_id,
+            personality=personality,
+            preferences=preferences,
+            facts=facts,
+            relevant_memories=relevant[:10],
+            project_id=project_id,
+            task_id=task_id,
         )
         if self._bus is not None:
-            self._bus.publish(Event(
-                event_type=EventType.PERSONALIZATION_APPLIED, task_id=task_id,
-                payload={"project_id": project_id,
-                         "personality_version": personality.version,
-                         "preferences_version": preferences.version,
-                         "memories": len(relevant)},
-            ))
+            self._bus.publish(
+                Event(
+                    event_type=EventType.PERSONALIZATION_APPLIED,
+                    task_id=task_id,
+                    payload={
+                        "project_id": project_id,
+                        "personality_version": personality.version,
+                        "preferences_version": preferences.version,
+                        "memories": len(relevant),
+                    },
+                )
+            )
         return context
 
     def summarize(self, context: PersonalizationContext, content: str) -> str:

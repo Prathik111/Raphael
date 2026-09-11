@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 
 Environment = Literal["development", "testing", "production"]
 
@@ -32,24 +32,38 @@ class AppConfig(BaseModel):
     max_queued_tasks: int = 16
 
     @model_validator(mode="after")
-    def _production_bind_loopback(self) -> "AppConfig":
+    def _production_bind_loopback(self) -> AppConfig:
         if self.environment == "production" and self.api_host not in (
-                "127.0.0.1", "localhost", "::1"):
+            "127.0.0.1",
+            "localhost",
+            "::1",
+        ):
             raise ValueError(
                 f"production api_host {self.api_host!r} is not loopback; "
-                "the local API has no auth layer")
+                "the local API has no auth layer"
+            )
         return self
 
     @classmethod
-    def from_env(cls, prefix: str = "AI_ECO_") -> "AppConfig":
+    def from_env(cls, prefix: str = "AI_ECO_") -> AppConfig:
         """Build from environment variables (AI_ECO_* by default)."""
         from ai_ecosystem.core.errors.exceptions import DomainValidationError
 
         values: dict[str, str] = {}
-        fields = ("environment", "db_path", "api_host", "api_port",
-                  "log_level", "lease_timeout_s", "max_retries",
-                  "sync_max_retries", "scheduler_workers", "allow_shells",
-                  "max_workers", "max_queued_tasks")
+        fields = (
+            "environment",
+            "db_path",
+            "api_host",
+            "api_port",
+            "log_level",
+            "lease_timeout_s",
+            "max_retries",
+            "sync_max_retries",
+            "scheduler_workers",
+            "allow_shells",
+            "max_workers",
+            "max_queued_tasks",
+        )
         for field in fields:
             raw = os.environ.get(f"{prefix}{field.upper()}")
             if raw is not None:

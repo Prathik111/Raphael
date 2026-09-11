@@ -15,10 +15,10 @@ from ai_ecosystem.personalization.personality.store import (
 )
 
 __all__ = [
-    "PersonalizationContext",
-    "PersonalizationEngine",
     "PersonalityProfile",
     "PersonalityStore",
+    "PersonalizationContext",
+    "PersonalizationEngine",
     "PreferenceProfile",
     "PreferenceStore",
     "render_prompt",

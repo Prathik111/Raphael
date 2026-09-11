@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -89,16 +89,17 @@ class MockOCITransport(OCITransport):
 
     def __init__(
         self,
-        outputs: Optional[dict[str, str]] = None,
+        outputs: dict[str, str] | None = None,
         failures: int = 0,
         latency_s: float = 0.0,
-        capabilities: Optional[CloudCapabilities] = None,
+        capabilities: CloudCapabilities | None = None,
     ) -> None:
         self._outputs = dict(outputs or {})
         self._failures_left = failures
         self.latency_s = latency_s
         self.capabilities = capabilities or CloudCapabilities(
-            cpu="4 OCPU", memory_gb=24.0, available_models=["oci-mock"])
+            cpu="4 OCPU", memory_gb=24.0, available_models=["oci-mock"]
+        )
         self.calls = {"handshake": 0, "complete": 0, "close": 0}
         self.prompts: list[str] = []
 
@@ -199,7 +200,7 @@ class OCIProvider(CloudProvider):
         except CredentialError as exc:
             self._status = CloudStatus.ERROR
             raise CloudAuthError(str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 -- normalize transport errors
+        except Exception as exc:
             self._status = CloudStatus.ERROR
             raise CloudAuthError("OCI authentication failed") from exc
         self._region = str(facts.get("region", self._region))
@@ -216,8 +217,11 @@ class OCIProvider(CloudProvider):
     def status(self) -> ProviderInfo:
         """Describe without secrets (region + capabilities only)."""
         return ProviderInfo(
-            provider=self.name, status=self._status, region=self._region,
-            capabilities=self.capabilities() if self._status is CloudStatus.CONNECTED
+            provider=self.name,
+            status=self._status,
+            region=self._region,
+            capabilities=self.capabilities()
+            if self._status is CloudStatus.CONNECTED
             else CloudCapabilities(),
             latency_ms=self._latency_ms,
         )
@@ -240,13 +244,23 @@ class OCIProvider(CloudProvider):
         except Exception:  # noqa: BLE001
             reachable, authenticated = True, False
         elapsed_ms = round((time.monotonic() - started) * 1000.0, 2)
-        available = reachable and authenticated and self._status is CloudStatus.CONNECTED
-        return {"provider": self.name, "reachable": reachable,
-                "authenticated": authenticated, "available": available,
-                "status": (self._status.value if available
-                           else CloudStatus.DEGRADED.value
-                           if reachable else CloudStatus.ERROR.value),
-                "latency_ms": elapsed_ms}
+        available = (
+            reachable and authenticated and self._status is CloudStatus.CONNECTED
+        )
+        return {
+            "provider": self.name,
+            "reachable": reachable,
+            "authenticated": authenticated,
+            "available": available,
+            "status": (
+                self._status.value
+                if available
+                else CloudStatus.DEGRADED.value
+                if reachable
+                else CloudStatus.ERROR.value
+            ),
+            "latency_ms": elapsed_ms,
+        }
 
     def complete_remote(self, model: str, prompt: str) -> str:
         """Run one remote completion (connected only)."""
@@ -259,9 +273,12 @@ class OCIProvider(CloudProvider):
     def describe_redacted(self) -> dict[str, Any]:
         """Status safe for logs and events (no credential material)."""
         info = self.status()
-        return {"provider": info.provider, "status": info.status.value,
-                "region": info.region,
-                "capabilities": info.capabilities.model_dump()}
+        return {
+            "provider": info.provider,
+            "status": info.status.value,
+            "region": info.region,
+            "capabilities": info.capabilities.model_dump(),
+        }
 
 
 def redact_event(payload: dict[str, Any]) -> dict[str, Any]:

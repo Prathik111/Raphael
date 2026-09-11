@@ -7,7 +7,7 @@ reasoning, planning, execution, or LLM logic may live here.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -30,6 +30,7 @@ from ai_ecosystem.core.models.enums import (
 
 class Goal(Entity):
     """A user goal the agent must accomplish."""
+
     title: str = ""
     description: str = ""
     success_criteria: list[str] = Field(default_factory=list)
@@ -37,14 +38,16 @@ class Goal(Entity):
 
 class Task(Entity):
     """A unit of work tracked through the PACE state machine."""
+
     title: str = ""
-    goal_id: Optional[str] = None
+    goal_id: str | None = None
     state: TaskState = TaskState.CREATED
-    agent_id: Optional[str] = None
+    agent_id: str | None = None
 
 
 class PlanStep(Entity):
     """One structured step of a plan (Gate 7 produces these)."""
+
     description: str = ""
     dependencies: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
@@ -56,6 +59,7 @@ class PlanStep(Entity):
 
 class Plan(Entity):
     """A structured plan: goal + steps + final verification."""
+
     goal: str = ""
     steps: list[PlanStep] = Field(default_factory=list)
     final_verification: str = ""
@@ -63,6 +67,7 @@ class Plan(Entity):
 
 class Tool(Entity):
     """Tool contract (Gate 5 lifecycle; Gate 30 sandbox flags)."""
+
     name: str = ""
     description: str = ""
     input_schema: dict[str, Any] = Field(default_factory=dict)
@@ -77,6 +82,7 @@ class Tool(Entity):
 
 class ToolCall(Entity):
     """A request to execute a tool within a task."""
+
     task_id: str = ""
     tool: str = ""
     arguments: dict[str, Any] = Field(default_factory=dict)
@@ -85,18 +91,20 @@ class ToolCall(Entity):
 
 class ToolResult(Entity):
     """Observed outcome of a tool call."""
+
     task_id: str = ""
     tool_call_id: str = ""
     success: bool = False
     output: Any = None
-    error: Optional[str] = None
-    exit_code: Optional[int] = None
+    error: str | None = None
+    exit_code: int | None = None
 
 
 class Permission(Entity):
     """An authorization decision for a (task, tool-call) pair."""
+
     task_id: str = ""
-    tool_call_id: Optional[str] = None
+    tool_call_id: str | None = None
     decision: PermissionDecision = PermissionDecision.PENDING
     reason: str = ""
     policy: str = "default"
@@ -104,8 +112,9 @@ class Permission(Entity):
 
 class RiskAssessment(Entity):
     """Risk evaluation for a proposed action (Gate 6 engine later)."""
+
     task_id: str = ""
-    tool_call_id: Optional[str] = None
+    tool_call_id: str | None = None
     level: RiskLevel = RiskLevel.LOW
     factors: list[str] = Field(default_factory=list)
     rationale: str = ""
@@ -113,11 +122,12 @@ class RiskAssessment(Entity):
 
 class Artifact(Entity):
     """A file or object produced during execution."""
+
     task_id: str = ""
     name: str = ""
     kind: str = "file"
     uri: str = ""
-    sha256: Optional[str] = None
+    sha256: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -127,6 +137,7 @@ class Memory(Entity):
     Memory is untrusted DATA. Provenance and verification describe where
     a memory came from; neither field grants authority or bypasses policy.
     """
+
     type: MemoryType = MemoryType.SEMANTIC
     content: str = ""
     source: str = ""
@@ -135,17 +146,18 @@ class Memory(Entity):
     scope: MemoryScope = MemoryScope.GLOBAL
     scope_id: str = ""
     status: MemoryStatus = MemoryStatus.ACTIVE
-    retention_days: Optional[int] = None
+    retention_days: int | None = None
     cloud_eligible: bool = False
     provenance: str = "unknown"
     created_by: str = "unknown"
     verified: bool = False
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Skill(Entity):
     """A structured, versioned, permission-aware capability (Gate 17)."""
+
     name: str = ""
     version: str = "1.0.0"
     description: str = ""
@@ -166,20 +178,23 @@ class Skill(Entity):
 
 class ModelProvider(Entity):
     """An interchangeable model backend (Gate 4 wires these up)."""
+
     name: str = ""
     kind: str = "local"
 
 
 class Model(Entity):
     """A selectable reasoning model behind the abstraction."""
+
     name: str = ""
-    provider_id: Optional[str] = None
+    provider_id: str | None = None
     capabilities: list[str] = Field(default_factory=list)
     context_length: int = 0
 
 
 class Device(Entity):
     """A known ecosystem node (Gate 35 standardizes the protocol)."""
+
     name: str = ""
     node_type: NodeType = NodeType.PC
     capabilities: list[str] = Field(default_factory=list)
@@ -188,7 +203,8 @@ class Device(Entity):
 
 class ComputeNode(Entity):
     """A schedulable compute target (Gate 25 routes to these)."""
-    device_id: Optional[str] = None
+
+    device_id: str | None = None
     kind: str = "local"
     available: bool = True
     resources: dict[str, Any] = Field(default_factory=dict)
@@ -196,6 +212,7 @@ class ComputeNode(Entity):
 
 class VerificationResult(Entity):
     """Structured verification outcome."""
+
     task_id: str = ""
     step_id: str = ""
     status: VerificationStatus = VerificationStatus.PENDING
@@ -210,20 +227,22 @@ class VerificationResult(Entity):
 
 class Agent(Entity):
     """An agent identity (orchestrator or subagent)."""
+
     name: str = ""
     role: str = "general"
     capabilities: list[str] = Field(default_factory=list)
-    model_id: Optional[str] = None
+    model_id: str | None = None
     permission_scope: str = "default"
 
 
 class ExecutionContext(Entity):
     """All durable state for one running task."""
+
     task_id: str = ""
     goal: str = ""
     current_state: TaskState = TaskState.CREATED
-    plan: Optional[Plan] = None
-    current_step: Optional[str] = None
+    plan: Plan | None = None
+    current_step: str | None = None
     variables: dict[str, Any] = Field(default_factory=dict)
     tool_results: list[ToolResult] = Field(default_factory=list)
     artifacts: list[Artifact] = Field(default_factory=list)
@@ -246,6 +265,4 @@ class ExecutionContext(Entity):
         try:
             return cls.model_validate_json(data)
         except Exception as exc:
-            raise ContextSerializationError(
-                f"cannot restore context: {exc}"
-            ) from exc
+            raise ContextSerializationError(f"cannot restore context: {exc}") from exc

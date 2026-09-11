@@ -28,7 +28,7 @@ import logging
 import os
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.agent.executor import ParallelExecutor
 from ai_ecosystem.agent.orchestrator import AgentConfig, SingleAgent
@@ -39,7 +39,6 @@ from ai_ecosystem.core.events import InMemoryEventStore
 from ai_ecosystem.core.events.bus import Event
 from ai_ecosystem.core.models.enums import EventType, RiskLevel, TaskState
 from ai_ecosystem.core.persistence import (
-    Database,
     SqliteMemoryRepository,
     SqliteSkillRepository,
     SqliteVerificationRepository,
@@ -59,8 +58,8 @@ from ai_ecosystem.interface.api import ApiError, RuntimeAPI
 from ai_ecosystem.interface.server import LocalHttpServer
 from ai_ecosystem.personalization.memory import MemoryStore
 from ai_ecosystem.personalization.personality import (
-    PersonalizationEngine,
     PersonalityStore,
+    PersonalizationEngine,
     PreferenceStore,
 )
 from ai_ecosystem.security import (
@@ -91,12 +90,12 @@ class Stack:
     runtime: AgentRuntime
     api: RuntimeAPI
     server: LocalHttpServer
-    agent: Optional[SingleAgent] = None
+    agent: SingleAgent | None = None
     providers: list[ModelProvider] = field(default_factory=list)
     model_configured: bool = False
     workspace: str = ""
-    auth_token: Optional[str] = None
-    dispatcher: Optional["BoundedDispatcher"] = None
+    auth_token: str | None = None
+    dispatcher: BoundedDispatcher | None = None
 
 
 class BoundedDispatcher:
@@ -118,9 +117,11 @@ class BoundedDispatcher:
         self._queue: _queue.Queue = _queue.Queue(maxsize=self._max_queued)
         self._stopped = threading.Event()
         self._workers = [
-            threading.Thread(target=self._loop, daemon=True,
-                             name=f"agent-worker-{index}")
-            for index in range(self._max_workers)]
+            threading.Thread(
+                target=self._loop, daemon=True, name=f"agent-worker-{index}"
+            )
+            for index in range(self._max_workers)
+        ]
         for worker in self._workers:
             worker.start()
 
@@ -139,7 +140,8 @@ class BoundedDispatcher:
             raise ApiError(
                 "queue_full",
                 f"task queue full ({self._max_queued} waiting, "
-                f"{self._max_workers} running); try again later") from None
+                f"{self._max_workers} running); try again later",
+            ) from None
 
     def _loop(self) -> None:
         import queue as _queue
@@ -195,7 +197,7 @@ def load_or_create_token(path: str) -> str:
             handle.write(token)
     try:
         os.chmod(path, 0o600)
-    except OSError:  # noqa: BLE001 -- best effort on Windows
+    except OSError:
         pass
     return token
 
@@ -215,25 +217,32 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
     if http_provider is not None:
         router.register(
             http_provider,
-            ProviderProfile(provider_id=http_provider.provider_id,
-                            local=False, latency_class="standard"))
+            ProviderProfile(
+                provider_id=http_provider.provider_id,
+                local=False,
+                latency_class="standard",
+            ),
+        )
         providers.append(http_provider)
         return router, providers, True
 
     def _missing(request: Any) -> ModelResponse:
         raise ModelUnavailableError(
             "no model configured: set AI_ECO_MODEL_ENDPOINT and "
-            "AI_ECO_MODEL_API_KEY (plus AI_ECO_MODEL_NAME)")
+            "AI_ECO_MODEL_API_KEY (plus AI_ECO_MODEL_NAME)"
+        )
 
     stub = MockModelProvider("unconfigured", handler=_missing)
     router.register(stub, ProviderProfile(provider_id="unconfigured"))
     return router, [], False
 
 
-def build_stack(config: Optional[AppConfig] = None,
-                workspace: str = "workspace",
-                auth_token: Optional[str] = None,
-                no_auth: bool = False) -> Stack:
+def build_stack(
+    config: AppConfig | None = None,
+    workspace: str = "workspace",
+    auth_token: str | None = None,
+    no_auth: bool = False,
+) -> Stack:
     """Compose runtime + tools + policy + agent + API (no sockets yet).
 
     Authentication is on by default: pass ``auth_token`` explicitly or
@@ -251,38 +260,44 @@ def build_stack(config: Optional[AppConfig] = None,
     bus = runtime.bus
     # Surface subscriber failures in server logs (default is silent drop).
     # Assigned post-construction: AgentRuntime owns the bus wiring.
-    bus._on_error = lambda report: log.error(  # noqa: SLF001 -- composition root
-        "event subscriber failed: %s", report)
+    bus._on_error = lambda report: log.error(
+        "event subscriber failed: %s", report
+    )
     events = InMemoryEventStore()
     events.attach(bus)
 
     registry = ToolRegistry()
     for tool, handler in (
-            list(filesystem_tools(workspace))
-            + list(git_tools(workspace))
-            + list(respond_tools())
-            + list(terminal_tools(workspace))):
+        list(filesystem_tools(workspace))
+        + list(git_tools(workspace))
+        + list(respond_tools())
+        + list(terminal_tools(workspace))
+    ):
         registry.register(tool, handler)
     authorizer = AuthorizationManager(
         registry,
-        policy_engine=PolicyEngine(Policy(
-            name="local-operator", auto_grant_up_to=RiskLevel.HIGH,
-            deny_critical=True)),
+        policy_engine=PolicyEngine(
+            Policy(
+                name="local-operator",
+                auto_grant_up_to=RiskLevel.HIGH,
+                deny_critical=True,
+            )
+        ),
         context=RiskContext(agent_id="single-agent", root=workspace),
-        allow_shells=config.allow_shells)
+        allow_shells=config.allow_shells,
+    )
     runner = ToolRunner(registry, authorizer, bus)
 
     router, providers, model_configured = build_router()
     verifier = Verifier(
-        repository=SqliteVerificationRepository(runtime.db),
-        bus=bus).with_test_command(runner, registry)
+        repository=SqliteVerificationRepository(runtime.db), bus=bus
+    ).with_test_command(runner, registry)
     memories = MemoryStore(SqliteMemoryRepository(runtime.db), bus=bus)
     personalities = PersonalityStore(runtime.db, bus)
     preferences = PreferenceStore(runtime.db, bus)
-    personalization = PersonalizationEngine(
-        personalities, preferences, memories, bus)
+    personalization = PersonalizationEngine(personalities, preferences, memories, bus)
     skills = SqliteSkillRepository(runtime.db).list()
-    awareness: Optional[SystemAwarenessManager] = None
+    awareness: SystemAwarenessManager | None = None
     try:
         awareness = SystemAwarenessManager(LocalSystemProbe(), bus=bus)
     except Exception:  # noqa: BLE001 -- awareness is optional, never fatal
@@ -290,8 +305,9 @@ def build_stack(config: Optional[AppConfig] = None,
 
     tokens: dict[str, CancellationToken] = {}
     tokens_lock = threading.Lock()
-    dispatcher = BoundedDispatcher(max_workers=config.max_workers,
-                                   max_queued=config.max_queued_tasks)
+    dispatcher = BoundedDispatcher(
+        max_workers=config.max_workers, max_queued=config.max_queued_tasks
+    )
 
     # Crash recovery (review fix 09/39): tasks left non-terminal by a
     # previous process (killed mid-run, queued but never started) can
@@ -299,16 +315,25 @@ def build_stack(config: Optional[AppConfig] = None,
     # honest reason instead of leaving them stuck forever.
     try:
         for task in runtime.manager._tasks.list():
-            if task.state not in (TaskState.COMPLETED, TaskState.FAILED,
-                                  TaskState.CANCELLED):
+            if task.state not in (
+                TaskState.COMPLETED,
+                TaskState.FAILED,
+                TaskState.CANCELLED,
+            ):
                 try:
                     runtime.manager.transition(task.id, TaskState.FAILED)
                 except Exception:  # noqa: BLE001 -- best effort per task
                     continue
-                bus.publish(Event(
-                    event_type=EventType.TASK_FAILED, task_id=task.id,
-                    payload={"error": "interrupted by shutdown/restart; "
-                                      "resubmit the goal to retry"}))
+                bus.publish(
+                    Event(
+                        event_type=EventType.TASK_FAILED,
+                        task_id=task.id,
+                        payload={
+                            "error": "interrupted by shutdown/restart; "
+                            "resubmit the goal to retry"
+                        },
+                    )
+                )
     except Exception:  # noqa: BLE001 -- recovery never blocks startup
         pass
 
@@ -318,39 +343,61 @@ def build_stack(config: Optional[AppConfig] = None,
 
         provider = router.select(RoutingRequirements())
         tools = list(registry.list_tools())
-        required = {tool.name: set(tool.input_schema.get("required", []))
-                    for tool in tools}
-        schemas = {tool.name: {"required": tool.input_schema.get("required", []),
-                               "properties": tool.input_schema.get("properties", {})}
-                   for tool in tools}
-        docs = {tool.name: {"description": tool.description,
-                            "required": tool.input_schema.get("required", []),
-                            "properties": tool.input_schema.get("properties", {})}
-                for tool in tools}
+        required = {
+            tool.name: set(tool.input_schema.get("required", [])) for tool in tools
+        }
+        schemas = {
+            tool.name: {
+                "required": tool.input_schema.get("required", []),
+                "properties": tool.input_schema.get("properties", {}),
+            }
+            for tool in tools
+        }
+        docs = {
+            tool.name: {
+                "description": tool.description,
+                "required": tool.input_schema.get("required", []),
+                "properties": tool.input_schema.get("properties", {}),
+            }
+            for tool in tools
+        }
         system = _platform.system()
         if config.allow_shells:
-            shell_hint = ("shell interpreters explicitly allowed; prefer "
-                          "direct executables and file tools")
+            shell_hint = (
+                "shell interpreters explicitly allowed; prefer "
+                "direct executables and file tools"
+            )
         elif system == "Windows":
-            shell_hint = ("Windows, shell interpreters BLOCKED by operator "
-                          "policy (no cmd/bash/powershell): use direct "
-                          "executables and file tools only")
+            shell_hint = (
+                "Windows, shell interpreters BLOCKED by operator "
+                "policy (no cmd/bash/powershell): use direct "
+                "executables and file tools only"
+            )
         else:
-            shell_hint = (f"{system}, shell interpreters BLOCKED by "
-                          "operator policy: use direct executables and "
-                          "file tools only")
+            shell_hint = (
+                f"{system}, shell interpreters BLOCKED by "
+                "operator policy: use direct executables and "
+                "file tools only"
+            )
         return SingleAgent(
-            runtime=runtime, router=router,
-            requirements=RoutingRequirements(), registry=registry,
+            runtime=runtime,
+            router=router,
+            requirements=RoutingRequirements(),
+            registry=registry,
             runner=runner,
             planner=ModelReasoningBackend(
-                provider, tool_arguments=required, tool_schemas=schemas,
+                provider,
+                tool_arguments=required,
+                tool_schemas=schemas,
                 tool_docs=docs,
-                platform_hint=f"{system}; {shell_hint}"),
-            verifier=verifier, memories=memories,
+                platform_hint=f"{system}; {shell_hint}",
+            ),
+            verifier=verifier,
+            memories=memories,
             personalization=personalization,
             executor_factory=lambda: ParallelExecutor(runner, registry, bus),
-            bus=bus)
+            bus=bus,
+        )
 
     def dispatch(task_id: str) -> None:
         # NOTE: the task row already exists when this runs (created by
@@ -371,8 +418,10 @@ def build_stack(config: Optional[AppConfig] = None,
                         # Stable project scope: memories (task summaries,
                         # preferences) persist across conversations
                         # instead of dying per task.
-                        project_id="default"),
-                    cancel_token=token)
+                        project_id="default",
+                    ),
+                    cancel_token=token,
+                )
             except Exception as exc:  # noqa: BLE001 -- agent terminates tasks
                 log.error("dispatch for task %s failed: %s", task_id, exc)
             finally:
@@ -387,41 +436,68 @@ def build_stack(config: Optional[AppConfig] = None,
         if token is not None:
             token.cancel()
 
-    api = RuntimeAPI(runtime, dispatch=dispatch, awareness=awareness,
-                     models=providers, skills=skills, event_store=events,
-                     on_cancel=on_cancel)
+    api = RuntimeAPI(
+        runtime,
+        dispatch=dispatch,
+        awareness=awareness,
+        models=providers,
+        skills=skills,
+        event_store=events,
+        on_cancel=on_cancel,
+    )
     token = None if no_auth else auth_token
-    server = LocalHttpServer(api, host=config.api_host, port=config.api_port,
-                             auth_token=token)
-    return Stack(config=config, runtime=runtime, api=api, server=server,
-                 agent=agent_factory(), providers=providers,
-                 model_configured=model_configured, workspace=workspace,
-                 auth_token=token, dispatcher=dispatcher)
+    server = LocalHttpServer(
+        api, host=config.api_host, port=config.api_port, auth_token=token
+    )
+    return Stack(
+        config=config,
+        runtime=runtime,
+        api=api,
+        server=server,
+        agent=agent_factory(),
+        providers=providers,
+        model_configured=model_configured,
+        workspace=workspace,
+        auth_token=token,
+        dispatcher=dispatcher,
+    )
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Serve forever; Ctrl-C shuts down cleanly."""
     parser = argparse.ArgumentParser(
-        description="Serve the AI Ecosystem local runtime API")
-    parser.add_argument("--db", default=None,
-                        help="SQLite path (default: AI_ECO_DB_PATH)")
-    parser.add_argument("--workspace", default="workspace",
-                        help="Agent workspace root (tools are jailed here)")
+        description="Serve the AI Ecosystem local runtime API"
+    )
+    parser.add_argument(
+        "--db", default=None, help="SQLite path (default: AI_ECO_DB_PATH)"
+    )
+    parser.add_argument(
+        "--workspace",
+        default="workspace",
+        help="Agent workspace root (tools are jailed here)",
+    )
     parser.add_argument("--host", default=None, help="Bind host (loopback)")
     parser.add_argument("--port", type=int, default=None, help="Bind port")
-    parser.add_argument("--api-token-file", default=None,
-                        help="Path to the per-install bearer token file "
-                             "(default: <db dir>/api_token)")
-    parser.add_argument("--api-token", default=None,
-                        help="Bearer token value (overrides the file; "
-                             "prefer the file)")
-    parser.add_argument("--no-auth", action="store_true",
-                        help="Disable API authentication (tests only; "
-                             "never use with a real agent)")
+    parser.add_argument(
+        "--api-token-file",
+        default=None,
+        help="Path to the per-install bearer token file (default: <db dir>/api_token)",
+    )
+    parser.add_argument(
+        "--api-token",
+        default=None,
+        help="Bearer token value (overrides the file; prefer the file)",
+    )
+    parser.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="Disable API authentication (tests only; never use with a real agent)",
+    )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
     config = AppConfig.from_env()
     if args.db:
         config.db_path = args.db
@@ -430,9 +506,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.port:
         config.api_port = args.port
 
-    token: Optional[str] = None
+    token: str | None = None
     token_file = args.api_token_file or os.path.join(
-        os.path.dirname(os.path.abspath(config.db_path)), "api_credential")
+        os.path.dirname(os.path.abspath(config.db_path)), "api_credential"
+    )
     if not args.no_auth:
         # One-time rename from the pre-remediation filename: never leave
         # a stale credential file behind.
@@ -444,14 +521,20 @@ def main(argv: Optional[list[str]] = None) -> int:
                 pass
         token = args.api_token or load_or_create_token(token_file)
 
-    stack = build_stack(config, workspace=args.workspace,
-                        auth_token=token, no_auth=args.no_auth)
+    stack = build_stack(
+        config, workspace=args.workspace, auth_token=token, no_auth=args.no_auth
+    )
     stack.server.start()
-    log.info("serving %s (db=%s workspace=%s model=%s auth=%s)",
-             stack.server.url, config.db_path, stack.workspace,
-             "configured" if stack.model_configured
-             else "NOT CONFIGURED (set AI_ECO_MODEL_ENDPOINT/AI_ECO_MODEL_API_KEY)",
-             "off (INSECURE)" if args.no_auth else f"on ({token_file})")
+    log.info(
+        "serving %s (db=%s workspace=%s model=%s auth=%s)",
+        stack.server.url,
+        config.db_path,
+        stack.workspace,
+        "configured"
+        if stack.model_configured
+        else "NOT CONFIGURED (set AI_ECO_MODEL_ENDPOINT/AI_ECO_MODEL_API_KEY)",
+        "off (INSECURE)" if args.no_auth else f"on ({token_file})",
+    )
     try:
         threading.Event().wait()  # sleep until Ctrl-C
     except KeyboardInterrupt:

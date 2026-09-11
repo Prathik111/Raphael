@@ -41,7 +41,11 @@ def topic_of(claim: str) -> str:
 
 def split_sentences(content: str) -> list[str]:
     """Naive sentence split; keeps chunks with real content."""
-    return [part.strip() for part in _SENTENCE_SPLIT.split(content) if len(part.strip()) >= 20]
+    return [
+        part.strip()
+        for part in _SENTENCE_SPLIT.split(content)
+        if len(part.strip()) >= 20
+    ]
 
 
 class EvidenceExtractor:
@@ -55,14 +59,16 @@ class EvidenceExtractor:
         findings = []
         for claim in claims:
             rel = round(relevance(query, claim), 3)
-            findings.append(Evidence(
-                source_id=source.id,
-                claim=claim,
-                reference=claim[:160],
-                topic=topic_of(claim),
-                relevance=rel,
-                confidence=round(min(0.95, 0.4 + 0.6 * rel), 3),
-            ))
+            findings.append(
+                Evidence(
+                    source_id=source.id,
+                    claim=claim,
+                    reference=claim[:160],
+                    topic=topic_of(claim),
+                    relevance=rel,
+                    confidence=round(min(0.95, 0.4 + 0.6 * rel), 3),
+                )
+            )
         return findings
 
 
@@ -108,6 +114,7 @@ def rank_sources(
             by_source[item.source_id].append(
                 evidence_score(item, lookup[item.source_id], moment)
             )
+
     def mean(source_id: str) -> float:
         scores = by_source[source_id]
         return sum(scores) / len(scores) if scores else 0.0
@@ -134,14 +141,16 @@ def detect_conflicts(evidence: list[Evidence]) -> list[Conflict]:
         if len(sources) < 2:
             continue
         ordered = [variants[key] for key in sorted(variants)]
-        conflicts.append(Conflict(
-            topic=topic,
-            evidence_ids=[item.id for item in ordered],
-            claims=[item.claim for item in ordered],
-            source_ids=sources,
-            reason=(
-                f"{len(ordered)} differing claims on one topic "
-                f"from {len(sources)} sources; preserved, not merged"
-            ),
-        ))
+        conflicts.append(
+            Conflict(
+                topic=topic,
+                evidence_ids=[item.id for item in ordered],
+                claims=[item.claim for item in ordered],
+                source_ids=sources,
+                reason=(
+                    f"{len(ordered)} differing claims on one topic "
+                    f"from {len(sources)} sources; preserved, not merged"
+                ),
+            )
+        )
     return conflicts

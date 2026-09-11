@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import (
     ModelMalformedError,
@@ -63,7 +62,7 @@ class HttpChatModelProvider(ModelProvider):
     def __init__(
         self,
         provider_id: str = "http-chat",
-        capabilities: Optional[ModelCapabilities] = None,
+        capabilities: ModelCapabilities | None = None,
         endpoint: str = "",
         api_key: str = "",
         model: str = "",
@@ -91,7 +90,7 @@ class HttpChatModelProvider(ModelProvider):
         secrets: SecretsProvider,
         provider_id: str = "http-chat",
         timeout_s: float = DEFAULT_TIMEOUT_S,
-    ) -> Optional["HttpChatModelProvider"]:
+    ) -> HttpChatModelProvider | None:
         """Build from secrets; None when endpoint/key are not configured."""
         endpoint = secrets.get(ENDPOINT_ENV)
         api_key = secrets.get(API_KEY_ENV)
@@ -115,50 +114,59 @@ class HttpChatModelProvider(ModelProvider):
         payload = {
             "model": self._model,
             "messages": [
-                *([{"role": "system", "content": request.system}]
-                  if request.system else []),
+                *(
+                    [{"role": "system", "content": request.system}]
+                    if request.system
+                    else []
+                ),
                 {"role": "user", "content": request.prompt},
             ],
             "max_tokens": max(1, request.max_tokens),
         }
         body = json.dumps(payload).encode("utf-8")
         http_request = urllib.request.Request(
-            self._endpoint, data=body, method="POST",
+            self._endpoint,
+            data=body,
+            method="POST",
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self._api_key}",
                 # Groq fronts its API with Cloudflare, which challenges
                 # the default "Python-urllib" user agent (error 1010).
                 "User-Agent": "ai-ecosystem/0.1",
-            })
+            },
+        )
         timeout = min(self._timeout, max(1.0, request.timeout_s))
         try:
             with urllib.request.urlopen(http_request, timeout=timeout) as response:
                 raw = response.read()
         except TimeoutError as exc:
-            raise ModelTimeoutError(
-                f"provider {self.provider_id!r} timed out") from exc
+            raise ModelTimeoutError(f"provider {self.provider_id!r} timed out") from exc
         except urllib.error.HTTPError as exc:
             raise ModelUnavailableError(
-                f"provider {self.provider_id!r} refused the request "
-                f"(HTTP {exc.code})") from exc
+                f"provider {self.provider_id!r} refused the request (HTTP {exc.code})"
+            ) from exc
         except OSError as exc:
             raise ModelUnavailableError(
-                f"provider {self.provider_id!r} unreachable") from exc
+                f"provider {self.provider_id!r} unreachable"
+            ) from exc
         if len(raw) > MAX_BODY_BYTES:
             raise ModelMalformedError(
-                f"provider {self.provider_id!r} returned an oversize body")
+                f"provider {self.provider_id!r} returned an oversize body"
+            )
         try:
             decoded = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
             raise ModelMalformedError(
-                f"provider {self.provider_id!r} returned invalid JSON") from exc
+                f"provider {self.provider_id!r} returned invalid JSON"
+            ) from exc
         text = _extract_text(decoded)
         usage = decoded.get("usage", {}) if isinstance(decoded, dict) else {}
         return ModelResponse(
             text=text,
             model=decoded.get("model", self._model)
-            if isinstance(decoded, dict) else self._model,
+            if isinstance(decoded, dict)
+            else self._model,
             input_tokens=int(usage.get("prompt_tokens", 0) or 0),
             output_tokens=int(usage.get("completion_tokens", 0) or 0),
         )
@@ -171,13 +179,12 @@ def _extract_text(decoded: object) -> str:
     choices = decoded.get("choices")
     if not choices:
         raise ModelMalformedError("chat response has no choices")
-    message = choices[0].get("message", {}) if isinstance(
-        choices[0], dict) else {}
+    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
     content = message.get("content", "")
     if isinstance(content, list):  # multipart content blocks
         content = "".join(
-            block.get("text", "") for block in content
-            if isinstance(block, dict))
+            block.get("text", "") for block in content if isinstance(block, dict)
+        )
     if not isinstance(content, str) or not content.strip():
         raise ModelMalformedError("chat response has empty content")
     return content

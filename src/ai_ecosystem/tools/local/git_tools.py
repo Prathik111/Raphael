@@ -16,7 +16,6 @@ CONTRACT_TIMEOUT_S = 30.0
 
 def _resolve_cwd(raw: object, root: object, tool: str) -> str:
     """Default empty cwd to root; jail resolved cwd under root when set."""
-    from pathlib import Path
 
     if not raw:
         if root is None:
@@ -32,8 +31,7 @@ def _resolve_cwd(raw: object, root: object, tool: str) -> str:
         try:
             resolved.relative_to(Path(root).resolve())
         except ValueError:
-            raise ToolExecutionError(
-                tool, "'cwd' escapes the allowed root") from None
+            raise ToolExecutionError(tool, "'cwd' escapes the allowed root") from None
         raw = str(resolved)
     if not Path(raw).is_dir():
         raise ToolExecutionError(tool, f"not a directory: {raw!r}")
@@ -116,9 +114,10 @@ def git_tools(root: object = None) -> list[tuple[Tool, object]]:
             Tool(
                 name="git.status",
                 description="Show short git status for a repository.",
-                input_schema={"required": ["cwd"],
-                              "properties": {"cwd": "string",
-                                             "timeout_s": "number"}},
+                input_schema={
+                    "required": ["cwd"],
+                    "properties": {"cwd": "string", "timeout_s": "number"},
+                },
                 risk_level=RiskLevel.LOW,
                 timeout_s=30.0,
                 capabilities=["read-only"],
@@ -129,9 +128,10 @@ def git_tools(root: object = None) -> list[tuple[Tool, object]]:
             Tool(
                 name="git.diff",
                 description="Show git diff stat for a repository.",
-                input_schema={"required": ["cwd"],
-                              "properties": {"cwd": "string",
-                                             "timeout_s": "number"}},
+                input_schema={
+                    "required": ["cwd"],
+                    "properties": {"cwd": "string", "timeout_s": "number"},
+                },
                 risk_level=RiskLevel.LOW,
                 timeout_s=30.0,
                 capabilities=["read-only"],

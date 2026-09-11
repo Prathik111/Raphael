@@ -19,7 +19,12 @@ def manager():
     db = Database(":memory:")
     db.migrate()
     bus = EventBus()
-    yield TaskManager(SqliteTaskRepository(db), SqliteExecutionContextRepository(db), bus), bus
+    yield (
+        TaskManager(
+            SqliteTaskRepository(db), SqliteExecutionContextRepository(db), bus
+        ),
+        bus,
+    )
     db.close()
 
 

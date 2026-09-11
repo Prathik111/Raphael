@@ -23,12 +23,26 @@ def test_full_suite_produces_machine_readable_json(tmp_path):
     loaded = json.loads(open(out).read())
     assert loaded["generated_at"] > 0
     names = {entry["name"] for entry in loaded["results"]}
-    for expected in ("task.create", "persistence.roundtrip", "event.publish",
-                     "plan.validate", "tool.execute", "dag.execute",
-                     "verify.command", "memory.insert", "memory.retrieve",
-                     "skill.lookup", "skill.discover", "agent.delegate",
-                     "message.delivery", "provider.select", "sync.manifest",
-                     "workspace.update", "viz.ingest", "scheduler.tick"):
+    for expected in (
+        "task.create",
+        "persistence.roundtrip",
+        "event.publish",
+        "plan.validate",
+        "tool.execute",
+        "dag.execute",
+        "verify.command",
+        "memory.insert",
+        "memory.retrieve",
+        "skill.lookup",
+        "skill.discover",
+        "agent.delegate",
+        "message.delivery",
+        "provider.select",
+        "sync.manifest",
+        "workspace.update",
+        "viz.ingest",
+        "scheduler.tick",
+    ):
         assert expected in names, expected
     for entry in loaded["results"]:
         assert entry["iterations"] > 0
@@ -42,8 +56,10 @@ def print_benchmarks(loaded):
     """Human-readable summary (the JSON file is the artifact)."""
     print("\nbenchmark results (avg ms):")
     for entry in loaded["results"]:
-        print(f"  {entry['category']:>12} {entry['name']:<22} "
-              f"{entry['average_ms']:>8.2f}ms x{entry['iterations']}")
+        print(
+            f"  {entry['category']:>12} {entry['name']:<22} "
+            f"{entry['average_ms']:>8.2f}ms x{entry['iterations']}"
+        )
 
 
 def test_measure_counts_all_runs():

@@ -24,7 +24,6 @@ from __future__ import annotations
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -89,12 +88,12 @@ class ParallelExecutor:
         self,
         runner: ToolRunner,
         registry: ToolRegistry,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
         *,
         max_concurrency: int = 4,
         failure_policy: FailurePolicy = FailurePolicy.FAIL_FAST,
         default_step_timeout_s: float = 60.0,
-        step_timeouts: Optional[dict[str, float]] = None,
+        step_timeouts: dict[str, float] | None = None,
         poll_interval_s: float = 0.02,
     ) -> None:
         if max_concurrency < 1:
@@ -115,10 +114,10 @@ class ParallelExecutor:
         task_id: str,
         plan: Plan,
         *,
-        arguments: Optional[dict[str, dict]] = None,
-        context: Optional[ExecutionContext] = None,
-        contexts_repo: Optional[SqliteExecutionContextRepository] = None,
-        cancel: Optional[CancellationToken] = None,
+        arguments: dict[str, dict] | None = None,
+        context: ExecutionContext | None = None,
+        contexts_repo: SqliteExecutionContextRepository | None = None,
+        cancel: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Validate the plan, then execute it as a DAG."""
         known = {tool.name for tool in self._registry.list_tools()}
@@ -137,10 +136,10 @@ class ParallelExecutor:
         task_id: str,
         graph: TaskGraph,
         *,
-        arguments: Optional[dict[str, dict]] = None,
-        context: Optional[ExecutionContext] = None,
-        contexts_repo: Optional[SqliteExecutionContextRepository] = None,
-        cancel: Optional[CancellationToken] = None,
+        arguments: dict[str, dict] | None = None,
+        context: ExecutionContext | None = None,
+        contexts_repo: SqliteExecutionContextRepository | None = None,
+        cancel: CancellationToken | None = None,
     ) -> ExecutionResult:
         """Execute a pre-built (possibly restored) graph.
 
@@ -159,9 +158,7 @@ class ParallelExecutor:
         args = arguments or {}
         token = cancel or CancellationToken()
         started = time.monotonic()
-        self._emit(
-            EventType.GRAPH_STARTED, task_id, {"steps": len(graph.nodes)}
-        )
+        self._emit(EventType.GRAPH_STARTED, task_id, {"steps": len(graph.nodes)})
         self._persist(graph, context, contexts_repo)
 
         halting = False
@@ -172,8 +169,7 @@ class ParallelExecutor:
                 if (token.cancelled or halting) and in_flight is not None:
                     self._stop_unstarted(graph, task_id, token, halting)
                 if not token.cancelled and not halting:
-                    self._submit_ready(graph, task_id, args, pool, in_flight,
-                                       token)
+                    self._submit_ready(graph, task_id, args, pool, in_flight, token)
                 if not in_flight:
                     if not self._drain_stuck(graph, task_id):
                         break
@@ -224,7 +220,7 @@ class ParallelExecutor:
         args: dict[str, dict],
         pool: ThreadPoolExecutor,
         in_flight: dict[Future, GraphNode],
-        token: Optional[CancellationToken] = None,
+        token: CancellationToken | None = None,
     ) -> None:
         for node in graph.ready():
             if len(in_flight) >= self._max_concurrency:
@@ -241,16 +237,16 @@ class ParallelExecutor:
             # Model-proposed step arguments apply first; operator-pinned
             # config arguments override per key (operator is trusted,
             # model output is not). Both still pass authorization.
-            merged = {**(node.step.arguments or {}),
-                      **args.get(node.step.id, {})}
-            future = pool.submit(
-                self._run_node, task_id, node, merged, token
-            )
+            merged = {**(node.step.arguments or {}), **args.get(node.step.id, {})}
+            future = pool.submit(self._run_node, task_id, node, merged, token)
             in_flight[future] = node
 
     def _run_node(
-        self, task_id: str, node: GraphNode, arguments: dict,
-        token: Optional[CancellationToken] = None,
+        self,
+        task_id: str,
+        node: GraphNode,
+        arguments: dict,
+        token: CancellationToken | None = None,
     ) -> tuple[bool, list[ToolResult], str]:
         """Run one step's tools sequentially via ToolRunner (never direct)."""
         try:
@@ -270,12 +266,13 @@ class ParallelExecutor:
         graph: TaskGraph,
         task_id: str,
         in_flight: dict[Future, GraphNode],
-        context: Optional[ExecutionContext],
+        context: ExecutionContext | None,
     ) -> None:
         if not in_flight:
             return
-        done, _ = wait(set(in_flight), timeout=self._poll_interval_s,
-                       return_when=FIRST_COMPLETED)
+        done, _ = wait(
+            set(in_flight), timeout=self._poll_interval_s, return_when=FIRST_COMPLETED
+        )
         for future in done:
             node = in_flight.pop(future)
             if node.state is not StepState.RUNNING:
@@ -289,9 +286,7 @@ class ParallelExecutor:
             node.completed_at = utcnow()
             if ok:
                 node.transition(StepState.SUCCEEDED)
-                self._emit(
-                    EventType.STEP_COMPLETED, task_id, {"step_id": node.step.id}
-                )
+                self._emit(EventType.STEP_COMPLETED, task_id, {"step_id": node.step.id})
             else:
                 node.transition(StepState.FAILED)
                 node.error = error
@@ -357,9 +352,7 @@ class ParallelExecutor:
             except DomainValidationError:
                 continue
             node.error = "unsatisfiable dependencies; skipped defensively"
-            self._emit(
-                EventType.STEP_SKIPPED, task_id, {"step_id": node.step.id}
-            )
+            self._emit(EventType.STEP_SKIPPED, task_id, {"step_id": node.step.id})
         return True
 
     # -- aggregation / persistence -------------------------------------
@@ -410,8 +403,8 @@ class ParallelExecutor:
     def _persist(
         self,
         graph: TaskGraph,
-        context: Optional[ExecutionContext],
-        contexts_repo: Optional[SqliteExecutionContextRepository],
+        context: ExecutionContext | None,
+        contexts_repo: SqliteExecutionContextRepository | None,
     ) -> None:
         if context is None or contexts_repo is None:
             return

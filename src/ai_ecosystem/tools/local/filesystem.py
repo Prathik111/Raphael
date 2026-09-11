@@ -38,11 +38,10 @@ def _read(arguments: dict, root: Path) -> ToolResult:
     try:
         if target.stat().st_size > MAX_READ_BYTES:
             raise ToolExecutionError(
-                "filesystem.read",
-                f"file too large ({target.stat().st_size} bytes)")
+                "filesystem.read", f"file too large ({target.stat().st_size} bytes)"
+            )
     except OSError as exc:
-        raise ToolExecutionError(
-            "filesystem.read", f"cannot stat {raw!r}") from exc
+        raise ToolExecutionError("filesystem.read", f"cannot stat {raw!r}") from exc
     data = target.read_bytes()
     if len(data) > MAX_READ_BYTES:  # raced growth between stat and read
         raise ToolExecutionError(
@@ -84,8 +83,7 @@ def filesystem_tools(root: str | Path) -> list[tuple[Tool, object]]:
             Tool(
                 name="filesystem.read",
                 description="Read a UTF-8 text file under the allowed root.",
-                input_schema={"required": ["path"],
-                              "properties": {"path": "string"}},
+                input_schema={"required": ["path"], "properties": {"path": "string"}},
                 risk_level=RiskLevel.LOW,
                 capabilities=["read-only"],
             ),
@@ -95,8 +93,7 @@ def filesystem_tools(root: str | Path) -> list[tuple[Tool, object]]:
             Tool(
                 name="filesystem.list",
                 description="List directory entries under the allowed root.",
-                input_schema={"required": [],
-                              "properties": {"path": "string"}},
+                input_schema={"required": [], "properties": {"path": "string"}},
                 risk_level=RiskLevel.LOW,
                 capabilities=["read-only"],
             ),
@@ -106,8 +103,7 @@ def filesystem_tools(root: str | Path) -> list[tuple[Tool, object]]:
             Tool(
                 name="filesystem.exists",
                 description="Check whether a path exists under the allowed root.",
-                input_schema={"required": ["path"],
-                              "properties": {"path": "string"}},
+                input_schema={"required": ["path"], "properties": {"path": "string"}},
                 risk_level=RiskLevel.LOW,
                 capabilities=["read-only"],
             ),

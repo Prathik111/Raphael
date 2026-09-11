@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import ToolResult
@@ -29,7 +29,7 @@ class VerificationTarget:
 class Finding:
     """One strategy's verdict: passed / failed / cannot-tell."""
 
-    passed: Optional[bool]  # True / False / None (inconclusive)
+    passed: bool | None  # True / False / None (inconclusive)
     evidence: list[str] = field(default_factory=list)
     reason: str = ""
 
@@ -167,8 +167,9 @@ class TestCommandStrategy(VerificationStrategy):
         command = params.get("command")
         if not command:
             return Finding(None, [], "no test command specified")
-        call = self._registry.build_call(target.task_id, "terminal.execute",
-                                         {"command": command})
+        call = self._registry.build_call(
+            target.task_id, "terminal.execute", {"command": command}
+        )
         result = self._runner.run(call)
         if (result.error or "").lower().startswith("denied:"):
             return Finding(
@@ -178,7 +179,9 @@ class TestCommandStrategy(VerificationStrategy):
             )
         if result.success:
             return Finding(
-                True, [f"test output: {str(result.output)[:500]}"], "test command passed"
+                True,
+                [f"test output: {str(result.output)[:500]}"],
+                "test command passed",
             )
         return Finding(
             False,

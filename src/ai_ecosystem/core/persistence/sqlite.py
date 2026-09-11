@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator, Optional, TypeVar
+from typing import Any, TypeVar
 
 from ai_ecosystem.core.errors.exceptions import PersistenceError
 from ai_ecosystem.core.events.bus import Event, EventStore
@@ -37,7 +38,6 @@ from ai_ecosystem.core.persistence.repositories import (
     MessageRepository,
     PlanRepository,
     SkillRepository,
-    SnapshotRepository,
     SnapshotRepository,
     TaskRepository,
     UsageEventRepository,
@@ -89,8 +89,10 @@ _DDL = [
 #: are sequential, idempotent, and auditable.
 _MIGRATIONS: dict[int, list[str]] = {
     1: _DDL,
-    2: ["CREATE TABLE IF NOT EXISTS schema_migrations "
-        "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"],
+    2: [
+        ("CREATE TABLE IF NOT EXISTS schema_migrations "
+        "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+    ],
 }
 
 T = TypeVar("T", bound=Entity)
@@ -128,7 +130,8 @@ class Database:
                 # exist before v1 can record into it.
                 self._conn.execute(
                     "CREATE TABLE IF NOT EXISTS schema_migrations "
-                    "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+                    "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+                )
                 applied = self._applied_versions()
                 for version in sorted(_MIGRATIONS):
                     if version in applied:
@@ -148,13 +151,15 @@ class Database:
         """Journaled versions; legacy v1 DBs backfill from meta."""
         try:
             rows = self._conn.execute(
-                "SELECT version FROM schema_migrations").fetchall()
+                "SELECT version FROM schema_migrations"
+            ).fetchall()
             return {int(r[0]) for r in rows}
         except sqlite3.Error:
             pass  # pre-v2 database: no journal yet
         try:
             rows = self._conn.execute(
-                "SELECT value FROM meta WHERE key='schema_version'").fetchall()
+                "SELECT value FROM meta WHERE key='schema_version'"
+            ).fetchall()
             if rows:
                 return set(range(1, int(rows[0][0]) + 1))
         except sqlite3.Error:
@@ -164,15 +169,17 @@ class Database:
     def _record_version(self, version: int) -> None:
         self._conn.execute(
             "INSERT OR IGNORE INTO schema_migrations (version, applied_at)"
-            " VALUES (?, ?)", (version, utcnow().isoformat()))
+            " VALUES (?, ?)",
+            (version, utcnow().isoformat()),
+        )
 
-    def schema_version(self) -> Optional[int]:
+    def schema_version(self) -> int | None:
         """Current schema version, or None before the first migrate()."""
         rows = self.query("SELECT value FROM meta WHERE key='schema_version'")
         return int(rows[0][0]) if rows else None
 
     @contextmanager
-    def transaction(self) -> Iterator["Database"]:
+    def transaction(self) -> Iterator[Database]:
         """Atomic block: exception rolls everything back (may nest)."""
         with self._lock:
             outermost = self._tx_depth == 0
@@ -235,7 +242,7 @@ class Database:
             except sqlite3.Error:
                 pass
 
-    def __del__(self) -> None:  # noqa: D105 -- deterministic resource release
+    def __del__(self) -> None:
         """Final safety net: never leave a connection open implicitly.
 
         Fire-and-forget uses (``Database(path).migrate()``) rely on
@@ -291,7 +298,7 @@ class _SnapshotTable:
         )
         return item
 
-    def get(self, item_id: str) -> Optional[T]:
+    def get(self, item_id: str) -> T | None:
         rows = self._db.query(
             f"SELECT snapshot FROM {self._table} WHERE id = ?", (item_id,)
         )
@@ -314,9 +321,7 @@ class _SnapshotTable:
         return rowcount > 0
 
     def list(self) -> list[T]:
-        rows = self._db.query(
-            f"SELECT snapshot FROM {self._table} ORDER BY updated_at"
-        )
+        rows = self._db.query(f"SELECT snapshot FROM {self._table} ORDER BY updated_at")
         return [self._model_cls.model_validate_json(r[0]) for r in rows]
 
 
@@ -329,7 +334,7 @@ class SqliteTaskRepository(TaskRepository):
     def create(self, item: Task) -> Task:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Task]:
+    def get(self, item_id: str) -> Task | None:
         return self._t.get(item_id)
 
     def update(self, item: Task) -> Task:
@@ -351,7 +356,7 @@ class SqlitePlanRepository(PlanRepository):
     def create(self, item: Plan) -> Plan:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Plan]:
+    def get(self, item_id: str) -> Plan | None:
         return self._t.get(item_id)
 
     def update(self, item: Plan) -> Plan:
@@ -373,7 +378,7 @@ class SqliteMemoryRepository(MemoryRepository):
     def create(self, item: Memory) -> Memory:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Memory]:
+    def get(self, item_id: str) -> Memory | None:
         return self._t.get(item_id)
 
     def update(self, item: Memory) -> Memory:
@@ -395,7 +400,7 @@ class SqliteSkillRepository(SkillRepository):
     def create(self, item: Skill) -> Skill:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Skill]:
+    def get(self, item_id: str) -> Skill | None:
         return self._t.get(item_id)
 
     def update(self, item: Skill) -> Skill:
@@ -417,7 +422,7 @@ class SqliteAgentRepository(AgentRepository):
     def create(self, item: Agent) -> Agent:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Agent]:
+    def get(self, item_id: str) -> Agent | None:
         return self._t.get(item_id)
 
     def update(self, item: Agent) -> Agent:
@@ -439,15 +444,15 @@ class SqlitePresenceRepository:
 
         self._t = _SnapshotTable(db, "device_presence", DevicePresence)
 
-    def create(self, item: "DevicePresence") -> "DevicePresence":
+    def create(self, item: DevicePresence) -> DevicePresence:
         """Persist a presence row."""
         return self._t.create(item)
 
-    def get(self, item_id: str) -> "Optional[DevicePresence]":
+    def get(self, item_id: str) -> DevicePresence | None:
         """Fetch by record id."""
         return self._t.get(item_id)
 
-    def update(self, item: "DevicePresence") -> "DevicePresence":
+    def update(self, item: DevicePresence) -> DevicePresence:
         """Replace the stored row."""
         return self._t.update(item)
 
@@ -455,7 +460,7 @@ class SqlitePresenceRepository:
         """Remove a row."""
         return self._t.delete(item_id)
 
-    def list(self) -> "list[DevicePresence]":
+    def list(self) -> list[DevicePresence]:
         """All rows."""
         return self._t.list()
 
@@ -469,7 +474,7 @@ class SqliteDeviceRepository(DeviceRepository):
     def create(self, item: Device) -> Device:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Device]:
+    def get(self, item_id: str) -> Device | None:
         return self._t.get(item_id)
 
     def update(self, item: Device) -> Device:
@@ -491,7 +496,7 @@ class SqliteVerificationRepository(VerificationRepository):
     def create(self, item: VerificationResult) -> VerificationResult:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[VerificationResult]:
+    def get(self, item_id: str) -> VerificationResult | None:
         return self._t.get(item_id)
 
     def update(self, item: VerificationResult) -> VerificationResult:
@@ -513,7 +518,7 @@ class SqliteSnapshotRepository(SnapshotRepository):
     def create(self, item: SystemSnapshot) -> SystemSnapshot:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[SystemSnapshot]:
+    def get(self, item_id: str) -> SystemSnapshot | None:
         return self._t.get(item_id)
 
     def update(self, item: SystemSnapshot) -> SystemSnapshot:
@@ -525,12 +530,12 @@ class SqliteSnapshotRepository(SnapshotRepository):
     def list(self) -> list[SystemSnapshot]:
         return self._t.list()
 
-    def latest(self) -> Optional[SystemSnapshot]:
+    def latest(self) -> SystemSnapshot | None:
         """Most recently collected snapshot (None when none stored)."""
         snapshots = self._t.list()
         if not snapshots:
             return None
-        return sorted(snapshots, key=lambda s: s.collected_at)[-1]
+        return max(snapshots, key=lambda s: s.collected_at)
 
 
 class SqliteUsageEventRepository(UsageEventRepository):
@@ -542,7 +547,7 @@ class SqliteUsageEventRepository(UsageEventRepository):
     def create(self, item: UsageEvent) -> UsageEvent:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[UsageEvent]:
+    def get(self, item_id: str) -> UsageEvent | None:
         return self._t.get(item_id)
 
     def update(self, item: UsageEvent) -> UsageEvent:
@@ -564,7 +569,7 @@ class SqliteUsagePatternRepository(UsagePatternRepository):
     def create(self, item: UsagePattern) -> UsagePattern:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[UsagePattern]:
+    def get(self, item_id: str) -> UsagePattern | None:
         return self._t.get(item_id)
 
     def update(self, item: UsagePattern) -> UsagePattern:
@@ -586,7 +591,7 @@ class SqliteLearningProposalRepository(LearningProposalRepository):
     def create(self, item: LearningProposal) -> LearningProposal:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[LearningProposal]:
+    def get(self, item_id: str) -> LearningProposal | None:
         return self._t.get(item_id)
 
     def update(self, item: LearningProposal) -> LearningProposal:
@@ -612,7 +617,7 @@ class SqliteMessageRepository(MessageRepository):
         """Persist a sent message."""
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Any]:
+    def get(self, item_id: str) -> Any | None:
         """Fetch by message id."""
         return self._t.get(item_id)
 
@@ -645,7 +650,7 @@ class SqliteExecutionContextRepository(ExecutionContextRepository):
         )
         return context
 
-    def load(self, task_id: str) -> Optional[ExecutionContext]:
+    def load(self, task_id: str) -> ExecutionContext | None:
         rows = self._db.query(
             "SELECT snapshot FROM contexts WHERE task_id = ?", (task_id,)
         )
@@ -653,7 +658,8 @@ class SqliteExecutionContextRepository(ExecutionContextRepository):
 
     def delete(self, task_id: str) -> bool:
         rowcount, _ = self._db.write(
-            "DELETE FROM contexts WHERE task_id = ?", (task_id,))
+            "DELETE FROM contexts WHERE task_id = ?", (task_id,)
+        )
         return rowcount > 0
 
 
@@ -676,8 +682,8 @@ class SqliteEventRepository(EventRepository):
     def list_snapshots_since(self, seq: int) -> list[tuple[int, str]]:
         """(seq, snapshot) rows newer than ``seq`` (durable cursor)."""
         rows = self._db.query(
-            "SELECT seq, snapshot FROM events WHERE seq > ? ORDER BY seq",
-            (seq,))
+            "SELECT seq, snapshot FROM events WHERE seq > ? ORDER BY seq", (seq,)
+        )
         return [(int(r[0]), r[1]) for r in rows]
 
 
@@ -695,8 +701,9 @@ class DbEventStore(EventStore):
 
     def events_since(self, seq: int) -> list[tuple[int, Event]]:
         rows = self._repo.list_snapshots_since(seq)
-        return [(row_seq, Event.model_validate_json(snapshot))
-                for row_seq, snapshot in rows]
+        return [
+            (row_seq, Event.model_validate_json(snapshot)) for row_seq, snapshot in rows
+        ]
 
     def replay(self, handler: Any) -> int:
         count = 0
@@ -731,10 +738,8 @@ class SqliteJobStore:
         )
         return envelope
 
-    def load(self, job_id: str) -> Optional[dict]:
+    def load(self, job_id: str) -> dict | None:
         import json
 
-        rows = self._db.query(
-            "SELECT snapshot FROM jobs WHERE job_id = ?", (job_id,)
-        )
+        rows = self._db.query("SELECT snapshot FROM jobs WHERE job_id = ?", (job_id,))
         return json.loads(rows[0][0]) if rows else None

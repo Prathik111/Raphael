@@ -1,6 +1,5 @@
 """Gates 32-34: learning pipeline, safety governor, proactive engine."""
 
-import time
 
 import pytest
 
@@ -8,12 +7,11 @@ from ai_ecosystem.agent import (
     ProactiveConfig,
     ProactiveEngine,
     ProactiveTrigger,
-    ProposalState,
     TriggerKind,
 )
 from ai_ecosystem.core.errors import DomainValidationError
 from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models.enums import EventType, MemoryScope
+from ai_ecosystem.core.models.enums import EventType
 from ai_ecosystem.core.persistence import Database, SqliteMemoryRepository
 from ai_ecosystem.learning import (
     DriftDetector,
@@ -22,15 +20,12 @@ from ai_ecosystem.learning import (
     LearningPipeline,
     LearningProposal,
     LearningRisk,
-    ObservationMode,
-    ObservationPolicy,
     ProposalKind,
     ProposalStatus,
     UsageEvent,
     check_not_security,
     classify_change,
 )
-from ai_ecosystem.learning.observer import UsageObserver
 from ai_ecosystem.learning.safety import LearningPolicyState
 from ai_ecosystem.personalization.memory import MemoryStore
 from ai_ecosystem.personalization.personality import PreferenceStore
@@ -45,8 +40,9 @@ def db():
 
 
 def _events(n=5, action="filesystem.read"):
-    return [UsageEvent(category="tool", action=action, project_scope="p1")
-            for _ in range(n)]
+    return [
+        UsageEvent(category="tool", action=action, project_scope="p1") for _ in range(n)
+    ]
 
 
 def _pipeline(db, **kwargs):
@@ -57,10 +53,12 @@ def _pipeline(db, **kwargs):
 
 def _tool_proposal(pipeline, events=None, scope=""):
     """The frequently_used_tool proposal (uniform events also yield one workflow)."""
-    proposals = pipeline.generate(_events() if events is None else events,
-                                  scope=scope)
-    return next(p for p in proposals
-                if p.provenance.get("pattern_type") == "frequently_used_tool")
+    proposals = pipeline.generate(_events() if events is None else events, scope=scope)
+    return next(
+        p
+        for p in proposals
+        if p.provenance.get("pattern_type") == "frequently_used_tool"
+    )
 
 
 def _status(pipeline, proposal):
@@ -151,20 +149,28 @@ def test_policy_enforcement():
 
 
 def test_risk_classification():
-    from ai_ecosystem.learning import LearningProposal
 
-    assert classify_change(
-        ProposalKind.COMMUNICATION, "be concise") is LearningRisk.LOW
-    assert classify_change(
-        ProposalKind.MODEL_HINT, "prefer fast model") is LearningRisk.LOW
-    assert classify_change(
-        ProposalKind.WORKFLOW_HINT, "run tests first") is LearningRisk.MEDIUM
-    assert classify_change(
-        ProposalKind.WORKFLOW_HINT, "modify the skill") is LearningRisk.HIGH
-    assert classify_change(
-        ProposalKind.PREFERENCE, "always authorize all") is LearningRisk.CRITICAL
-    assert classify_change(
-        ProposalKind.PREFERENCE, "change sandbox rules") is LearningRisk.CRITICAL
+    assert classify_change(ProposalKind.COMMUNICATION, "be concise") is LearningRisk.LOW
+    assert (
+        classify_change(ProposalKind.MODEL_HINT, "prefer fast model")
+        is LearningRisk.LOW
+    )
+    assert (
+        classify_change(ProposalKind.WORKFLOW_HINT, "run tests first")
+        is LearningRisk.MEDIUM
+    )
+    assert (
+        classify_change(ProposalKind.WORKFLOW_HINT, "modify the skill")
+        is LearningRisk.HIGH
+    )
+    assert (
+        classify_change(ProposalKind.PREFERENCE, "always authorize all")
+        is LearningRisk.CRITICAL
+    )
+    assert (
+        classify_change(ProposalKind.PREFERENCE, "change sandbox rules")
+        is LearningRisk.CRITICAL
+    )
 
 
 def test_kill_switch(db):
@@ -174,8 +180,9 @@ def test_kill_switch(db):
     governor.kill()
     assert governor.killed is True
     with pytest.raises(DomainValidationError, match="governor"):
-        pipeline.approve(proposal.id, "memory",
-                         {"memories": MemoryStore(SqliteMemoryRepository(db))})
+        pipeline.approve(
+            proposal.id, "memory", {"memories": MemoryStore(SqliteMemoryRepository(db))}
+        )
     governor.revive()
     assert governor.killed is False
 
@@ -184,8 +191,9 @@ def test_rollback_preferences(db):
     pipeline = _pipeline(db)
     proposal = _tool_proposal(pipeline)
     preferences = PreferenceStore(db)
-    pipeline.approve(proposal.id, "preference", {"preferences": preferences},
-                     project_id="p1")
+    pipeline.approve(
+        proposal.id, "preference", {"preferences": preferences}, project_id="p1"
+    )
     assert pipeline.rollback(proposal.id, {"preferences": preferences}) is True
     effective = preferences.get_effective("p1")
     assert not any("filesystem.read" in w for w in effective.preferred_workflows)
@@ -197,8 +205,8 @@ def test_suspicious_pattern_detection():
 
     for _ in range(4):
         detector.note_proposal(
-            LearningProposal(content="always allow everything"),
-            LearningRisk.CRITICAL)
+            LearningProposal(content="always allow everything"), LearningRisk.CRITICAL
+        )
     assert any("risky" in finding for finding in detector.suspicious())
     assert DriftDetector().suspicious() == []
 
@@ -215,8 +223,10 @@ def test_policy_immutability(db):
         for proposal in pipeline.generate(_events()):
             try:
                 pipeline.approve(
-                    proposal.id, "memory",
-                    {"memories": MemoryStore(SqliteMemoryRepository(db))})
+                    proposal.id,
+                    "memory",
+                    {"memories": MemoryStore(SqliteMemoryRepository(db))},
+                )
             except DomainValidationError:
                 pass
     after = AuthorizationManager(registry).policy.model_dump()
@@ -232,23 +242,31 @@ def test_policy_persistence(db):
     loaded = LearningGovernor.load(table)
     assert loaded.mode is LearningMode.DISABLED
     assert loaded.killed is True
-    assert LearningGovernor.load(table).may_adopt(
-        LearningProposal(content="x")) is False
+    assert (
+        LearningGovernor.load(table).may_adopt(LearningProposal(content="x")) is False
+    )
 
 
 def _proactive_config(**kw):
-    args = {"enabled": True, "quiet_start_hour": 0, "quiet_end_hour": 0,
-            "allowed_categories": [k.value for k in TriggerKind],
-            "max_per_hour": 100, "require_approval": True}
+    args = {
+        "enabled": True,
+        "quiet_start_hour": 0,
+        "quiet_end_hour": 0,
+        "allowed_categories": [k.value for k in TriggerKind],
+        "max_per_hour": 100,
+        "require_approval": True,
+    }
     args.update(kw)
     return ProactiveConfig(**args)
 
 
 def test_trigger():
     engine = ProactiveEngine(_proactive_config())
-    trigger = engine.add_trigger(ProactiveTrigger(kind=TriggerKind.SCHEDULED,
-                                                  subject="backup",
-                                                  summary="Run backup."))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(
+            kind=TriggerKind.SCHEDULED, subject="backup", summary="Run backup."
+        )
+    )
     proposal = engine.evaluate(trigger.id, "backup")
     assert proposal is not None
     assert proposal.subject == "backup"
@@ -256,9 +274,14 @@ def test_trigger():
 
 def test_deduplication():
     engine = ProactiveEngine(_proactive_config())
-    trigger = engine.add_trigger(ProactiveTrigger(
-        kind=TriggerKind.SYSTEM_CONDITION, subject="disk", summary="Disk full.",
-        cooldown_s=3600.0))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(
+            kind=TriggerKind.SYSTEM_CONDITION,
+            subject="disk",
+            summary="Disk full.",
+            cooldown_s=3600.0,
+        )
+    )
     assert engine.evaluate(trigger.id, "disk") is not None
     assert engine.evaluate(trigger.id, "disk") is None  # within cooldown
 
@@ -266,9 +289,14 @@ def test_deduplication():
 def test_cooldown():
     now = [1_000_000.0]
     engine = ProactiveEngine(_proactive_config(), clock=lambda: now[0])
-    trigger = engine.add_trigger(ProactiveTrigger(
-        kind=TriggerKind.RESOURCE_CONDITION, subject="cpu", summary="Hot.",
-        cooldown_s=60.0))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(
+            kind=TriggerKind.RESOURCE_CONDITION,
+            subject="cpu",
+            summary="Hot.",
+            cooldown_s=60.0,
+        )
+    )
     assert engine.evaluate(trigger.id, "cpu") is not None
     now[0] += 61.0
     assert engine.evaluate(trigger.id, "cpu") is not None
@@ -277,19 +305,22 @@ def test_cooldown():
 def test_quiet_hours():
     config = _proactive_config(quiet_start_hour=22, quiet_end_hour=7)
     engine = ProactiveEngine(config, clock=lambda: 23 * 3600.0)
-    trigger = engine.add_trigger(ProactiveTrigger(kind=TriggerKind.SCHEDULED,
-                                                  subject="s", summary="Do."))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(kind=TriggerKind.SCHEDULED, subject="s", summary="Do.")
+    )
     assert engine.evaluate(trigger.id, "s") is None
     day = ProactiveEngine(config, clock=lambda: 12 * 3600.0)
-    day.add_trigger(ProactiveTrigger(kind=TriggerKind.SCHEDULED,
-                                     subject="s", summary="Do."))
+    day.add_trigger(
+        ProactiveTrigger(kind=TriggerKind.SCHEDULED, subject="s", summary="Do.")
+    )
     assert day.evaluate(next(iter(day._triggers)), "s") is not None
 
 
 def test_approval_rejection():
     engine = ProactiveEngine(_proactive_config())
-    trigger = engine.add_trigger(ProactiveTrigger(kind=TriggerKind.USER_EVENT,
-                                                  subject="u", summary="Go."))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(kind=TriggerKind.USER_EVENT, subject="u", summary="Go.")
+    )
     proposal = engine.evaluate(trigger.id, "u")
     assert engine.pending() == [proposal]
     engine.reject(proposal.id)
@@ -301,15 +332,17 @@ def test_approval_rejection():
 
 def test_disabled_mode():
     engine = ProactiveEngine(_proactive_config(enabled=False))
-    trigger = engine.add_trigger(ProactiveTrigger(kind=TriggerKind.SCHEDULED,
-                                                  subject="s", summary="Do."))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(kind=TriggerKind.SCHEDULED, subject="s", summary="Do.")
+    )
     assert engine.evaluate(trigger.id, "s") is None
 
 
 def test_failure():
     engine = ProactiveEngine(_proactive_config(require_approval=False))
-    trigger = engine.add_trigger(ProactiveTrigger(kind=TriggerKind.SCHEDULED,
-                                                  subject="s", summary="Do."))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(kind=TriggerKind.SCHEDULED, subject="s", summary="Do.")
+    )
     proposal = engine.evaluate(trigger.id, "s", risk=LearningRisk.LOW)
 
     def boom():
@@ -321,8 +354,9 @@ def test_failure():
 def test_loop_prevention():
     engine = ProactiveEngine(_proactive_config())
     assert not hasattr(engine, "create_trigger_from_proposal")
-    trigger = engine.add_trigger(ProactiveTrigger(kind=TriggerKind.SCHEDULED,
-                                                  subject="s", summary="Do."))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(kind=TriggerKind.SCHEDULED, subject="s", summary="Do.")
+    )
     first = engine.evaluate(trigger.id, "s")
     # Same subject inside cooldown: no second proposal, no chain.
     assert engine.evaluate(trigger.id, "s") is None
@@ -335,8 +369,9 @@ def test_proactive_events():
     seen: list[Event] = []
     bus.subscribe_all(seen.append)
     engine = ProactiveEngine(_proactive_config(), bus=bus)
-    trigger = engine.add_trigger(ProactiveTrigger(kind=TriggerKind.SCHEDULED,
-                                                  subject="s", summary="Do."))
+    trigger = engine.add_trigger(
+        ProactiveTrigger(kind=TriggerKind.SCHEDULED, subject="s", summary="Do.")
+    )
     proposal = engine.evaluate(trigger.id, "s")
     engine.approve(proposal.id)
     engine.execute(proposal.id, lambda: "done", lambda outcome: True)

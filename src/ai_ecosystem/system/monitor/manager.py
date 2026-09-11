@@ -7,8 +7,6 @@ that, so usage observation (Gate 16) can never silently piggyback.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from ai_ecosystem.core.errors.exceptions import AiEcosystemError
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.enums import EventType
@@ -29,10 +27,12 @@ class AwarenessDisabledError(AiEcosystemError):
 
 def build_context(snapshot: SystemSnapshot) -> AwarenessContext:
     """Answer planning questions from a snapshot (pure function)."""
-    available = [name for name in _CAPABILITY_FIELDS
-                 if getattr(snapshot.capabilities, name)]
-    unavailable = [name for name in _CAPABILITY_FIELDS
-                   if not getattr(snapshot.capabilities, name)]
+    available = [
+        name for name in _CAPABILITY_FIELDS if getattr(snapshot.capabilities, name)
+    ]
+    unavailable = [
+        name for name in _CAPABILITY_FIELDS if not getattr(snapshot.capabilities, name)
+    ]
     constrained = []
     cpu = snapshot.cpu.utilization_percent
     memory = snapshot.memory.utilization_percent
@@ -41,8 +41,10 @@ def build_context(snapshot: SystemSnapshot) -> AwarenessContext:
     if memory is not None and memory >= 85.0:
         constrained.append("memory")
     for volume in snapshot.storage:
-        if (volume.utilization_percent is not None
-                and volume.utilization_percent >= 90.0):
+        if (
+            volume.utilization_percent is not None
+            and volume.utilization_percent >= 90.0
+        ):
             constrained.append(f"storage:{volume.mount}")
     for gpu in snapshot.gpus:
         if gpu.utilization_percent is not None and gpu.utilization_percent >= 90.0:
@@ -56,7 +58,8 @@ def build_context(snapshot: SystemSnapshot) -> AwarenessContext:
         + (f"; constrained: {', '.join(constrained)}" if constrained else "")
     )
     return AwarenessContext(
-        can_compute_locally=not under_pressure and bool(snapshot.cpu.logical_processors),
+        can_compute_locally=not under_pressure
+        and bool(snapshot.cpu.logical_processors),
         available_capabilities=available,
         unavailable_capabilities=unavailable,
         constrained_resources=constrained,
@@ -71,7 +74,7 @@ class SystemAwarenessManager:
     def __init__(
         self,
         probe: SystemProbe,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
         enabled: bool = True,
         include_host: bool = False,
     ) -> None:
@@ -96,19 +99,25 @@ class SystemAwarenessManager:
         self._emit(EventType.SYSTEM_AWARENESS_REQUESTED, {})
         snap = self._probe.snapshot(include_host=self._include_host)
         # Event payload carries summaries, never process lists or hostnames.
-        self._emit(EventType.SYSTEM_SNAPSHOT_CREATED, {
-            "os": snap.operating_system, "arch": snap.architecture,
-            "pressure": snap.pressure.value,
-            "capabilities": [n for n in _CAPABILITY_FIELDS
-                             if getattr(snap.capabilities, n)],
-            "processes": len(snap.processes),
-        })
+        self._emit(
+            EventType.SYSTEM_SNAPSHOT_CREATED,
+            {
+                "os": snap.operating_system,
+                "arch": snap.architecture,
+                "pressure": snap.pressure.value,
+                "capabilities": [
+                    n for n in _CAPABILITY_FIELDS if getattr(snap.capabilities, n)
+                ],
+                "processes": len(snap.processes),
+            },
+        )
         for name in _CAPABILITY_FIELDS:
             if getattr(snap.capabilities, name):
                 self._emit(EventType.CAPABILITY_DETECTED, {"capability": name})
         if snap.pressure in (PressureLevel.HIGH, PressureLevel.CRITICAL):
-            self._emit(EventType.RESOURCE_PRESSURE_DETECTED,
-                       {"pressure": snap.pressure.value})
+            self._emit(
+                EventType.RESOURCE_PRESSURE_DETECTED, {"pressure": snap.pressure.value}
+            )
         return snap
 
     def context(self) -> AwarenessContext:

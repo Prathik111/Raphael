@@ -49,9 +49,7 @@ def test_read_file_is_low_and_allowed(manager, registry):
 
 
 def test_terminal_is_high_and_denied_by_default(manager, registry):
-    call = registry.build_call(
-        "t", "terminal.execute", {"command": ["echo", "hi"]}
-    )
+    call = registry.build_call("t", "terminal.execute", {"command": ["echo", "hi"]})
     permission = manager.authorize("t", registry.get("terminal.execute"), call)
     assert permission.decision is PermissionDecision.DENIED
     assert "grant band" in permission.reason
@@ -88,9 +86,7 @@ def test_command_injection_pattern_in_string_arg(registry):
 
 def test_argv_metachars_stay_literal_but_noted(registry):
     engine = RiskEngine()
-    call = registry.build_call(
-        "t", "terminal.execute", {"command": ["echo", "a; b"]}
-    )
+    call = registry.build_call("t", "terminal.execute", {"command": ["echo", "a; b"]})
     assessment = engine.assess(
         "t", registry.get("terminal.execute"), call, RiskContext()
     )
@@ -161,24 +157,33 @@ def test_no_path_from_intention_to_tool_without_policy(registry, tmp_path):
 
 def test_shell_interpreters_blocked_by_default(registry):
     runner = ToolRunner(registry, AuthorizationManager(registry))
-    for shell in (["cmd", "/c", "echo hi"],
-                  ["powershell", "-Command", "echo hi"],
-                  ["bash", "-c", "echo hi"]):
+    for shell in (
+        ["cmd", "/c", "echo hi"],
+        ["powershell", "-Command", "echo hi"],
+        ["bash", "-c", "echo hi"],
+    ):
         result = runner.run(
-            registry.build_call("t", "terminal.execute", {"command": shell}))
+            registry.build_call("t", "terminal.execute", {"command": shell})
+        )
         assert result.success is False, shell
         assert "shell interpreter" in result.error, shell
 
 
 def test_shell_interpreters_allowed_with_opt_in(registry):
     manager = AuthorizationManager(
-        registry, allow_shells=True,
+        registry,
+        allow_shells=True,
         policy_engine=PolicyEngine(
-            Policy(name="shells-ok", auto_grant_up_to=RiskLevel.HIGH)))
+            Policy(name="shells-ok", auto_grant_up_to=RiskLevel.HIGH)
+        ),
+    )
     permission = manager.authorize(
-        "t", registry.get("terminal.execute"),
-        registry.build_call("t", "terminal.execute",
-                            {"command": ["cmd", "/c", "echo hi"]}))
+        "t",
+        registry.get("terminal.execute"),
+        registry.build_call(
+            "t", "terminal.execute", {"command": ["cmd", "/c", "echo hi"]}
+        ),
+    )
     assert permission.decision is PermissionDecision.GRANTED
     assert "shell interpreter" not in permission.reason
 
@@ -199,7 +204,6 @@ def test_git_cwd_jailed_to_root(tmp_path):
         reg.register(tool, handler)
     runner = ToolRunner(reg, GrantAllAuthorizer())
     outside = str(tmp_path.parent)
-    escaped = runner.run(
-        reg.build_call("t", "git.status", {"cwd": outside}))
+    escaped = runner.run(reg.build_call("t", "git.status", {"cwd": outside}))
     assert escaped.success is False
     assert "escapes" in escaped.error

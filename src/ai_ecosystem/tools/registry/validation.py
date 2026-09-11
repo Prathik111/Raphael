@@ -43,5 +43,6 @@ def check_arguments(tool: Any, arguments: dict) -> list[str]:
         if want_type is not None and not isinstance(arguments[param], want_type):
             problems.append(
                 f"argument {param!r} must be {want}, got "
-                f"{type(arguments[param]).__name__}")
+                f"{type(arguments[param]).__name__}"
+            )
     return problems

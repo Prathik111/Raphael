@@ -43,12 +43,31 @@ _SHELL_TOKENS = (";", "&&", "||", "$(", "`", "|")
 #: Executables that interpret their arguments as a scripting language.
 #: Launched through the argv API they still hand the model a full
 #: shell, so they are CRITICAL unless the operator opted in.
-SHELL_BINARIES = frozenset({
-    "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
-    "bash", "sh", "zsh", "fish", "dash", "wsl", "wsl.exe",
-    "cscript", "cscript.exe", "wscript", "wscript.exe",
-    "mshta", "mshta.exe", "rundll32", "rundll32.exe",
-})
+SHELL_BINARIES = frozenset(
+    {
+        "cmd",
+        "cmd.exe",
+        "powershell",
+        "powershell.exe",
+        "pwsh",
+        "pwsh.exe",
+        "bash",
+        "sh",
+        "zsh",
+        "fish",
+        "dash",
+        "wsl",
+        "wsl.exe",
+        "cscript",
+        "cscript.exe",
+        "wscript",
+        "wscript.exe",
+        "mshta",
+        "mshta.exe",
+        "rundll32",
+        "rundll32.exe",
+    }
+)
 
 
 class RiskContext(BaseModel):
@@ -121,13 +140,19 @@ class RiskEngine:
         if self._allow_shells:
             note(f"shell interpreter {first!r} explicitly allowed by operator")
         else:
-            escalate(RiskLevel.CRITICAL,
-                      f"shell interpreter {first!r} requires explicit "
-                      "operator opt-in")
+            escalate(
+                RiskLevel.CRITICAL,
+                f"shell interpreter {first!r} requires explicit operator opt-in",
+            )
 
     def _scan_value(
-        self, value: object, key: str, tool: Tool, context: RiskContext,
-        escalate, note,
+        self,
+        value: object,
+        key: str,
+        tool: Tool,
+        context: RiskContext,
+        escalate,
+        note,
     ) -> None:
         """Recurse into lists/tuples/dicts so payloads can't hide.
 
@@ -137,29 +162,50 @@ class RiskEngine:
         escalate, as does any path traversal at any depth.
         """
         if isinstance(value, str):
-            self._scan_string(value, key, tool, context, escalate, note,
-                              literal_argv=(tool.name == "terminal.execute"
-                                            and key == "command"))
+            self._scan_string(
+                value,
+                key,
+                tool,
+                context,
+                escalate,
+                note,
+                literal_argv=(tool.name == "terminal.execute" and key == "command"),
+            )
             return
         if isinstance(value, (list, tuple)):
             for index, item in enumerate(value):
                 if isinstance(item, str):
-                    self._scan_string(item, f"{key}[{index}]", tool, context,
-                                      escalate, note,
-                                      literal_argv=(tool.name == "terminal.execute"
-                                                    and key == "command"))
+                    self._scan_string(
+                        item,
+                        f"{key}[{index}]",
+                        tool,
+                        context,
+                        escalate,
+                        note,
+                        literal_argv=(
+                            tool.name == "terminal.execute" and key == "command"
+                        ),
+                    )
                 else:
-                    self._scan_value(item, f"{key}[{index}]", tool, context,
-                                     escalate, note)
+                    self._scan_value(
+                        item, f"{key}[{index}]", tool, context, escalate, note
+                    )
             return
         if isinstance(value, dict):
             for sub_key, item in value.items():
-                self._scan_value(item, f"{key}.{sub_key}", tool, context,
-                                 escalate, note)
+                self._scan_value(
+                    item, f"{key}.{sub_key}", tool, context, escalate, note
+                )
 
     def _scan_string(
-        self, value: str, key: str, tool: Tool, context: RiskContext, escalate,
-        note, literal_argv: bool = False,
+        self,
+        value: str,
+        key: str,
+        tool: Tool,
+        context: RiskContext,
+        escalate,
+        note,
+        literal_argv: bool = False,
     ) -> None:
         if ".." in value.replace("\\", "/").split("/"):
             escalate(RiskLevel.CRITICAL, f"path traversal in {key!r}")
@@ -172,8 +218,7 @@ class RiskEngine:
                 escalate(
                     RiskLevel.HIGH, f"absolute path outside allowed root in {key!r}"
                 )
-        is_argv = literal_argv or (tool.name == "terminal.execute"
-                                   and key == "command")
+        is_argv = literal_argv or (tool.name == "terminal.execute" and key == "command")
         if any(token in value for token in _SHELL_TOKENS):
             if is_argv:
                 note(f"shell-like tokens in {key!r} (passed literally, no shell)")
@@ -215,7 +260,10 @@ class PolicyEngine:
         if policy.deny_critical and assessment.level is RiskLevel.CRITICAL:
             return False, f"CRITICAL risk denied: {'; '.join(assessment.factors)}"
         if _LEVEL_ORDER[assessment.level] <= _LEVEL_ORDER[policy.auto_grant_up_to]:
-            return True, f"risk {assessment.level.value} within {policy.name!r} grant band"
+            return (
+                True,
+                f"risk {assessment.level.value} within {policy.name!r} grant band",
+            )
         return False, (
             f"risk {assessment.level.value} exceeds {policy.name!r} grant band "
             f"({policy.auto_grant_up_to.value})"
@@ -239,7 +287,9 @@ class PermissionEngine:
         return Permission(
             task_id=task_id,
             tool_call_id=call.id,
-            decision=PermissionDecision.GRANTED if granted else PermissionDecision.DENIED,
+            decision=PermissionDecision.GRANTED
+            if granted
+            else PermissionDecision.DENIED,
             reason=reason,
             policy=self.policy_name,
         )
@@ -270,8 +320,9 @@ class AuthorizationManager:
         )
         self._context = context or RiskContext()
 
-    def _decide(self, task_id: str, tool: Tool, call: ToolCall,
-                agent_id: str = "") -> tuple[Tool, Permission]:
+    def _decide(
+        self, task_id: str, tool: Tool, call: ToolCall, agent_id: str = ""
+    ) -> tuple[Tool, Permission]:
         """The ONE authorization pipeline (review fix 02/11).
 
         Both authorize() and enforce() run exactly this: registry
@@ -281,11 +332,12 @@ class AuthorizationManager:
         known = self._registry.get(tool.name)
         if known is None:
             return tool, self._permissions.decide(
-                task_id, call, False, f"unknown tool {tool.name!r}")
+                task_id, call, False, f"unknown tool {tool.name!r}"
+            )
         if call.task_id != task_id:
             return known, self._permissions.decide(
-                task_id, call, False,
-                "task_id mismatch between call and request")
+                task_id, call, False, "task_id mismatch between call and request"
+            )
         problems = check_arguments(known, dict(call.arguments))
         if problems:
             raise DomainValidationError("; ".join(problems))
@@ -294,10 +346,12 @@ class AuthorizationManager:
             context = RiskContext(
                 agent_id=agent_id,
                 environment=self._context.environment,
-                root=self._context.root)
+                root=self._context.root,
+            )
         assessment = self._risk.assess(task_id, known, call, context)
         granted, reason = self._policy.evaluate(
-            assessment, known.name, agent_id or self._context.agent_id)
+            assessment, known.name, agent_id or self._context.agent_id
+        )
         return known, self._permissions.decide(task_id, call, granted, reason)
 
     def authorize(self, task_id: str, tool: Tool, call: ToolCall) -> Permission:
@@ -307,8 +361,7 @@ class AuthorizationManager:
         Tool object is never trusted for schema or risk, only its name
         is used to look the authoritative contract up.
         """
-        _, permission = self._decide(
-            task_id, tool, call, self._context.agent_id)
+        _, permission = self._decide(task_id, tool, call, self._context.agent_id)
         return permission
 
     def enforce(
@@ -319,8 +372,8 @@ class AuthorizationManager:
         if permission.decision is not PermissionDecision.GRANTED:
             known = self._registry.get(tool.name)
             raise AuthorizationDeniedError(
-                task_id, known.name if known else tool.name,
-                permission.reason)
+                task_id, known.name if known else tool.name, permission.reason
+            )
         return permission
 
     @property
