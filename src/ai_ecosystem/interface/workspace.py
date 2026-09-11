@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
-from ai_ecosystem.core.models.base import Entity, utcnow
+from ai_ecosystem.core.models.base import Entity
 from ai_ecosystem.core.models.enums import EventType
 
 MAX_PROP_BYTES = 64_000
@@ -87,7 +87,7 @@ class WorkspaceNode(Entity):
 
     node_type: NodeType = NodeType.PROSE
     props: dict[str, Any] = Field(default_factory=dict)
-    data_ref: Optional[DataRef] = None
+    data_ref: DataRef | None = None
     salience: float = 0.5
     state: NodeState = NodeState.LIVE
     affordances: list[str] = Field(default_factory=list)
@@ -165,7 +165,7 @@ def validate_affordances(node_type: NodeType, affordances: list[str]) -> list[st
 class WorkspaceManager:
     """CRUD + layout + validated agent updates over persisted workspaces."""
 
-    def __init__(self, repository: Any, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, repository: Any, bus: EventBus | None = None) -> None:
         self._repo = repository
         self._bus = bus
 
@@ -192,10 +192,10 @@ class WorkspaceManager:
         return all_workspaces
 
     def add_node(self, workspace_id: str, node_type: NodeType,
-                 props: Optional[dict] = None,
-                 data_ref: Optional[DataRef] = None,
+                 props: dict | None = None,
+                 data_ref: DataRef | None = None,
                  salience: float = 0.5,
-                 affordances: Optional[list[str]] = None) -> WorkspaceNode:
+                 affordances: list[str] | None = None) -> WorkspaceNode:
         """Validate and append a node (layout defaults assigned)."""
         workspace = self.get(workspace_id)
         node = WorkspaceNode(
@@ -213,8 +213,8 @@ class WorkspaceManager:
         return node
 
     def update_node(self, workspace_id: str, node_id: str,
-                    props: Optional[dict] = None,
-                    state: Optional[NodeState] = None) -> WorkspaceNode:
+                    props: dict | None = None,
+                    state: NodeState | None = None) -> WorkspaceNode:
         """Apply validated changes (FROZEN nodes refuse updates)."""
         workspace = self.get(workspace_id)
         node = self._need(workspace, node_id)
@@ -375,7 +375,7 @@ class SqliteWorkspaceRepository:
         """Persist a workspace."""
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[Workspace]:
+    def get(self, item_id: str) -> Workspace | None:
         """Fetch by id (None when unknown)."""
         return self._t.get(item_id)
 

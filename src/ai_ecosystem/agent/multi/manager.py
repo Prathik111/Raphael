@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import re
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from ai_ecosystem.agent.executor.cancellation import CancellationToken
 from ai_ecosystem.agent.executor.executor import (
@@ -48,7 +49,7 @@ def _keywords(text: str) -> set[str]:
 class AgentRegistry:
     """Persisted agent definitions (duplicate ids rejected)."""
 
-    def __init__(self, db: Database, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, db: Database, bus: EventBus | None = None) -> None:
         self._table = _SnapshotTable(db, "agent_definitions", AgentDefinition)
         self._bus = bus
 
@@ -63,7 +64,7 @@ class AgentRegistry:
                    {"agent_id": created.id, "role": created.role})
         return created
 
-    def lookup(self, agent_id: str) -> Optional[AgentDefinition]:
+    def lookup(self, agent_id: str) -> AgentDefinition | None:
         """Fetch by id (None when unknown)."""
         return self._table.get(agent_id)
 
@@ -107,11 +108,11 @@ class AgentTaskRepository:
         """Persist a new agent task."""
         return self._table.create(item)
 
-    def get(self, item_id: str) -> Optional[AgentTask]:
+    def get(self, item_id: str) -> AgentTask | None:
         """Fetch by record id."""
         return self._table.get(item_id)
 
-    def by_task(self, task_id: str) -> Optional[AgentTask]:
+    def by_task(self, task_id: str) -> AgentTask | None:
         """Fetch by runtime task id."""
         for item in self._table.list():
             if item.task_id == task_id:
@@ -136,7 +137,7 @@ class AgentManager:
         runtime: AgentRuntime,
         tools: ToolRegistry,
         max_workers: int = 4,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
     ) -> None:
         if max_workers < 1:
             raise DomainValidationError("max_workers must be >= 1")
@@ -162,7 +163,7 @@ class AgentManager:
         return self._agents.set_status(agent_id, AgentStatus.READY)
 
     def submit(self, agent_id: str, goal: str, plan: Any,
-               arguments: Optional[dict] = None,
+               arguments: dict | None = None,
                parent_agent: str = "", parent_task: str = "") -> AgentTask:
         """Create a runtime task owned by one agent (with parentage)."""
         definition = self._agents.lookup(agent_id)
@@ -195,7 +196,7 @@ class AgentManager:
         return ToolRunner(self._tools, authorizer, self._bus), authorizer
 
     def run_task(self, record_id: str,
-                 cancel: Optional[CancellationToken] = None) -> ExecutionResult:
+                 cancel: CancellationToken | None = None) -> ExecutionResult:
         """Execute one submitted task with the owner's scoped runner."""
         record = self._tasks.get(record_id)
         if record is None:
@@ -230,7 +231,7 @@ class AgentManager:
         return result
 
     def run_all(self, record_ids: list[str],
-                cancel: Optional[CancellationToken] = None) -> dict[str, ExecutionResult]:
+                cancel: CancellationToken | None = None) -> dict[str, ExecutionResult]:
         """Run submitted tasks concurrently (bounded by max_workers)."""
         token = cancel or CancellationToken()
         pending = list(record_ids)
@@ -290,7 +291,7 @@ class SubtaskSpec:
     """One delegated unit: who does what with which plan."""
 
     def __init__(self, agent_id: str, goal: str, plan: Any,
-                 arguments: Optional[dict] = None) -> None:
+                 arguments: dict | None = None) -> None:
         self.agent_id = agent_id
         self.goal = goal
         self.plan = plan
@@ -324,8 +325,8 @@ class Supervisor:
         self,
         manager: AgentManager,
         verifier: Any = None,
-        bus: Optional[EventBus] = None,
-        decompose_fn: Optional[DecomposeFn] = None,
+        bus: EventBus | None = None,
+        decompose_fn: DecomposeFn | None = None,
     ) -> None:
         self._manager = manager
         self._verifier = verifier
@@ -338,8 +339,8 @@ class Supervisor:
                   if d.status in (AgentStatus.READY, AgentStatus.RUNNING)]
         return list(self._decompose_fn(goal, agents))
 
-    def run_goal(self, goal: str, specs: Optional[list[SubtaskSpec]] = None,
-                 cancel: Optional[CancellationToken] = None) -> SupervisorResult:
+    def run_goal(self, goal: str, specs: list[SubtaskSpec] | None = None,
+                 cancel: CancellationToken | None = None) -> SupervisorResult:
         """Delegate subtasks, run them concurrently, aggregate outcomes."""
         chosen = specs if specs is not None else self.decompose(goal)
         if not chosen:
@@ -354,7 +355,7 @@ class Supervisor:
         return SupervisorResult(task_ids, results)
 
     def verify_results(self, supervisor_result: SupervisorResult,
-                       criteria: Optional[dict[str, list]] = None) -> dict[str, Any]:
+                       criteria: dict[str, list] | None = None) -> dict[str, Any]:
         """Verify each child result; never trust them blindly."""
         if self._verifier is None:
             raise DomainValidationError("supervisor has no verifier configured")

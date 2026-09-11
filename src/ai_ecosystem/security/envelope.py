@@ -10,7 +10,6 @@ skepticism each deserves.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:  # cycle-safe: cloud imports persistence at runtime
@@ -236,10 +236,8 @@ class Database:
                 self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             except sqlite3.Error:
                 pass  # non-WAL databases have nothing to checkpoint
-            try:
+            with suppress(sqlite3.Error):
                 self._conn.close()
-            except sqlite3.Error:
-                pass
 
     def __del__(self) -> None:  # noqa: D105 -- deterministic resource release
         """Final safety net: never leave a connection open implicitly.

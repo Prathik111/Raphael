@@ -7,7 +7,6 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import (
     ModelMalformedError,
@@ -69,7 +68,7 @@ class HttpChatModelProvider(ModelProvider):
     def __init__(
         self,
         provider_id: str = "http-chat",
-        capabilities: Optional[ModelCapabilities] = None,
+        capabilities: ModelCapabilities | None = None,
         endpoint: str = "",
         api_key: str = "",
         model: str = "",
@@ -97,7 +96,7 @@ class HttpChatModelProvider(ModelProvider):
         secrets: SecretsProvider,
         provider_id: str = "http-chat",
         timeout_s: float = DEFAULT_TIMEOUT_S,
-    ) -> Optional["HttpChatModelProvider"]:
+    ) -> HttpChatModelProvider | None:
         endpoint = secrets.get(ENDPOINT_ENV)
         if not endpoint:
             return None

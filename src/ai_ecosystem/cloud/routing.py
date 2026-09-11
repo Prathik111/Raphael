@@ -8,7 +8,7 @@ call fails loudly instead of leaking to a cloud.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
@@ -90,9 +90,9 @@ class ComputeRouter:
 
     def __init__(
         self,
-        providers: Optional[dict[str, ProviderCapabilities]] = None,
-        availability: Optional[Callable[[str], bool]] = None,
-        policy: Optional[ComputePolicy] = None,
+        providers: dict[str, ProviderCapabilities] | None = None,
+        availability: Callable[[str], bool] | None = None,
+        policy: ComputePolicy | None = None,
     ) -> None:
         self._providers = dict(providers or {})
         self._availability = availability or (lambda name: True)
@@ -183,9 +183,7 @@ class ComputeRouter:
             return False
         if requirements.model and requirements.model not in caps.models:
             return False
-        if requirements.network and not caps.network:
-            return False
-        return True
+        return not (requirements.network and not caps.network)
 
     def _permitted(self, name: str, caps: ProviderCapabilities,
                    requirements: ComputeRequirements | None = None) -> bool:

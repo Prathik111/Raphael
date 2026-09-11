@@ -8,7 +8,6 @@ risk, or policy code (separate modules, no imports between them).
 
 from __future__ import annotations
 
-from typing import Optional
 
 from pydantic import Field
 
@@ -69,8 +68,8 @@ class PersonalizationEngine:
         self,
         personalities: PersonalityStore,
         preferences: PreferenceStore,
-        memories: Optional[MemoryStore] = None,
-        bus: Optional[EventBus] = None,
+        memories: MemoryStore | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._personalities = personalities
         self._preferences = preferences

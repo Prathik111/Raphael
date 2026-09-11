@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from pydantic import Field
 
@@ -26,7 +27,7 @@ class ScheduledJob(Entity):
     goal: str = ""
     requirements: ComputeRequirements = Field(default_factory=ComputeRequirements)
     priority: int = 0
-    deadline: Optional[datetime] = None
+    deadline: datetime | None = None
     dependencies: list[str] = Field(default_factory=list)
     idempotency_key: str = ""
     agent_id: str = ""
@@ -49,10 +50,10 @@ class GlobalScheduler:
         self,
         repository: Any,
         router: ComputeRouter,
-        dispatch: Optional[DispatchFn] = None,
-        audit: Optional[Callable[[dict], None]] = None,
-        clock: Optional[Callable[[], float]] = None,
-        quiet_hours: Optional[tuple[int, int]] = None,
+        dispatch: DispatchFn | None = None,
+        audit: Callable[[dict], None] | None = None,
+        clock: Callable[[], float] | None = None,
+        quiet_hours: tuple[int, int] | None = None,
     ) -> None:
         import threading
         self._repo = repository
@@ -114,7 +115,7 @@ class GlobalScheduler:
         self._note(job, "scheduler.cancel", "CANCELLED")
         return updated
 
-    def tick(self, now: Optional[datetime] = None) -> list[ScheduledJob]:
+    def tick(self, now: datetime | None = None) -> list[ScheduledJob]:
         moment = now or utcnow()
         return [self._run_one(job, moment) for job in self._ready(moment)]
 
@@ -227,7 +228,7 @@ class SqliteScheduledJobRepository:
     def create(self, item: ScheduledJob) -> ScheduledJob:
         return self._t.create(item)
 
-    def get(self, item_id: str) -> Optional[ScheduledJob]:
+    def get(self, item_id: str) -> ScheduledJob | None:
         return self._t.get(item_id)
 
     def update(self, item: ScheduledJob) -> ScheduledJob:

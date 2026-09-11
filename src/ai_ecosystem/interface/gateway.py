@@ -14,7 +14,7 @@ import hmac as hmac_lib
 import secrets as secrets_lib
 import time
 from collections import deque
-from typing import Any, Callable, Optional
+from collections.abc import Callable
 
 from ai_ecosystem.core.errors.exceptions import AiEcosystemError, DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
@@ -51,8 +51,8 @@ class EcosystemGateway:
 
     def __init__(
         self,
-        bus: Optional[EventBus] = None,
-        clock: Optional[Callable[[], float]] = None,
+        bus: EventBus | None = None,
+        clock: Callable[[], float] | None = None,
         code_ttl_s: float = 300.0,
         session_ttl_s: float = 3600.0,
         replay_window_s: float = 300.0,
@@ -135,7 +135,7 @@ class EcosystemGateway:
             self._use_nonce(nonce)
         return session
 
-    def device_secret(self, device_id: str) -> Optional[str]:
+    def device_secret(self, device_id: str) -> str | None:
         """Pairing secret for HMAC verification (server-side only)."""
         return self._secrets.get(device_id)
 

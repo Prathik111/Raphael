@@ -22,7 +22,6 @@ from ai_ecosystem.cloud import MockSyncTransport, SyncManager, make_sync_object
 from ai_ecosystem.core.events import EventBus, InMemoryEventStore
 from ai_ecosystem.core.models import Plan, PlanStep, Tool, ToolResult
 from ai_ecosystem.core.models.enums import (
-    EventType,
     MemoryScope,
     RiskLevel,
     TaskState,

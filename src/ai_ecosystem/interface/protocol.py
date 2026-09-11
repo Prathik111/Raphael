@@ -9,9 +9,8 @@ without knowing whether the bytes arrived over HTTP, USB, or MQTT.
 
 from __future__ import annotations
 
-import json
-import time
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
@@ -58,7 +57,7 @@ class ProtocolValidator:
 
     def __init__(
         self,
-        authorize: Optional[Callable[[EcosystemEnvelope], bool]] = None,
+        authorize: Callable[[EcosystemEnvelope], bool] | None = None,
         clock: Any = None,
     ) -> None:
         import time as _time
@@ -119,9 +118,9 @@ class ProtocolValidator:
 
 
 def envelope_for(sender: str, sender_type: str, message_type: str,
-                 payload: Optional[dict] = None,
+                 payload: dict | None = None,
                  correlation_id: str = "",
-                 auth: Optional[AuthRef] = None) -> EcosystemEnvelope:
+                 auth: AuthRef | None = None) -> EcosystemEnvelope:
     """Build a well-formed envelope (timestamps handled by the model)."""
     return EcosystemEnvelope(
         sender=sender, sender_type=sender_type, message_type=message_type,

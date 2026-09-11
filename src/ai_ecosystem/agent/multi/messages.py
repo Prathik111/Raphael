@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -51,7 +51,7 @@ class AgentMessage(Entity):
     correlation_id: str = ""
     ttl_hops: int = 8
     hops: int = 0
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
 
 
 class MessageBus:
@@ -59,7 +59,7 @@ class MessageBus:
 
     def __init__(
         self,
-        bus: Optional[EventBus] = None,
+        bus: EventBus | None = None,
         repository: Any | None = None,
         max_payload_bytes: int = MAX_PAYLOAD_BYTES,
         max_inbox: int = 100,
@@ -100,7 +100,7 @@ class MessageBus:
                     "type": message.message_type.value})
         return message
 
-    def receive(self, agent_id: str) -> Optional[AgentMessage]:
+    def receive(self, agent_id: str) -> AgentMessage | None:
         """Pop the oldest message for an agent (None when empty)."""
         self._require_registered(agent_id)
         inbox = self._inboxes[agent_id]

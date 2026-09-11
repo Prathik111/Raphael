@@ -10,6 +10,7 @@ from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.tools.registry.registry import ToolHandler
+import contextlib
 
 OUTPUT_CAP: Final = 100_000
 CONTRACT_TIMEOUT_S: Final = 30.0
@@ -68,10 +69,8 @@ def _run_git(cwd: str, args: list[str], timeout_s: float) -> str:
         stdout, stderr = proc.communicate(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         proc.kill()
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
         raise ToolExecutionError("git", "git command timed out") from None
 
     if proc.returncode != 0:

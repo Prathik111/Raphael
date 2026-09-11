@@ -147,7 +147,7 @@ class LocalHttpServer:
     def url(self) -> str:
         host, port = self._server.server_address
         return f"http://{host}:{port}"
-    def start(self) -> "LocalHttpServer":
+    def start(self) -> LocalHttpServer:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start(); return self
     def stop(self) -> None:
@@ -158,7 +158,8 @@ class ApiClient:
     def __init__(self, base_url: str, timeout_s: float = 5.0, auth_token: str | None = None) -> None:
         self._base = base_url.rstrip("/"); self._timeout = timeout_s; self._auth_token = auth_token
     def _call(self, method: str, path: str, body: Any = None) -> Any:
-        import urllib.error, urllib.request
+        import urllib.error
+        import urllib.request
         data = json.dumps(body).encode() if body is not None else None
         headers = {"Content-Type": "application/json"}
         if self._auth_token: headers["Authorization"] = f"Bearer {self._auth_token}"

@@ -3,7 +3,6 @@
 import pytest
 
 from ai_ecosystem.core.events import Event, EventBus
-from ai_ecosystem.core.models import Tool
 from ai_ecosystem.core.models.enums import EventType, MemoryScope, MemoryType
 from ai_ecosystem.core.persistence import Database, SqliteMemoryRepository
 from ai_ecosystem.intelligence import MockModelProvider, ModelRequest

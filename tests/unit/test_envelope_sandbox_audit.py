@@ -1,6 +1,5 @@
 """Gates 29-31: trust tiers, sandbox isolation, tamper-evident audit."""
 
-import json
 import os
 import time
 
@@ -36,7 +35,7 @@ def test_trust_levels_ordered():
     assert meets(TrustLevel.SYSTEM, TrustLevel.UNTRUSTED)
     assert meets(TrustLevel.TRUSTED, TrustLevel.LIMITED)
     assert not meets(TrustLevel.LIMITED, TrustLevel.TRUSTED)
-    assert not meets(TrustLevel.UNTRUSTED, TrustLevel.UNTRUSTED) is False
+    assert meets(TrustLevel.UNTRUSTED, TrustLevel.UNTRUSTED) is not False
 
 
 def test_no_self_elevation():

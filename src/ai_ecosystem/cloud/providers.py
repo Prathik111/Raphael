@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -89,10 +89,10 @@ class MockOCITransport(OCITransport):
 
     def __init__(
         self,
-        outputs: Optional[dict[str, str]] = None,
+        outputs: dict[str, str] | None = None,
         failures: int = 0,
         latency_s: float = 0.0,
-        capabilities: Optional[CloudCapabilities] = None,
+        capabilities: CloudCapabilities | None = None,
     ) -> None:
         self._outputs = dict(outputs or {})
         self._failures_left = failures

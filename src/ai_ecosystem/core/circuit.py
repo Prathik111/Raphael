@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from enum import Enum
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from ai_ecosystem.core.errors.exceptions import AiEcosystemError
 
@@ -34,7 +34,7 @@ class CircuitBreaker:
         self,
         failure_threshold: int = 3,
         reset_timeout_s: float = 30.0,
-        clock: Optional[Callable[[], float]] = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         import threading
 

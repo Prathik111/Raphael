@@ -309,7 +309,7 @@ class ParallelExecutor:
         in_flight: dict[Future, GraphNode],
     ) -> None:
         now = utcnow()
-        for future, node in list(in_flight.items()):
+        for _future, node in list(in_flight.items()):
             if node.state is not StepState.RUNNING or node.started_at is None:
                 continue
             elapsed = (now - node.started_at).total_seconds()
