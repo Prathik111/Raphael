@@ -1,7 +1,8 @@
-"""Process-isolated sandbox provider with fail-closed network policy."""
+"""Process-isolated sandbox provider with fail-closed resource/network policy."""
 
 from __future__ import annotations
 
+import ctypes
 import multiprocessing as mp
 import os
 import queue
@@ -80,7 +81,7 @@ def _worker(
 
 
 def _terminate_process(process: mp.Process) -> None:
-    """Terminate the worker; POSIX workers also own a process group."""
+    """Terminate the worker and its descendants."""
     if not process.is_alive():
         return
     if os.name == "posix":
@@ -91,6 +92,120 @@ def _terminate_process(process: mp.Process) -> None:
     else:
         process.kill()
     process.join(timeout=1.0)
+
+
+class _WindowsJob:
+    """Windows Job Object enforcing descendant lifetime and resource limits.
+
+    A plain ``Process.kill`` does not terminate children created by the worker.
+    The job is therefore the authoritative lifetime boundary on Windows.
+    """
+
+    JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
+    JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
+    JOB_OBJECT_LIMIT_JOB_TIME = 0x00000004
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+    JobObjectExtendedLimitInformation = 9
+
+    class _BasicLimit(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", ctypes.c_uint32),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", ctypes.c_uint32),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", ctypes.c_uint32),
+            ("SchedulingClass", ctypes.c_uint32),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_uint64),
+            ("WriteOperationCount", ctypes.c_uint64),
+            ("OtherOperationCount", ctypes.c_uint64),
+            ("ReadTransferCount", ctypes.c_uint64),
+            ("WriteTransferCount", ctypes.c_uint64),
+            ("OtherTransferCount", ctypes.c_uint64),
+        ]
+
+    class _ExtendedLimit(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimit),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    def __init__(self, profile: SandboxProfile) -> None:
+        if os.name != "nt":
+            self.handle = None
+            return
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._kernel32 = kernel32
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+        kernel32.SetInformationJobObject.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        ]
+        kernel32.SetInformationJobObject.restype = ctypes.c_int
+        kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+        kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.TerminateJobObject.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+        self.handle = handle
+        limits = self._ExtendedLimit()
+        flags = self.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if profile.max_processes > 0:
+            flags |= self.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            limits.BasicLimitInformation.ActiveProcessLimit = profile.max_processes
+        if profile.max_memory_mb > 0:
+            flags |= self.JOB_OBJECT_LIMIT_PROCESS_MEMORY
+            limits.ProcessMemoryLimit = profile.max_memory_mb * 1024 * 1024
+        if profile.max_cpu_s > 0:
+            flags |= self.JOB_OBJECT_LIMIT_JOB_TIME
+            limits.BasicLimitInformation.PerJobUserTimeLimit = int(profile.max_cpu_s * 10_000_000)
+        limits.BasicLimitInformation.LimitFlags = flags
+        ok = kernel32.SetInformationJobObject(
+            handle,
+            self.JobObjectExtendedLimitInformation,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        )
+        if not ok:
+            error = ctypes.get_last_error()
+            self.close()
+            raise OSError(error, "SetInformationJobObject failed")
+
+    def assign(self, process: mp.Process) -> None:
+        if self.handle is None:
+            return
+        ok = self._kernel32.AssignProcessToJobObject(self.handle, ctypes.c_void_p(process.pid))
+        if not ok:
+            error = ctypes.get_last_error()
+            self.close()
+            raise OSError(error, "AssignProcessToJobObject failed")
+
+    def terminate(self) -> None:
+        if self.handle:
+            self._kernel32.TerminateJobObject(self.handle, 1)
+
+    def close(self) -> None:
+        if self.handle:
+            self._kernel32.CloseHandle(self.handle)
+            self.handle = None
 
 
 class LocalSandboxProvider(SandboxProvider):
@@ -116,14 +231,17 @@ class LocalSandboxProvider(SandboxProvider):
         timeout_s: float,
         cancel_token: Any = None,
     ) -> ToolResult:
-        if profile.max_processes != 1:
-            raise ToolExecutionError(
-                tool.name, "local sandbox currently supports max_processes=1 only"
-            )
-        if profile.max_memory_mb or profile.max_cpu_s or profile.max_disk_mb:
+        if profile.max_processes < 1:
+            raise ToolExecutionError(tool.name, "sandbox max_processes must be at least 1")
+        if profile.max_disk_mb:
             raise ToolExecutionError(
                 tool.name,
-                "requested resource quota is not enforceable by the local sandbox provider",
+                "requested disk quota is not enforceable by the local sandbox provider",
+            )
+        if os.name != "nt" and (profile.max_memory_mb or profile.max_cpu_s):
+            raise ToolExecutionError(
+                tool.name,
+                "requested memory/CPU quota is only enforced by the Windows Job Object provider",
             )
         if tool.network_access and not profile.allow_network:
             raise ToolExecutionError(
@@ -151,10 +269,19 @@ class LocalSandboxProvider(SandboxProvider):
                     result_queue,
                 ),
             )
+            job = _WindowsJob(profile)
             try:
                 os.environ.clear()
                 os.environ.update(clean_env)
                 process.start()
+                if os.name == "nt":
+                    try:
+                        job.assign(process)
+                    except OSError as exc:
+                        _terminate_process(process)
+                        raise ToolExecutionError(
+                            tool.name, f"could not attach worker to Windows Job Object: {exc}"
+                        ) from exc
             finally:
                 os.environ.clear()
                 os.environ.update(original_env)
@@ -163,9 +290,13 @@ class LocalSandboxProvider(SandboxProvider):
                 started = time.monotonic()
                 while process.is_alive():
                     if cancel_token is not None and getattr(cancel_token, "cancelled", False):
+                        if os.name == "nt":
+                            job.terminate()
                         _terminate_process(process)
                         raise ToolExecutionError(tool.name, "execution cancelled")
                     if time.monotonic() - started >= max(deadline, 0.0):
+                        if os.name == "nt":
+                            job.terminate()
                         _terminate_process(process)
                         raise ToolTimeoutError(tool.name, deadline)
                     time.sleep(0.02)
@@ -182,6 +313,8 @@ class LocalSandboxProvider(SandboxProvider):
                     raise DomainValidationError("sandbox worker returned a non-ToolResult")
                 return value
             finally:
+                if os.name == "nt":
+                    job.close()
                 if process.is_alive():
                     _terminate_process(process)
                 result_queue.close()
