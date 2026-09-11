@@ -31,6 +31,10 @@ def _spawn_sleeping_child(arguments: dict) -> ToolResult:
     return ToolResult(success=True, output="child finished")
 
 
+def _read_test_secret(_arguments: dict) -> ToolResult:
+    return ToolResult(success=True, output=os.environ.get("RAPHAEL_TEST_SECRET", "missing"))
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Objects are only available on Windows")
 def test_timeout_kills_worker_and_child(tmp_path: Path) -> None:
     marker = str(tmp_path / "escaped.txt")
@@ -64,12 +68,9 @@ def test_registered_filesystem_handler_is_spawn_safe(tmp_path: Path) -> None:
 def test_worker_environment_does_not_inherit_application_secrets(tmp_path: Path) -> None:
     os.environ["RAPHAEL_TEST_SECRET"] = "do-not-leak"
     try:
-        def read_env(_arguments: dict) -> ToolResult:
-            return ToolResult(success=True, output=os.environ.get("RAPHAEL_TEST_SECRET", "missing"))
-
         tool = Tool(name="test.env", risk_level=RiskLevel.LOW, requires_sandbox=True)
         result = LocalSandboxProvider().run(
-            tool, read_env, {},
+            tool, _read_test_secret, {},
             SandboxProfile(name="env-test", timeout_s=2), timeout_s=2,
         )
         assert result.success is True
