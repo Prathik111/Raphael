@@ -13,6 +13,8 @@ from ai_ecosystem.intelligence.models.providers import (
     ModelProvider,
     ModelRequest,
     ModelResponse,
+    ModelToolCall,
+    ModelToolDefinition,
     extract_json_block,
     request_structured,
 )
@@ -27,6 +29,8 @@ __all__ = [
     "ModelProvider",
     "ModelRequest",
     "ModelResponse",
+    "ModelToolCall",
+    "ModelToolDefinition",
     "extract_json_block",
     "normalize_endpoint",
     "request_structured",
