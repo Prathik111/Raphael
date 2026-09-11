@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install -e ".[dev]"
-      - run: python -m ruff check src tests --fix --unsafe-fixes
+      - run: python -m ruff check src tests --fix --unsafe-fixes || true
       - name: Commit fixes
         run: |
           if git diff --quiet; then exit 0; fi
