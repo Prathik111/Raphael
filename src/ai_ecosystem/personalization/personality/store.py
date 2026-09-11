@@ -32,15 +32,16 @@ class PersonalityStore:
         profile.version = self.get().version + 1 if self._table.list() else 1
         profile.touch()
         created = self._table.create(profile)
-        self._emit(EventType.PERSONALITY_UPDATED, "",
-                   {"profile_id": created.id, "version": created.version})
+        self._emit(
+            EventType.PERSONALITY_UPDATED,
+            "",
+            {"profile_id": created.id, "version": created.version},
+        )
         return created
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload)
-            )
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))
 
 
 class PreferenceStore:
@@ -60,7 +61,8 @@ class PreferenceStore:
     def get_project(self, project_id: str) -> PreferenceProfile | None:
         """Latest project profile, or None when the project has none."""
         candidates = [
-            p for p in self._table.list()
+            p
+            for p in self._table.list()
             if p.scope is MemoryScope.PROJECT and p.scope_id == project_id
         ]
         if not candidates:
@@ -70,15 +72,23 @@ class PreferenceStore:
     def save(self, profile: PreferenceProfile) -> PreferenceProfile:
         """Persist a preference profile (new version per save)."""
         existing = [
-            p for p in self._table.list()
+            p
+            for p in self._table.list()
             if p.scope is profile.scope and p.scope_id == profile.scope_id
         ]
         profile.version = max([p.version for p in existing], default=0) + 1
         profile.touch()
         created = self._table.create(profile)
-        self._emit(EventType.PREFERENCE_UPDATED, "",
-                   {"profile_id": created.id, "scope": created.scope.value,
-                    "scope_id": created.scope_id, "version": created.version})
+        self._emit(
+            EventType.PREFERENCE_UPDATED,
+            "",
+            {
+                "profile_id": created.id,
+                "scope": created.scope.value,
+                "scope_id": created.scope_id,
+                "version": created.version,
+            },
+        )
         return created
 
     def get_effective(self, project_id: str = "") -> PreferenceProfile:
@@ -114,6 +124,4 @@ class PreferenceStore:
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload)
-            )
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))

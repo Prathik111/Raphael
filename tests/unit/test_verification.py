@@ -22,12 +22,16 @@ def test_1_successful_execution_passes(tmp_path):
     (tmp_path / "report.txt").write_text("results")
     verifier = Verifier()
     result = verifier.verify(
-        "t", "s1", [_ok()],
+        "t",
+        "s1",
+        [_ok()],
         [
             {"strategy": "command_results"},
             {"strategy": "artifact_exists", "params": {"paths": ["report.txt"]}},
-            {"strategy": "artifact_properties",
-             "params": {"path": "report.txt", "contains": "results"}},
+            {
+                "strategy": "artifact_properties",
+                "params": {"path": "report.txt", "contains": "results"},
+            },
         ],
         root=str(tmp_path),
     )
@@ -39,7 +43,9 @@ def test_1_successful_execution_passes(tmp_path):
 def test_2_false_success_command_ok_file_missing_fails(tmp_path):
     verifier = Verifier()
     result = verifier.verify(
-        "t", "s1", [_ok()],  # exit 0 -- but nothing was produced
+        "t",
+        "s1",
+        [_ok()],  # exit 0 -- but nothing was produced
         [{"strategy": "artifact_exists", "params": {"paths": ["absent.txt"]}}],
         root=str(tmp_path),
     )
@@ -50,9 +56,10 @@ def test_2_false_success_command_ok_file_missing_fails(tmp_path):
 def test_3_missing_build_artifact_fails(tmp_path):
     verifier = Verifier()
     result = verifier.verify(
-        "t", "s1", [_ok("build finished")],
-        [{"strategy": "artifact_properties",
-          "params": {"path": "dist/app.bin", "min_bytes": 10}}],
+        "t",
+        "s1",
+        [_ok("build finished")],
+        [{"strategy": "artifact_properties", "params": {"path": "dist/app.bin", "min_bytes": 10}}],
         root=str(tmp_path),
     )
     assert result.status is VerificationStatus.FAILED
@@ -62,9 +69,10 @@ def test_4_corrupt_artifact_fails(tmp_path):
     (tmp_path / "app.bin").write_bytes(b"\x00")  # 1 corrupt byte
     verifier = Verifier()
     result = verifier.verify(
-        "t", "s1", [_ok()],
-        [{"strategy": "artifact_properties",
-          "params": {"path": "app.bin", "min_bytes": 1024}}],
+        "t",
+        "s1",
+        [_ok()],
+        [{"strategy": "artifact_properties", "params": {"path": "app.bin", "min_bytes": 1024}}],
         root=str(tmp_path),
     )
     assert result.status is VerificationStatus.FAILED
@@ -78,9 +86,15 @@ def test_5_failed_test_command_fails():
     runner = ToolRunner(registry, GrantAllAuthorizer())
     verifier = Verifier().with_test_command(runner, registry)
     result = verifier.verify(
-        "t", "s1", [_ok()],
-        [{"strategy": "test_command",
-          "params": {"command": [sys.executable, "-c", "raise SystemExit(1)"]}}],
+        "t",
+        "s1",
+        [_ok()],
+        [
+            {
+                "strategy": "test_command",
+                "params": {"command": [sys.executable, "-c", "raise SystemExit(1)"]},
+            }
+        ],
     )
     assert result.status is VerificationStatus.FAILED
     assert "test command reported failure" in result.reason
@@ -89,9 +103,10 @@ def test_5_failed_test_command_fails():
 def test_6_incorrect_output_fails():
     verifier = Verifier()
     result = verifier.verify(
-        "t", "s1", [_ok("total: 41")],
-        [{"strategy": "command_results",
-          "params": {"expect_in_output": "total: 42"}}],
+        "t",
+        "s1",
+        [_ok("total: 41")],
+        [{"strategy": "command_results", "params": {"expect_in_output": "total: 42"}}],
     )
     assert result.status is VerificationStatus.FAILED
     assert "completion criteria" in result.reason
@@ -111,9 +126,7 @@ def test_8_strategy_exception_is_error_not_crash():
             raise RuntimeError("strategy bug")
 
     verifier = Verifier(strategies={"exploding": Exploding()})
-    result = verifier.verify(
-        "t", "s1", [_ok()], [{"strategy": "exploding"}]
-    )
+    result = verifier.verify("t", "s1", [_ok()], [{"strategy": "exploding"}])
     assert result.status is VerificationStatus.ERROR
     assert "raised" in result.reason
 
@@ -126,9 +139,7 @@ def test_unknown_strategy_is_error():
 
 def test_failed_tool_results_fail_command_check():
     verifier = Verifier()
-    result = verifier.verify(
-        "t", "s1", [_failed("disk full")], [{"strategy": "command_results"}]
-    )
+    result = verifier.verify("t", "s1", [_failed("disk full")], [{"strategy": "command_results"}])
     assert result.status is VerificationStatus.FAILED
 
 
@@ -152,9 +163,7 @@ def test_verification_results_persisted():
     try:
         repo = SqliteVerificationRepository(db)
         verifier = Verifier(repository=repo)
-        created = verifier.verify(
-            "t", "s1", [_ok()], [{"strategy": "command_results"}]
-        )
+        created = verifier.verify("t", "s1", [_ok()], [{"strategy": "command_results"}])
         stored = repo.get(created.id)
         assert stored is not None
         assert stored.status is VerificationStatus.PASSED
@@ -185,7 +194,9 @@ def test_verifier_is_executor_free():
 def test_path_escape_in_criteria_fails():
     verifier = Verifier()
     result = verifier.verify(
-        "t", "s1", [_ok()],
+        "t",
+        "s1",
+        [_ok()],
         [{"strategy": "artifact_exists", "params": {"paths": ["../../etc/passwd"]}}],
         root="/tmp/root",
     )

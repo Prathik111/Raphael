@@ -20,10 +20,8 @@ from ai_ecosystem.core.errors.exceptions import AiEcosystemError, DomainValidati
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.enums import EventType
 
-PHONE_SCOPES = frozenset({
-    "status", "tasks", "cancel", "permissions-view", "awareness", "decide"})
-HARDWARE_SCOPES = frozenset({
-    "status", "approve-record", "deny-cancel", "stop", "model-note"})
+PHONE_SCOPES = frozenset({"status", "tasks", "cancel", "permissions-view", "awareness", "decide"})
+HARDWARE_SCOPES = frozenset({"status", "approve-record", "deny-cancel", "stop", "model-note"})
 
 # Scopes with side effects require a fresh nonce (replay protection is
 # mandatory where a replayed call would do something twice).
@@ -37,8 +35,9 @@ class GatewayError(AiEcosystemError):
 class DeviceSession:
     """One live session: device, role scopes, and expiry."""
 
-    def __init__(self, token: str, device_id: str, role: str,
-                 scopes: frozenset, expires_at: float) -> None:
+    def __init__(
+        self, token: str, device_id: str, role: str, scopes: frozenset, expires_at: float
+    ) -> None:
         self.token = token
         self.device_id = device_id
         self.role = role
@@ -76,9 +75,12 @@ class EcosystemGateway:
             raise DomainValidationError(f"unknown device role {role!r}")
         self._gc()
         code = secrets_lib.token_hex(16)  # 128-bit pairing codes
-        self._codes[code] = {"device_id": device_id, "role": role,
-                             "expires": self._clock() + self._code_ttl,
-                             "used": False}
+        self._codes[code] = {
+            "device_id": device_id,
+            "role": role,
+            "expires": self._clock() + self._code_ttl,
+            "used": False,
+        }
         return code
 
     def pair(self, code: str, device_secret: str) -> str:
@@ -88,16 +90,14 @@ class EcosystemGateway:
             raise GatewayError("invalid or reused pairing code")
         if self._clock() > entry["expires"]:
             raise GatewayError("pairing code expired")
-        if not device_secret or len(device_secret) < 16 \
-                or len(set(device_secret)) < 8:
+        if not device_secret or len(device_secret) < 16 or len(set(device_secret)) < 8:
             raise GatewayError("device secret too weak")
         entry["used"] = True
         device_id = entry["device_id"]
         self._secrets[device_id] = device_secret
         self._revoked_devices.discard(device_id)
         token = self._mint(device_id, entry["role"])
-        self._emit(EventType.DEVICE_PAIRED, "",
-                   {"device_id": device_id, "role": entry["role"]})
+        self._emit(EventType.DEVICE_PAIRED, "", {"device_id": device_id, "role": entry["role"]})
         return token
 
     # -- sessions ------------------------------------------------------------
@@ -114,8 +114,11 @@ class EcosystemGateway:
 
     def revoke_device(self, device_id: str) -> None:
         """Revoke a device: all sessions die, secret is dropped."""
-        self._sessions = {token: session for token, session in self._sessions.items()
-                          if session.device_id != device_id}
+        self._sessions = {
+            token: session
+            for token, session in self._sessions.items()
+            if session.device_id != device_id
+        }
         self._secrets.pop(device_id, None)
         self._revoked_devices.add(device_id)
         self._emit(EventType.DEVICE_REVOKED, "", {"device_id": device_id})
@@ -156,7 +159,8 @@ class EcosystemGateway:
         token = secrets_lib.token_hex(16)
         scopes = PHONE_SCOPES if role == "phone" else HARDWARE_SCOPES
         self._sessions[token] = DeviceSession(
-            token, device_id, role, scopes, self._clock() + self._session_ttl)
+            token, device_id, role, scopes, self._clock() + self._session_ttl
+        )
         return token
 
     def _use_nonce(self, nonce: str) -> None:
@@ -170,22 +174,25 @@ class EcosystemGateway:
     def _gc(self) -> None:
         """Drop used/expired codes and dead sessions (bounded state)."""
         now = self._clock()
-        self._codes = {code: entry for code, entry in self._codes.items()
-                       if not entry["used"] and entry["expires"] > now}
-        self._sessions = {token: session for token, session in self._sessions.items()
-                          if session.expires_at > now
-                          and session.device_id not in self._revoked_devices}
+        self._codes = {
+            code: entry
+            for code, entry in self._codes.items()
+            if not entry["used"] and entry["expires"] > now
+        }
+        self._sessions = {
+            token: session
+            for token, session in self._sessions.items()
+            if session.expires_at > now and session.device_id not in self._revoked_devices
+        }
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload))
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))
 
 
 def hmac_sign(secret: str, canonical: str) -> str:
     """HMAC-SHA256 signature for device packets."""
-    return hmac_lib.new(secret.encode(), canonical.encode(),
-                        hashlib.sha256).hexdigest()
+    return hmac_lib.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
 
 
 def hmac_check(secret: str, canonical: str, signature: str) -> bool:

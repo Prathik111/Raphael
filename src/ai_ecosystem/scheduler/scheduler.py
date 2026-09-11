@@ -10,7 +10,12 @@ from collections.abc import Callable
 
 from pydantic import Field
 
-from ai_ecosystem.cloud.routing import ComputeRequirements, ComputeRouter, ComputeTarget, RoutingError
+from ai_ecosystem.cloud.routing import (
+    ComputeRequirements,
+    ComputeRouter,
+    ComputeTarget,
+    RoutingError,
+)
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.models.base import Entity, utcnow
 
@@ -56,6 +61,7 @@ class GlobalScheduler:
         quiet_hours: tuple[int, int] | None = None,
     ) -> None:
         import threading
+
         self._repo = repository
         self._router = router
         self._dispatch = dispatch
@@ -160,13 +166,18 @@ class GlobalScheduler:
         job.touch()
         self._repo.update(job)
         if self._dispatch is None:
-            return self._finish(job, ScheduledStatus.FAILED,
-                                "scheduler has no dispatch executor configured",
-                                "scheduler.dispatch")
+            return self._finish(
+                job,
+                ScheduledStatus.FAILED,
+                "scheduler has no dispatch executor configured",
+                "scheduler.dispatch",
+            )
         try:
             target = self._router.route(job.requirements)
         except RoutingError as exc:
-            return self._finish(job, ScheduledStatus.FAILED, f"routing failed: {exc}", "scheduler.route")
+            return self._finish(
+                job, ScheduledStatus.FAILED, f"routing failed: {exc}", "scheduler.route"
+            )
         job.routed_provider = target.provider
         self._repo.update(job)
         try:
@@ -178,11 +189,14 @@ class GlobalScheduler:
                 self._repo.update(job)
                 self._note(job, "scheduler.retry", "QUEUED")
                 return job
-            return self._finish(job, ScheduledStatus.FAILED,
-                                f"attempts exhausted: {exc}", "scheduler.retry")
+            return self._finish(
+                job, ScheduledStatus.FAILED, f"attempts exhausted: {exc}", "scheduler.retry"
+            )
         return self._finish(job, ScheduledStatus.SUCCEEDED, summary, "scheduler.dispatch")
 
-    def _finish(self, job: ScheduledJob, status: ScheduledStatus, summary: str, action: str) -> ScheduledJob:
+    def _finish(
+        self, job: ScheduledJob, status: ScheduledStatus, summary: str, action: str
+    ) -> ScheduledJob:
         job.status = status
         job.result_summary = summary
         job.touch()
@@ -201,6 +215,7 @@ class GlobalScheduler:
 
     def _require(self, job_id: str) -> ScheduledJob:
         from ai_ecosystem.core.errors.exceptions import ResourceNotFoundError
+
         job = self._repo.get(job_id)
         if job is None:
             raise ResourceNotFoundError("ScheduledJob", job_id)
@@ -210,10 +225,16 @@ class GlobalScheduler:
         if self._audit is None:
             return
         try:
-            self._audit({"action": action, "task_id": job.id,
-                         "resource": job.routed_provider or "scheduler",
-                         "decision": outcome, "result": job.result_summary,
-                         "agent_id": job.agent_id})
+            self._audit(
+                {
+                    "action": action,
+                    "task_id": job.id,
+                    "resource": job.routed_provider or "scheduler",
+                    "decision": outcome,
+                    "result": job.result_summary,
+                    "agent_id": job.agent_id,
+                }
+            )
         except Exception:  # noqa: BLE001
             pass
 
@@ -223,6 +244,7 @@ class SqliteScheduledJobRepository:
 
     def __init__(self, db: Any) -> None:
         from ai_ecosystem.core.persistence.sqlite import _SnapshotTable
+
         self._t = _SnapshotTable(db, "scheduler_jobs", ScheduledJob)
 
     def create(self, item: ScheduledJob) -> ScheduledJob:

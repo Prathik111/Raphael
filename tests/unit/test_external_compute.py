@@ -37,15 +37,24 @@ def _ok(args):
 
 def _registry():
     registry = ToolRegistry()
-    registry.register(Tool(name="compute", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW), _ok)
+    registry.register(
+        Tool(name="compute", input_schema={"required": []}, risk_level=RiskLevel.LOW), _ok
+    )
     return registry
 
 
 def _plan(*tools):
-    steps = [PlanStep(id=f"s{i}", description=t, dependencies=[],
-                      tools=[t], verification="v", completion_criteria="c")
-             for i, t in enumerate(tools)]
+    steps = [
+        PlanStep(
+            id=f"s{i}",
+            description=t,
+            dependencies=[],
+            tools=[t],
+            verification="v",
+            completion_criteria="c",
+        )
+        for i, t in enumerate(tools)
+    ]
     return Plan(goal="g", steps=steps, final_verification="v")
 
 
@@ -58,8 +67,7 @@ def test_kaggle_authentication():
     provider = _provider(KaggleProvider)
     assert provider.connect().status is CloudStatus.CONNECTED
     assert provider.name == "kaggle"
-    bad = KaggleProvider(MockNotebookTransport(),
-                         DictSecretsProvider({}))
+    bad = KaggleProvider(MockNotebookTransport(), DictSecretsProvider({}))
     with pytest.raises(CloudAuthError):
         bad.connect()
 
@@ -143,9 +151,12 @@ def test_data_policy_rejection():
     provider.connect()
     job = ComputeJob(provider="kaggle", task_id="t1")
     with pytest.raises(DatasetPolicyError):
-        provider.submit_job(job, datasets=[{"name": "leak", "kind": "dataset",
-                                            "size_bytes": 10,
-                                            "payload": {"password": "x"}}])
+        provider.submit_job(
+            job,
+            datasets=[
+                {"name": "leak", "kind": "dataset", "size_bytes": 10, "payload": {"password": "x"}}
+            ],
+        )
 
 
 def test_provider_outage():
@@ -184,8 +195,7 @@ def _cloud_agent(**kwargs):
     registry = _registry()
     runner = ToolRunner(registry, GrantAllAuthorizer())
     kwargs.setdefault("sync", SyncManager(transport=MockSyncTransport()))
-    return CloudAgent(
-        lambda: ParallelExecutor(runner, registry), **kwargs)
+    return CloudAgent(lambda: ParallelExecutor(runner, registry), **kwargs)
 
 
 def test_pc_offline_cloud_continuation():
@@ -200,8 +210,7 @@ def test_local_only_task_rejection():
     agent = _cloud_agent(allowed_tools=["compute"])
     plan = _plan("compute")
     with pytest.raises(CloudUnsafeError, match="LOCAL_ONLY"):
-        agent.accept("t1", plan, [make_sync_object("file", "/etc/passwd",
-                                                   {"path": "/etc/passwd"})])
+        agent.accept("t1", plan, [make_sync_object("file", "/etc/passwd", {"path": "/etc/passwd"})])
 
 
 def test_cloud_safe_task_execution():

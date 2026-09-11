@@ -15,12 +15,30 @@ from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry, ToolRunner
 
 def _plan():
     steps = [
-        PlanStep(id="a", description="a", dependencies=[], tools=["ok"],
-                 verification="v", completion_criteria="c"),
-        PlanStep(id="b", description="b", dependencies=["a"], tools=["ok"],
-                 verification="v", completion_criteria="c"),
-        PlanStep(id="c", description="c", dependencies=["b"], tools=["ok"],
-                 verification="v", completion_criteria="c"),
+        PlanStep(
+            id="a",
+            description="a",
+            dependencies=[],
+            tools=["ok"],
+            verification="v",
+            completion_criteria="c",
+        ),
+        PlanStep(
+            id="b",
+            description="b",
+            dependencies=["a"],
+            tools=["ok"],
+            verification="v",
+            completion_criteria="c",
+        ),
+        PlanStep(
+            id="c",
+            description="c",
+            dependencies=["b"],
+            tools=["ok"],
+            verification="v",
+            completion_criteria="c",
+        ),
     ]
     return Plan(goal="g", steps=steps, final_verification="v")
 

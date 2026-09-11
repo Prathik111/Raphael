@@ -66,13 +66,9 @@ class FailureClassifier:
                 FailureClass.PERMISSION_FAILURE, result.error or "", "tool_result"
             )
         if "timed out" in error:
-            return Classification(
-                FailureClass.TIMEOUT, result.error or "", "tool_result"
-            )
+            return Classification(FailureClass.TIMEOUT, result.error or "", "tool_result")
         if any(marker in error for marker in _TRANSIENT_MARKERS):
-            return Classification(
-                FailureClass.TRANSIENT, result.error or "", "tool_result"
-            )
+            return Classification(FailureClass.TRANSIENT, result.error or "", "tool_result")
         return Classification(
             FailureClass.TOOL_FAILURE, result.error or "tool failed", "tool_result"
         )
@@ -81,9 +77,7 @@ class FailureClassifier:
     def classify_verification(result: VerificationResult) -> Classification:
         """Classify a non-passing verification outcome."""
         if result.status is VerificationStatus.FAILED:
-            return Classification(
-                FailureClass.VERIFICATION_FAILURE, result.reason, "verification"
-            )
+            return Classification(FailureClass.VERIFICATION_FAILURE, result.reason, "verification")
         return Classification(
             FailureClass.UNKNOWN,
             f"verification ended {result.status.value}: {result.reason}",
@@ -94,9 +88,7 @@ class FailureClassifier:
     def classify_exception(exc: BaseException) -> Classification:
         """Classify a raised error (planner backends, providers, policy)."""
         if isinstance(exc, AuthorizationDeniedError):
-            return Classification(
-                FailureClass.PERMISSION_FAILURE, str(exc), "exception"
-            )
+            return Classification(FailureClass.PERMISSION_FAILURE, str(exc), "exception")
         if isinstance(exc, ToolTimeoutError):
             return Classification(FailureClass.TIMEOUT, str(exc), "exception")
         if isinstance(exc, ModelError):

@@ -17,16 +17,19 @@ def awareness_tools(manager: SystemAwarenessManager) -> list[tuple[Tool, object]
 
     def _snapshot(arguments: dict) -> ToolResult:
         snap = manager.snapshot()
-        return ToolResult(success=True, output={
-            "os": snap.operating_system,
-            "arch": snap.architecture,
-            "pressure": snap.pressure.value,
-            "capabilities": {n: v for n, v in snap.capabilities.model_dump().items() if v},
-            "cpu_logical": snap.cpu.logical_processors,
-            "memory_total_bytes": snap.memory.total_bytes,
-            "volumes": len(snap.storage),
-            "gpus": len(snap.gpus),
-        })
+        return ToolResult(
+            success=True,
+            output={
+                "os": snap.operating_system,
+                "arch": snap.architecture,
+                "pressure": snap.pressure.value,
+                "capabilities": {n: v for n, v in snap.capabilities.model_dump().items() if v},
+                "cpu_logical": snap.cpu.logical_processors,
+                "memory_total_bytes": snap.memory.total_bytes,
+                "volumes": len(snap.storage),
+                "gpus": len(snap.gpus),
+            },
+        )
 
     tool = Tool(
         name="system.snapshot",

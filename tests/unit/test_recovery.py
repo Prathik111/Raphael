@@ -30,8 +30,14 @@ from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry, ToolRunner
 
 def _plan(*items, goal="g"):
     steps = [
-        PlanStep(id=sid, description=sid, dependencies=list(deps), tools=list(tools),
-                 verification="v", completion_criteria="c")
+        PlanStep(
+            id=sid,
+            description=sid,
+            dependencies=list(deps),
+            tools=list(tools),
+            verification="v",
+            completion_criteria="c",
+        )
         for sid, deps, tools in items
     ]
     return Plan(goal=goal, steps=steps, final_verification="v")
@@ -53,7 +59,9 @@ def _harness(registry, authorizer=None, criteria=None):
 
     def verify_fn(task_id, plan, result):
         return verifier.verify(
-            task_id, "all", result.all_tool_results(),
+            task_id,
+            "all",
+            result.all_tool_results(),
             criteria if criteria is not None else [{"strategy": "command_results"}],
         )
 
@@ -75,9 +83,7 @@ def _flaky_registry(failures, error="broken"):
 
 
 def test_9_transient_failure_retried_to_success():
-    execute_fn, verify_fn, calls = _harness(
-        _flaky_registry(1, "transient network reset")
-    )
+    execute_fn, verify_fn, calls = _harness(_flaky_registry(1, "transient network reset"))
     outcome = RecoveryEngine().run("t", _base_plan(), execute_fn, verify_fn)
     assert outcome.status is OutcomeStatus.RECOVERED
     assert outcome.attempts == 2 and outcome.retries == 1
@@ -112,10 +118,12 @@ def test_10_timeout_bounded_retry_then_escalate():
 
 def test_11_permission_denial_never_retried():
     reg = ToolRegistry()
-    reg.register(Tool(name="blocked", input_schema={"required": []}),
-                 lambda args: ToolResult(success=True))
+    reg.register(
+        Tool(name="blocked", input_schema={"required": []}), lambda args: ToolResult(success=True)
+    )
     strict = AuthorizationManager(
-        reg, policy_engine=PolicyEngine(Policy(name="s", denied_tools={"blocked"})),
+        reg,
+        policy_engine=PolicyEngine(Policy(name="s", denied_tools={"blocked"})),
     )
     execute_fn, verify_fn, calls = _harness(reg, authorizer=strict)
     engine = RecoveryEngine(policy=RecoveryPolicy(retries=RetryPolicy(max_attempts=9)))
@@ -128,8 +136,10 @@ def test_11_permission_denial_never_retried():
 def test_12_verification_failure_replans_to_success(tmp_path):
     target = tmp_path / "fix.txt"
     reg = ToolRegistry()
-    reg.register(Tool(name="work", input_schema={"required": []}),
-                 lambda args: ToolResult(success=True, output="ok"))
+    reg.register(
+        Tool(name="work", input_schema={"required": []}),
+        lambda args: ToolResult(success=True, output="ok"),
+    )
     criteria = [{"strategy": "artifact_exists", "params": {"paths": ["fix.txt"]}}]
 
     def replan_fn(task_id, failed_plan, reason):
@@ -140,12 +150,11 @@ def test_12_verification_failure_replans_to_success(tmp_path):
     execute_fn, verify_fn, calls = _harness(reg, criteria=criteria)
 
     def rooted_verify(task_id, plan, result):
-        return Verifier().verify(task_id, "all", result.all_tool_results(),
-                                 criteria, root=str(tmp_path))
+        return Verifier().verify(
+            task_id, "all", result.all_tool_results(), criteria, root=str(tmp_path)
+        )
 
-    outcome = RecoveryEngine(planner=planner).run(
-        "t", _base_plan(), execute_fn, rooted_verify
-    )
+    outcome = RecoveryEngine(planner=planner).run("t", _base_plan(), execute_fn, rooted_verify)
     assert outcome.status is OutcomeStatus.RECOVERED
     assert outcome.replans == 1
     assert len(outcome.plan_versions) == 2
@@ -172,8 +181,7 @@ def test_14_maximum_retry_enforcement():
 
 def test_15_no_infinite_loop_always_failing():
     execute_fn, verify_fn, calls = _harness(_flaky_registry(999))
-    outcome = RecoveryEngine().run("t", _base_plan(), execute_fn, verify_fn,
-                                   max_attempts=5)
+    outcome = RecoveryEngine().run("t", _base_plan(), execute_fn, verify_fn, max_attempts=5)
     assert calls["executions"] == 4  # default policy: 3 retries then escalate
     assert outcome.status is OutcomeStatus.ESCALATED
     assert len(outcome.audit) == 4
@@ -181,15 +189,18 @@ def test_15_no_infinite_loop_always_failing():
 
 def test_15b_identical_replan_rejected_as_loop(tmp_path):
     reg = ToolRegistry()
-    reg.register(Tool(name="work", input_schema={"required": []}),
-                 lambda args: ToolResult(success=True, output="ok"))
+    reg.register(
+        Tool(name="work", input_schema={"required": []}),
+        lambda args: ToolResult(success=True, output="ok"),
+    )
     criteria = [{"strategy": "artifact_exists", "params": {"paths": ["never.txt"]}}]
     plan = _base_plan()
     planner = RecoveryPlanner(reg, replan_provider=lambda t, p, r: plan)
 
     def rooted_verify(task_id, plan, result):
-        return Verifier().verify(task_id, "all", result.all_tool_results(),
-                                 criteria, root=str(tmp_path))
+        return Verifier().verify(
+            task_id, "all", result.all_tool_results(), criteria, root=str(tmp_path)
+        )
 
     execute_fn, _, calls = _harness(reg)
     outcome = RecoveryEngine(planner=planner).run(
@@ -201,8 +212,10 @@ def test_15b_identical_replan_rejected_as_loop(tmp_path):
 
 def test_16_invalid_replacement_plan_rejected():
     reg = ToolRegistry()
-    reg.register(Tool(name="work", input_schema={"required": []}),
-                 lambda args: ToolResult(success=True, output="ok"))
+    reg.register(
+        Tool(name="work", input_schema={"required": []}),
+        lambda args: ToolResult(success=True, output="ok"),
+    )
     bad = _plan(("s1", [], ["teleport"]))
     planner = RecoveryPlanner(reg, replan_provider=lambda t, p, r: bad)
     execute_fn, verify_fn, _ = _harness(reg)
@@ -210,8 +223,7 @@ def test_16_invalid_replacement_plan_rejected():
     criteria = [{"strategy": "artifact_exists", "params": {"paths": ["x"]}}]
 
     def rooted_verify(task_id, plan, result):
-        return Verifier().verify(task_id, "all", result.all_tool_results(),
-                                 criteria, root="/tmp")
+        return Verifier().verify(task_id, "all", result.all_tool_results(), criteria, root="/tmp")
 
     outcome = RecoveryEngine(planner=planner).run(
         "t", _base_plan(), execute_fn, rooted_verify, max_attempts=2
@@ -222,19 +234,31 @@ def test_16_invalid_replacement_plan_rejected():
 
 def test_17_unsafe_replacement_plan_rejected():
     reg = ToolRegistry()
-    reg.register(Tool(name="work", input_schema={"required": []}),
-                 lambda args: ToolResult(success=True, output="ok"))
-    evil = Plan(goal="g", steps=[PlanStep(
-        id="s1", description="evil", dependencies=[], tools=["work"],
-        risk=RiskLevel.CRITICAL, verification="v", completion_criteria="c")],
-        final_verification="v")
+    reg.register(
+        Tool(name="work", input_schema={"required": []}),
+        lambda args: ToolResult(success=True, output="ok"),
+    )
+    evil = Plan(
+        goal="g",
+        steps=[
+            PlanStep(
+                id="s1",
+                description="evil",
+                dependencies=[],
+                tools=["work"],
+                risk=RiskLevel.CRITICAL,
+                verification="v",
+                completion_criteria="c",
+            )
+        ],
+        final_verification="v",
+    )
     planner = RecoveryPlanner(reg, replan_provider=lambda t, p, r: evil)
     execute_fn, _, _ = _harness(reg)
     criteria = [{"strategy": "artifact_exists", "params": {"paths": ["x"]}}]
 
     def rooted_verify(task_id, plan, result):
-        return Verifier().verify(task_id, "all", result.all_tool_results(),
-                                 criteria, root="/tmp")
+        return Verifier().verify(task_id, "all", result.all_tool_results(), criteria, root="/tmp")
 
     outcome = RecoveryEngine(planner=planner).run(
         "t", _base_plan(), execute_fn, rooted_verify, max_attempts=2
@@ -245,8 +269,10 @@ def test_17_unsafe_replacement_plan_rejected():
 
 def test_18_valid_replacement_plan_accepted():
     reg = ToolRegistry()
-    reg.register(Tool(name="work", input_schema={"required": []}),
-                 lambda args: ToolResult(success=True, output="ok"))
+    reg.register(
+        Tool(name="work", input_schema={"required": []}),
+        lambda args: ToolResult(success=True, output="ok"),
+    )
     planner = RecoveryPlanner(
         reg, replan_provider=lambda t, p, r: _plan(("s1", [], ["work"]), ("s2", [], ["work"]))
     )
@@ -254,8 +280,7 @@ def test_18_valid_replacement_plan_accepted():
     criteria = [{"strategy": "artifact_exists", "params": {"paths": ["x"]}}]
 
     def rooted_verify(task_id, plan, result):
-        return Verifier().verify(task_id, "all", result.all_tool_results(),
-                                 criteria, root="/tmp")
+        return Verifier().verify(task_id, "all", result.all_tool_results(), criteria, root="/tmp")
 
     outcome = RecoveryEngine(planner=planner).run(
         "t", _base_plan(), execute_fn, rooted_verify, max_attempts=3
@@ -267,17 +292,31 @@ def test_18_valid_replacement_plan_accepted():
 
 def test_classification_covers_all_classes():
     deny = ToolResult(task_id="t", tool_call_id="c", success=False, error="denied: nope")
-    assert FailureClassifier.classify_tool_result(deny).failure_class is FailureClass.PERMISSION_FAILURE
+    assert (
+        FailureClassifier.classify_tool_result(deny).failure_class
+        is FailureClass.PERMISSION_FAILURE
+    )
     timeout = ToolResult(task_id="t", tool_call_id="c", success=False, error="timed out after 1s")
     assert FailureClassifier.classify_tool_result(timeout).failure_class is FailureClass.TIMEOUT
-    assert FailureClassifier.classify_exception(ToolTimeoutError("t", 1.0)).failure_class is FailureClass.TIMEOUT
-    assert FailureClassifier.classify_exception(
-        AuthorizationDeniedError("t", "x", "r")).failure_class is FailureClass.PERMISSION_FAILURE
-    assert FailureClassifier.classify_exception(
-        ModelUnavailableError("down")).failure_class is FailureClass.MODEL_FAILURE
-    assert FailureClassifier.classify_exception(
-        PlanValidationError("bad")).failure_class is FailureClass.LOGICAL_FAILURE
-    assert FailureClassifier.classify_exception(ValueError("?")).failure_class is FailureClass.UNKNOWN
+    assert (
+        FailureClassifier.classify_exception(ToolTimeoutError("t", 1.0)).failure_class
+        is FailureClass.TIMEOUT
+    )
+    assert (
+        FailureClassifier.classify_exception(AuthorizationDeniedError("t", "x", "r")).failure_class
+        is FailureClass.PERMISSION_FAILURE
+    )
+    assert (
+        FailureClassifier.classify_exception(ModelUnavailableError("down")).failure_class
+        is FailureClass.MODEL_FAILURE
+    )
+    assert (
+        FailureClassifier.classify_exception(PlanValidationError("bad")).failure_class
+        is FailureClass.LOGICAL_FAILURE
+    )
+    assert (
+        FailureClassifier.classify_exception(ValueError("?")).failure_class is FailureClass.UNKNOWN
+    )
 
 
 def test_retry_policy_table_and_backoff():
@@ -287,10 +326,12 @@ def test_retry_policy_table_and_backoff():
     assert policy.delay_for(3) == 4.0
     assert policy.delay_for(4) == 5.0  # capped
     perm = FailureClassifier.classify_tool_result(
-        ToolResult(task_id="t", tool_call_id="c", success=False, error="denied"))
+        ToolResult(task_id="t", tool_call_id="c", success=False, error="denied")
+    )
     assert policy.should_retry(perm, 0) is False
     transient = FailureClassifier.classify_tool_result(
-        ToolResult(task_id="t", tool_call_id="c", success=False, error="transient reset"))
+        ToolResult(task_id="t", tool_call_id="c", success=False, error="transient reset")
+    )
     assert policy.should_retry(transient, 0) is True
     assert policy.should_retry(transient, 3) is False
 
@@ -318,10 +359,8 @@ def test_recovery_is_auditable_and_observable():
 
 def test_skip_action_supported_via_override():
     execute_fn, verify_fn, _ = _harness(_flaky_registry(99))
-    policy = RecoveryPolicy(
-        overrides={FailureClass.TOOL_FAILURE: RecoveryAction.SKIP})
-    outcome = RecoveryEngine(policy=policy).run(
-        "t", _base_plan(), execute_fn, verify_fn)
+    policy = RecoveryPolicy(overrides={FailureClass.TOOL_FAILURE: RecoveryAction.SKIP})
+    outcome = RecoveryEngine(policy=policy).run("t", _base_plan(), execute_fn, verify_fn)
     assert outcome.status is OutcomeStatus.PARTIAL
     assert outcome.attempts == 1
 

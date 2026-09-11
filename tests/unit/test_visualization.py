@@ -16,12 +16,9 @@ def _lifecycle(task_id="t1"):
         _event(EventType.TASK_CREATED, task_id),
         _event(EventType.STEP_READY, task_id, {"step_id": "a"}),
         _event(EventType.STEP_STARTED, task_id, {"step_id": "a"}),
-        _event(EventType.TOOL_REQUESTED, task_id,
-               {"tool": "filesystem.read", "call_id": "c1"}),
-        _event(EventType.TOOL_STARTED, task_id,
-               {"tool": "filesystem.read", "call_id": "c1"}),
-        _event(EventType.TOOL_COMPLETED, task_id,
-               {"tool": "filesystem.read", "call_id": "c1"}),
+        _event(EventType.TOOL_REQUESTED, task_id, {"tool": "filesystem.read", "call_id": "c1"}),
+        _event(EventType.TOOL_STARTED, task_id, {"tool": "filesystem.read", "call_id": "c1"}),
+        _event(EventType.TOOL_COMPLETED, task_id, {"tool": "filesystem.read", "call_id": "c1"}),
         _event(EventType.STEP_COMPLETED, task_id, {"step_id": "a"}),
         _event(EventType.VERIFICATION_STARTED, task_id),
         _event(EventType.VERIFICATION_PASSED, task_id),
@@ -64,8 +61,7 @@ def test_4_multi_agent_state():
     adapter = EventAdapter()
     adapter.ingest(_event(EventType.AGENT_STARTED, payload={"agent_id": "r1"}))
     adapter.ingest(_event(EventType.STEP_STARTED, payload={"step_id": "s1"}))
-    adapter.ingest(_event(EventType.AGENT_COMPLETED,
-                          payload={"agent_id": "r1", "success": True}))
+    adapter.ingest(_event(EventType.AGENT_COMPLETED, payload={"agent_id": "r1", "success": True}))
     agent = adapter.snapshot("t1").agents["r1"]
     assert agent.status == "COMPLETED"
     # Step events carry no agent attribution, so the view must NOT guess
@@ -87,13 +83,17 @@ def test_5_tool_activity():
 
 def test_6_permission_state():
     adapter = EventAdapter()
-    adapter.ingest(_event(EventType.TOOL_REQUESTED,
-                          payload={"tool": "terminal.execute", "call_id": "c9"}))
+    adapter.ingest(
+        _event(EventType.TOOL_REQUESTED, payload={"tool": "terminal.execute", "call_id": "c9"})
+    )
     pending = adapter.snapshot("t1").permissions["c9"]
     assert pending.decided is False  # awaiting policy, clearly shown
-    adapter.ingest(_event(EventType.PERMISSION_DENIED,
-                          payload={"tool": "terminal.execute", "call_id": "c9",
-                                   "reason": "HIGH risk"}))
+    adapter.ingest(
+        _event(
+            EventType.PERMISSION_DENIED,
+            payload={"tool": "terminal.execute", "call_id": "c9", "reason": "HIGH risk"},
+        )
+    )
     decided = adapter.snapshot("t1").permissions["c9"]
     assert decided.decided is True and decided.granted is False
 

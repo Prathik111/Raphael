@@ -25,8 +25,9 @@ SUPPORTED_MAJOR = "1"
 MAX_PACKET_BYTES = 4_096
 REPLAY_WINDOW_S = 300.0
 
-HARDWARE_COMMANDS = frozenset({
-    "status", "approve", "deny", "stop", "kill", "model-note", "project-note"})
+HARDWARE_COMMANDS = frozenset(
+    {"status", "approve", "deny", "stop", "kill", "model-note", "project-note"}
+)
 
 
 class DevicePacket(BaseModel):
@@ -44,8 +45,7 @@ class DevicePacket(BaseModel):
 class SimulatedDevice:
     """In-process stand-in for firmware (tests + simulator UI)."""
 
-    def __init__(self, device_id: str, secret: str,
-                 clock: Any = None) -> None:
+    def __init__(self, device_id: str, secret: str, clock: Any = None) -> None:
         import time as _time
 
         self.device_id = device_id
@@ -53,16 +53,22 @@ class SimulatedDevice:
         self._clock = clock or _time.time
         self._counter = 0
 
-    def packet(self, command: str, payload: dict | None = None,
-               protocol_version: str = PROTOCOL_VERSION) -> dict:
+    def packet(
+        self, command: str, payload: dict | None = None, protocol_version: str = PROTOCOL_VERSION
+    ) -> dict:
         """Build and sign a packet dict."""
         from ai_ecosystem.interface.gateway import hmac_sign
         import json as _json
 
         self._counter += 1
-        body = {"protocol_version": protocol_version, "device_id": self.device_id,
-                "command": command, "payload": payload or {},
-                "timestamp": self._clock(), "nonce": f"{self.device_id}-{self._counter}"}
+        body = {
+            "protocol_version": protocol_version,
+            "device_id": self.device_id,
+            "command": command,
+            "payload": payload or {},
+            "timestamp": self._clock(),
+            "nonce": f"{self.device_id}-{self._counter}",
+        }
         canonical = _json.dumps(body, sort_keys=True, separators=(",", ":"))
         body["signature"] = hmac_sign(self._secret, canonical)
         return body
@@ -91,9 +97,13 @@ class HardwareGateway:
         message = self._parse(packet)
         self._authenticate(message)
         handler = {
-            "status": self._status, "approve": self._approve,
-            "deny": self._deny, "stop": self._stop, "kill": self._kill,
-            "model-note": self._note, "project-note": self._note,
+            "status": self._status,
+            "approve": self._approve,
+            "deny": self._deny,
+            "stop": self._stop,
+            "kill": self._kill,
+            "model-note": self._note,
+            "project-note": self._note,
         }[message.command]
         return handler(message)
 
@@ -117,7 +127,8 @@ class HardwareGateway:
         major = str(message.protocol_version).split(".")[0]
         if major != SUPPORTED_MAJOR:
             raise DomainValidationError(
-                f"protocol version {message.protocol_version!r} unsupported")
+                f"protocol version {message.protocol_version!r} unsupported"
+            )
         if message.command not in HARDWARE_COMMANDS:
             raise DomainValidationError(f"unknown command {message.command!r}")
         return message
@@ -128,10 +139,14 @@ class HardwareGateway:
         secret = self._gateway.device_secret(message.device_id)
         if secret is None:
             raise DomainValidationError("device is not paired")
-        body = {"protocol_version": message.protocol_version,
-                "device_id": message.device_id, "command": message.command,
-                "payload": message.payload, "timestamp": message.timestamp,
-                "nonce": message.nonce}
+        body = {
+            "protocol_version": message.protocol_version,
+            "device_id": message.device_id,
+            "command": message.command,
+            "payload": message.payload,
+            "timestamp": message.timestamp,
+            "nonce": message.nonce,
+        }
         canonical = _json.dumps(body, sort_keys=True, separators=(",", ":"))
         if not hmac_check(secret, canonical, message.signature):
             raise DomainValidationError("bad packet signature")
@@ -148,13 +163,18 @@ class HardwareGateway:
     # -- command effects -------------------------------------------------------
 
     def _status(self, message: DevicePacket) -> dict[str, Any]:
-        return {"tasks": self._api.list_tasks(),
-                "agents": self._api.get_agent_status()}
+        return {"tasks": self._api.list_tasks(), "agents": self._api.get_agent_status()}
 
     def _approve(self, message: DevicePacket) -> dict[str, Any]:
-        self._emit(EventType.PHONE_DECISION, str(message.payload.get("task_id", "")),
-                   {"device_id": message.device_id, "decision": "approve",
-                    "note": "hardware acknowledgment only; grants nothing"})
+        self._emit(
+            EventType.PHONE_DECISION,
+            str(message.payload.get("task_id", "")),
+            {
+                "device_id": message.device_id,
+                "decision": "approve",
+                "note": "hardware acknowledgment only; grants nothing",
+            },
+        )
         return {"acknowledged": True, "grants": "nothing"}
 
     def _deny(self, message: DevicePacket) -> dict[str, Any]:
@@ -173,8 +193,7 @@ class HardwareGateway:
         """
         scope = str(message.payload.get("scope", ""))
         if len(scope) < 3:
-            raise DomainValidationError(
-                "kill requires an explicit scope (>= 3 characters)")
+            raise DomainValidationError("kill requires an explicit scope (>= 3 characters)")
         cancelled = []
         for task in self._api.list_tasks():
             if scope and scope not in task["title"]:
@@ -185,30 +204,36 @@ class HardwareGateway:
                     cancelled.append(task["task_id"])
                 except Exception:  # noqa: BLE001 -- best effort per task
                     continue
-        self._emit(EventType.PHONE_DECISION, "",
-                   {"device_id": message.device_id, "decision": "kill",
-                    "cancelled": cancelled})
+        self._emit(
+            EventType.PHONE_DECISION,
+            "",
+            {"device_id": message.device_id, "decision": "kill", "cancelled": cancelled},
+        )
         return {"cancelled": cancelled}
 
     def _note(self, message: DevicePacket) -> dict[str, Any]:
         # Untrusted payload: emit only its shape, never its content.
         keys = sorted(message.payload) if isinstance(message.payload, dict) else []
-        self._emit(EventType.PHONE_DECISION, "",
-                   {"device_id": message.device_id,
-                    "decision": f"{message.command}-recorded",
-                    "payload_keys": keys})
+        self._emit(
+            EventType.PHONE_DECISION,
+            "",
+            {
+                "device_id": message.device_id,
+                "decision": f"{message.command}-recorded",
+                "payload_keys": keys,
+            },
+        )
         return {"recorded": True, "applied": False}
 
-    def _cancel(self, task_id: str, device_id: str,
-                decision: str) -> dict[str, Any]:
+    def _cancel(self, task_id: str, device_id: str, decision: str) -> dict[str, Any]:
         if not task_id:
             raise DomainValidationError("command needs a task_id")
         cancelled = self._api.cancel_task(task_id)
-        self._emit(EventType.PHONE_DECISION, task_id,
-                   {"device_id": device_id, "decision": decision})
+        self._emit(
+            EventType.PHONE_DECISION, task_id, {"device_id": device_id, "decision": decision}
+        )
         return cancelled
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload))
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))

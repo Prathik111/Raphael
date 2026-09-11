@@ -35,54 +35,54 @@ def _registry(tmp_path):
 
 def _floor_manager(registry, **kw):
     kw.setdefault("approval_store", ApprovalStore())
-    policy = Policy(name="approval-test",
-                    approval_required_from=RiskLevel.HIGH, **{
-                        k: v for k, v in kw.items()
-                        if k in ("auto_grant_up_to", "deny_critical")})
+    policy = Policy(
+        name="approval-test",
+        approval_required_from=RiskLevel.HIGH,
+        **{k: v for k, v in kw.items() if k in ("auto_grant_up_to", "deny_critical")},
+    )
     store = kw["approval_store"]
     manager = AuthorizationManager(
         registry,
         policy_engine=PolicyEngine(policy),
         approval_store=store,
-        approval_wait_s=kw.get("approval_wait_s", 30.0))
+        approval_wait_s=kw.get("approval_wait_s", 30.0),
+    )
     return manager, store
 
 
 def test_hash_stable_and_sensitive():
     args = {"path": "a.txt", "mode": "r"}
     assert approval_hash("t", args, "p") == approval_hash("t", dict(args), "p")
-    assert approval_hash("t", args, "p") != approval_hash(
-        "t", {"path": "b.txt", "mode": "r"}, "p")
+    assert approval_hash("t", args, "p") != approval_hash("t", {"path": "b.txt", "mode": "r"}, "p")
     assert approval_hash("t", args, "p") != approval_hash("t", args, "other")
     assert approval_hash("t", args, "p") != approval_hash("u", args, "p")
 
 
 def test_request_approve_verify_round_trip():
     store = ApprovalStore()
-    created = store.request("task-1", "filesystem.read", {"path": "a.txt"},
-                            "LOW", "test", "default")
+    created = store.request(
+        "task-1", "filesystem.read", {"path": "a.txt"}, "LOW", "test", "default"
+    )
     assert created.status is ApprovalStatus.PENDING
     # Same exact action reuses the request (idempotent).
-    assert store.request("task-1", "filesystem.read", {"path": "a.txt"},
-                         "LOW", "test", "default").id == created.id
-    assert store.verify(created.id, "filesystem.read",
-                        {"path": "a.txt"}, "default") is False
+    assert (
+        store.request("task-1", "filesystem.read", {"path": "a.txt"}, "LOW", "test", "default").id
+        == created.id
+    )
+    assert store.verify(created.id, "filesystem.read", {"path": "a.txt"}, "default") is False
     store.decide(created.id, True, decided_by="tester")
-    assert store.verify(created.id, "filesystem.read",
-                        {"path": "a.txt"}, "default") is True
+    assert store.verify(created.id, "filesystem.read", {"path": "a.txt"}, "default") is True
 
 
 def test_approve_then_mutate_denied():
     store = ApprovalStore()
-    created = store.request("task-1", "filesystem.read", {"path": "a.txt"},
-                            "LOW", "test", "default")
+    created = store.request(
+        "task-1", "filesystem.read", {"path": "a.txt"}, "LOW", "test", "default"
+    )
     store.decide(created.id, True)
-    assert store.verify(created.id, "filesystem.read",
-                        {"path": "b.txt"}, "default") is False
-    assert store.verify(created.id, "filesystem.write",
-                        {"path": "a.txt"}, "default") is False
-    assert store.verify(created.id, "filesystem.read",
-                        {"path": "a.txt"}, "other-policy") is False
+    assert store.verify(created.id, "filesystem.read", {"path": "b.txt"}, "default") is False
+    assert store.verify(created.id, "filesystem.write", {"path": "a.txt"}, "default") is False
+    assert store.verify(created.id, "filesystem.read", {"path": "a.txt"}, "other-policy") is False
 
 
 def test_decide_once_and_unknown_rejected():
@@ -153,8 +153,8 @@ def test_deny_from_human_fails_closed(tmp_path):
     call = registry.build_call("t", "filesystem.read", {"path": "a.txt"})
     box: dict = {}
     thread = threading.Thread(
-        target=lambda: box.setdefault("result", runner.run(call)),
-        daemon=True)
+        target=lambda: box.setdefault("result", runner.run(call)), daemon=True
+    )
     thread.start()
     deadline = time.monotonic() + 10
     pending = []
@@ -173,8 +173,7 @@ def test_wait_timeout_denies(tmp_path):
     manager._policy.policy.approval_required_from = RiskLevel.LOW
     runner = ToolRunner(registry, manager)
     started = time.monotonic()
-    result = runner.run(
-        registry.build_call("t", "filesystem.read", {"path": "a.txt"}))
+    result = runner.run(registry.build_call("t", "filesystem.read", {"path": "a.txt"}))
     assert time.monotonic() - started < 10
     assert result.success is False
     assert "timed out" in result.error
@@ -230,8 +229,9 @@ def test_approvals_persist_across_restart(tmp_path):
     runtime = AgentRuntime(path)
     try:
         store = ApprovalStore(SqliteApprovalRepository(runtime.db))
-        created = store.request("task-9", "filesystem.read",
-                                {"path": "a.txt"}, "HIGH", "ui", "default")
+        created = store.request(
+            "task-9", "filesystem.read", {"path": "a.txt"}, "HIGH", "ui", "default"
+        )
         assert [r.id for r in store.pending()] == [created.id]
     finally:
         runtime.shutdown()

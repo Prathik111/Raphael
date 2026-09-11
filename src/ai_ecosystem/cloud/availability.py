@@ -50,8 +50,9 @@ _MAX_CAPABILITIES = 100
 _MAX_CAPABILITY_CHARS = 256
 
 
-def _check_heartbeat(device_id: str, capabilities: list[str] | None,
-                     pressure: str, runtime: str) -> list[str]:
+def _check_heartbeat(
+    device_id: str, capabilities: list[str] | None, pressure: str, runtime: str
+) -> list[str]:
     """Validate heartbeat shape (presence carries no personal data)."""
     if not device_id:
         raise DomainValidationError("device_id must not be empty")
@@ -73,29 +74,39 @@ def _check_heartbeat(device_id: str, capabilities: list[str] | None,
 class PCAvailabilityService:
     """Heartbeat/lease tracker over the existing database."""
 
-    def __init__(self, repository: Any, bus: EventBus | None = None,
-                 lease_timeout_s: float = 60.0) -> None:
+    def __init__(
+        self, repository: Any, bus: EventBus | None = None, lease_timeout_s: float = 60.0
+    ) -> None:
         if lease_timeout_s <= 0:
             raise DomainValidationError("lease_timeout_s must be positive")
         self._repo = repository
         self._bus = bus
         self._lease_timeout_s = lease_timeout_s
 
-    def heartbeat(self, device_id: str, status: PCStatus = PCStatus.ONLINE,
-                  capabilities: list[str] | None = None,
-                  pressure: str = "UNKNOWN", reachable: bool = True,
-                  runtime: str = "unknown",
-                  now: datetime | None = None) -> DevicePresence:
+    def heartbeat(
+        self,
+        device_id: str,
+        status: PCStatus = PCStatus.ONLINE,
+        capabilities: list[str] | None = None,
+        pressure: str = "UNKNOWN",
+        reachable: bool = True,
+        runtime: str = "unknown",
+        now: datetime | None = None,
+    ) -> DevicePresence:
         """Record presence (idempotent: duplicates just refresh the lease)."""
         caps = _check_heartbeat(device_id, capabilities, pressure, runtime)
         moment = now or utcnow()
         existing = self._find(device_id)
         if existing is None:
             presence = DevicePresence(
-                device_id=device_id, last_seen=moment, status=status,
+                device_id=device_id,
+                last_seen=moment,
+                status=status,
                 capabilities=caps,
-                resource_pressure=pressure, network_reachable=reachable,
-                agent_runtime=runtime)
+                resource_pressure=pressure,
+                network_reachable=reachable,
+                agent_runtime=runtime,
+            )
             created = self._repo.create(presence)
             self._emit(EventType.PC_ONLINE, {"device_id": device_id})
             return created
@@ -109,7 +120,9 @@ class PCAvailabilityService:
         existing.touch()
         updated = self._repo.update(existing)
         if previous in (PCStatus.OFFLINE, PCStatus.UNREACHABLE) and status in (
-                PCStatus.ONLINE, PCStatus.AVAILABLE):
+            PCStatus.ONLINE,
+            PCStatus.AVAILABLE,
+        ):
             self._emit(EventType.PC_ONLINE, {"device_id": device_id})
         return updated
 
