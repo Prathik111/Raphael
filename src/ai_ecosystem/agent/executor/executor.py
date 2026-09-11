@@ -5,9 +5,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import Enum
-
 from pydantic import BaseModel, Field
-
 from ai_ecosystem.agent.executor.cancellation import CancellationToken
 from ai_ecosystem.agent.executor.graph import GraphNode, TaskGraph
 from ai_ecosystem.agent.planner.validator import PlanValidator
@@ -23,12 +21,10 @@ from ai_ecosystem.tools.registry.runner import ToolRunner
 class FailurePolicy(str, Enum):
     FAIL_FAST = "FAIL_FAST"
     CONTINUE_INDEPENDENT = "CONTINUE_INDEPENDENT"
-
 class OverallStatus(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
-
 class ExecutionResult(BaseModel):
     task_id: str = ""
     status: OverallStatus = OverallStatus.FAILED
@@ -56,12 +52,10 @@ class ParallelExecutor:
         self._runner = runner; self._registry = registry; self._bus = bus; self._max_concurrency = max_concurrency
         self._failure_policy = failure_policy; self._default_step_timeout_s = default_step_timeout_s; self._step_timeouts = dict(step_timeouts or {}); self._poll_interval_s = poll_interval_s
         self._step_tokens: dict[Future, CancellationToken] = {}
-
     def execute(self, task_id: str, plan: Plan, *, arguments: dict[str, dict] | None = None, context: ExecutionContext | None = None,
                 contexts_repo: SqliteExecutionContextRepository | None = None, cancel: CancellationToken | None = None) -> ExecutionResult:
         known = {tool.name for tool in self._registry.list_tools()}; validated = PlanValidator(known).validate(plan)
         return self.execute_graph(task_id, TaskGraph.from_plan(validated), arguments=arguments, context=context, contexts_repo=contexts_repo, cancel=cancel)
-
     def execute_graph(self, task_id: str, graph: TaskGraph, *, arguments: dict[str, dict] | None = None, context: ExecutionContext | None = None,
                       contexts_repo: SqliteExecutionContextRepository | None = None, cancel: CancellationToken | None = None) -> ExecutionResult:
         known = {tool.name for tool in self._registry.list_tools()}
@@ -88,15 +82,11 @@ class ParallelExecutor:
             if node.completed_at is None: node.completed_at = utcnow()
         status = self._overall_status(graph, token); duration = time.monotonic() - started; self._emit(EventType.GRAPH_COMPLETED, task_id, {"status": status.value, "duration_s": round(duration, 3)})
         result = self._aggregate(task_id, graph, status, duration); self._persist(graph, context, contexts_repo); return result
-
     def _submit_ready(self, graph: TaskGraph, task_id: str, args: dict[str, dict], pool: ThreadPoolExecutor, in_flight: dict[Future, GraphNode], token: CancellationToken) -> None:
         for node in graph.ready():
             if len(in_flight) >= self._max_concurrency: break
-            node.transition(StepState.READY); self._emit(EventType.STEP_READY, task_id, {"step_id": node.step.id}); node.transition(StepState.RUNNING); node.attempts += 1; node.started_at = utcnow()
-            node.timeout_s = self._step_timeouts.get(node.step.id, self._default_step_timeout_s); self._emit(EventType.STEP_STARTED, task_id, {"step_id": node.step.id})
-            merged = {**(node.step.arguments or {}), **args.get(node.step.id, {})}; child = token.child(node.timeout_s); future = pool.submit(self._run_node, task_id, node, merged, child)
-            in_flight[future] = node; self._step_tokens[future] = child
-
+            node.transition(StepState.READY); self._emit(EventType.STEP_READY, task_id, {"step_id": node.step.id}); node.transition(StepState.RUNNING); node.attempts += 1; node.started_at = utcnow(); node.timeout_s = self._step_timeouts.get(node.step.id, self._default_step_timeout_s); self._emit(EventType.STEP_STARTED, task_id, {"step_id": node.step.id})
+            merged = {**(node.step.arguments or {}), **args.get(node.step.id, {})}; child = token.child(node.timeout_s); future = pool.submit(self._run_node, task_id, node, merged, child); in_flight[future] = node; self._step_tokens[future] = child
     def _run_node(self, task_id: str, node: GraphNode, arguments: dict, token: CancellationToken) -> tuple[bool, list[ToolResult], str]:
         try:
             results: list[ToolResult] = []
@@ -107,7 +97,6 @@ class ParallelExecutor:
             if token.cancelled: return False, results, "step deadline/cancellation reached after tool execution"
             return True, results, ""
         except Exception as exc: return False, [], f"executor error: {exc}"
-
     def _collect_completed(self, graph: TaskGraph, task_id: str, in_flight: dict[Future, GraphNode], context: ExecutionContext | None) -> None:
         if not in_flight: return
         done, _ = wait(set(in_flight), timeout=self._poll_interval_s, return_when=FIRST_COMPLETED)
@@ -117,7 +106,7 @@ class ParallelExecutor:
             try: ok, results, error = future.result()
             except Exception as exc: ok, results, error = False, [], f"executor error: {exc}"
             node.tool_results = results; node.result = results[-1] if results else None; node.completed_at = utcnow()
-            timed_out = child is not None and child.deadline is not None and time.monotonic() >= child.deadline
+            timed_out = child is not None and child.deadline_reached
             if timed_out and not ok:
                 node.transition(StepState.TIMED_OUT); node.error = error or "step deadline exceeded"; self._emit(EventType.STEP_TIMED_OUT, task_id, {"step_id": node.step.id, "timeout_s": node.timeout_s})
             elif ok:
@@ -125,20 +114,15 @@ class ParallelExecutor:
             else:
                 node.transition(StepState.FAILED); node.error = error; self._emit(EventType.STEP_FAILED, task_id, {"step_id": node.step.id, "error": error})
             if context is not None: context.tool_results.extend(results)
-
     def _enforce_deadlines(self, graph: TaskGraph, task_id: str, in_flight: dict[Future, GraphNode]) -> None:
-        """Request cancellation at the deadline; do not lie about worker termination."""
         now = time.monotonic()
         for future, node in list(in_flight.items()):
             child = self._step_tokens.get(future)
             if node.state is StepState.RUNNING and child is not None and child.deadline is not None and now >= child.deadline: child.cancel()
-
     def _stop_unstarted(self, graph: TaskGraph, task_id: str, token: CancellationToken, halting: bool) -> None:
         reason = "cancel requested" if token.cancelled else "fail-fast halt"
         for node in graph.nodes:
-            if node.state in (StepState.PENDING, StepState.READY):
-                node.transition(StepState.CANCELLED); node.error = f"never started: {reason}"; self._emit(EventType.STEP_CANCELLED, task_id, {"step_id": node.step.id, "reason": reason})
-
+            if node.state in (StepState.PENDING, StepState.READY): node.transition(StepState.CANCELLED); node.error = f"never started: {reason}"; self._emit(EventType.STEP_CANCELLED, task_id, {"step_id": node.step.id, "reason": reason})
     def _drain_stuck(self, graph: TaskGraph, task_id: str) -> bool:
         stuck = [node for node in graph.nodes if node.state in (StepState.PENDING, StepState.READY)]
         if not stuck or graph.done(): return False
@@ -147,7 +131,6 @@ class ParallelExecutor:
             except DomainValidationError: continue
             node.error = "unsatisfiable dependencies; skipped defensively"; self._emit(EventType.STEP_SKIPPED, task_id, {"step_id": node.step.id})
         return True
-
     @staticmethod
     def _first_failure(graph: TaskGraph) -> bool: return any(node.state in (StepState.FAILED, StepState.TIMED_OUT) for node in graph.nodes)
     @staticmethod
