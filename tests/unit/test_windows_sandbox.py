@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from ai_ecosystem.core.errors.exceptions import ToolTimeoutError
 from ai_ecosystem.core.models import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.security.sandbox import LocalSandboxProvider, SandboxProfile
@@ -26,7 +27,7 @@ def test_timeout_kills_worker_and_child(tmp_path: Path) -> None:
                     "import time; from pathlib import Path; "
                     f"time.sleep(2); Path({str(marker)!r}).write_text('escaped')"
                 ),
-                ],
+            ],
             check=True,
         )
         return ToolResult(success=True, output="child finished")
@@ -43,7 +44,7 @@ def test_timeout_kills_worker_and_child(tmp_path: Path) -> None:
         max_processes=1,
     )
 
-    with pytest.raises(Exception, match="timed out|without a result|sandbox"):
+    with pytest.raises(ToolTimeoutError):
         LocalSandboxProvider().run(tool, handler, {}, profile, timeout_s=0.25)
 
     time.sleep(0.5)
