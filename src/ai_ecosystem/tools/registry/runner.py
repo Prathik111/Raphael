@@ -11,6 +11,7 @@ from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.domain import Permission, Tool, ToolCall, ToolResult
 from ai_ecosystem.core.models.enums import EventType, PermissionDecision, ToolCallStatus
 from ai_ecosystem.core.secrets import looks_like_secret_value, redact
+from ai_ecosystem.security.sandbox import LocalSandboxProvider, SandboxProfile
 from ai_ecosystem.tools.registry.registry import ToolRegistry
 from ai_ecosystem.tools.registry.validation import check_arguments
 
@@ -40,13 +41,11 @@ def _safe_output_snippet(output: Any, limit: int = 500) -> str:
 def _run_with_deadline(handler: Any, arguments: dict, timeout_s: float) -> Any:
     import threading
     box: dict[str, Any] = {}
-
     def target() -> None:
         try:
             box["result"] = handler(arguments)
         except BaseException as exc:
             box["error"] = exc
-
     thread = threading.Thread(target=target, daemon=True, name="tool-runner")
     thread.start()
     thread.join(max(float(timeout_s), 0.0))
@@ -83,7 +82,7 @@ class ToolRunner:
         self._registry = registry
         self._authorizer = authorizer
         self._bus = bus
-        self._sandbox = sandbox
+        self._sandbox = sandbox if sandbox is not None else LocalSandboxProvider()
         self._sandbox_profiles = dict(sandbox_profiles or {})
         self._auditor = auditor
         self._seen_ids: dict[str, None] = {}
@@ -126,7 +125,6 @@ class ToolRunner:
             try:
                 permission = waiter(permission, cancelled=cancel_token)
             except TypeError:
-                # Backward-compatible test authorizers that only accept permission.
                 permission = waiter(permission)
             except Exception as exc:
                 permission.decision = PermissionDecision.DENIED
@@ -197,13 +195,13 @@ class ToolRunner:
         try:
             result = _run_with_deadline(handler, dict(call.arguments), tool.timeout_s)
         except FuturesTimeoutError:
-            return self._fail(call, EventType.TOOL_FAILED, str(ToolTimeoutError(call.tool, tool.timeout_s)))
+            return self._fail(call, EventType.TOOL_FAILED, str(ToolTimeoutError(call.tool, tool.timeout_s)), tool, permission)
         except (ToolError, DomainValidationError) as exc:
-            return self._fail(call, EventType.TOOL_FAILED, str(exc))
+            return self._fail(call, EventType.TOOL_FAILED, str(exc), tool, permission)
         except Exception as exc:
-            return self._fail(call, EventType.TOOL_FAILED, f"handler crashed: {exc}")
+            return self._fail(call, EventType.TOOL_FAILED, f"handler crashed: {exc}", tool, permission)
         if not isinstance(result, ToolResult):
-            return self._fail(call, EventType.TOOL_FAILED, f"handler for {call.tool!r} returned {type(result).__name__}")
+            return self._fail(call, EventType.TOOL_FAILED, f"handler for {call.tool!r} returned {type(result).__name__}", tool, permission)
         result.task_id = call.task_id
         result.tool_call_id = call.id
         call.status = ToolCallStatus.COMPLETED if result.success else ToolCallStatus.FAILED
@@ -215,13 +213,14 @@ class ToolRunner:
         return result
 
     def _run_sandboxed(self, call: ToolCall, tool: Tool, handler: Any, permission: Permission) -> ToolResult:
-        if self._sandbox is None:
-            return self._fail(call, EventType.TOOL_FAILED,
-                              f"tool {call.tool!r} requires sandbox {tool.sandbox_profile!r}: no provider configured", tool, permission)
         profile = self._sandbox_profiles.get(tool.sandbox_profile)
         if profile is None:
-            return self._fail(call, EventType.TOOL_FAILED,
-                              f"tool {call.tool!r} requires unknown sandbox profile {tool.sandbox_profile!r}", tool, permission)
+            if tool.sandbox_profile == "terminal":
+                profile = SandboxProfile(name="terminal", fs_root="", allow_network=False,
+                                         timeout_s=tool.timeout_s, max_processes=1)
+            else:
+                return self._fail(call, EventType.TOOL_FAILED,
+                                  f"tool {call.tool!r} requires unknown sandbox profile {tool.sandbox_profile!r}", tool, permission)
         try:
             result = self._sandbox.run(tool, handler, dict(call.arguments), profile, tool.timeout_s)
         except (ToolError, DomainValidationError) as exc:
