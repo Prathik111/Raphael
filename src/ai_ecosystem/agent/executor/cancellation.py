@@ -19,15 +19,15 @@ class CancellationToken:
 
     @property
     def cancelled(self) -> bool:
-        if self._event.is_set():
-            return True
-        if self._parent is not None and self._parent.cancelled:
-            return True
-        return self._deadline is not None and time.monotonic() >= self._deadline
+        return self._event.is_set() or (self._parent is not None and self._parent.cancelled) or self.deadline_reached
 
     @property
     def deadline(self) -> float | None:
         return self._deadline
+
+    @property
+    def deadline_reached(self) -> bool:
+        return self._deadline is not None and time.monotonic() >= self._deadline
 
     def child(self, timeout_s: float | None = None) -> "CancellationToken":
         """Create a child whose deadline cannot exceed its parent's deadline."""
