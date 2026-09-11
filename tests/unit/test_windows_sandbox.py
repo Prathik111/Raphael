@@ -14,24 +14,25 @@ from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.security.sandbox import LocalSandboxProvider, SandboxProfile
 
 
+def _spawn_sleeping_child(arguments: dict) -> ToolResult:
+    marker = arguments["marker"]
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import time; from pathlib import Path; "
+                f"time.sleep(2); Path({marker!r}).write_text('escaped')"
+            ),
+        ],
+        check=True,
+    )
+    return ToolResult(success=True, output="child finished")
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Objects are only available on Windows")
 def test_timeout_kills_worker_and_child(tmp_path: Path) -> None:
-    marker = tmp_path / "escaped.txt"
-
-    def handler(_arguments: dict) -> ToolResult:
-        subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import time; from pathlib import Path; "
-                    f"time.sleep(2); Path({str(marker)!r}).write_text('escaped')"
-                ),
-            ],
-            check=True,
-        )
-        return ToolResult(success=True, output="child finished")
-
+    marker = str(tmp_path / "escaped.txt")
     tool = Tool(
         name="test.child",
         risk_level=RiskLevel.HIGH,
@@ -45,7 +46,13 @@ def test_timeout_kills_worker_and_child(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ToolTimeoutError):
-        LocalSandboxProvider().run(tool, handler, {}, profile, timeout_s=0.25)
+        LocalSandboxProvider().run(
+            tool,
+            _spawn_sleeping_child,
+            {"marker": marker},
+            profile,
+            timeout_s=0.25,
+        )
 
     time.sleep(0.5)
-    assert not marker.exists(), "child process survived the sandbox timeout"
+    assert not Path(marker).exists(), "child process survived the sandbox timeout"
