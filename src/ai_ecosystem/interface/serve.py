@@ -35,9 +35,9 @@ from ai_ecosystem.system.monitor.manager import SystemAwarenessManager
 from ai_ecosystem.system.monitor.probe import LocalSystemProbe
 from ai_ecosystem.tools import ToolRegistry, ToolRunner, filesystem_tools, git_tools, respond_tools, terminal_tools
 from ai_ecosystem.tools.registry import ToolHandler
+from ai_ecosystem.tools.registry.execution_ledger import ExecutionLedger
 
 log = logging.getLogger("ai_ecosystem.serve")
-
 
 @dataclass
 class Stack:
@@ -51,7 +51,6 @@ class Stack:
     workspace: str = ""
     auth_token: str | None = None
     dispatcher: BoundedDispatcher | None = None
-
 
 class BoundedDispatcher:
     """Fixed worker pool with bounded intake and cooperative shutdown."""
@@ -79,7 +78,6 @@ class BoundedDispatcher:
         self._stopped.set(); deadline = time.monotonic() + min(max(timeout_s, 0.0), 60.0)
         for worker in self._workers: worker.join(max(0.0, deadline - time.monotonic()))
 
-
 def load_or_create_token(path: str) -> str:
     try:
         with open(path, encoding="utf-8") as handle: token = handle.read().strip()
@@ -96,21 +94,15 @@ def load_or_create_token(path: str) -> str:
     except OSError: pass
     return token
 
-
 def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
     from ai_ecosystem.core.errors.exceptions import ModelUnavailableError
     router = ModelRouter(); providers: list[ModelProvider] = []
     http_provider = HttpChatModelProvider.from_secrets(EnvSecretsProvider())
     if http_provider is not None:
-        router.register(http_provider, ProviderProfile(provider_id=http_provider.provider_id, local=False, trusted=True,
-                                                       data_classes={DataClass.PUBLIC, DataClass.INTERNAL}, latency_class="standard"))
-        providers.append(http_provider); return router, providers, True
+        router.register(http_provider, ProviderProfile(provider_id=http_provider.provider_id, local=False, trusted=True, data_classes={DataClass.PUBLIC, DataClass.INTERNAL}, latency_class="standard")); providers.append(http_provider); return router, providers, True
     def missing(_: Any) -> ModelResponse:
         raise ModelUnavailableError("no model configured: set AI_ECO_MODEL_ENDPOINT (plus AI_ECO_MODEL_API_KEY for cloud providers, AI_ECO_MODEL_NAME for the model)")
-    stub = MockModelProvider("unconfigured", handler=missing)
-    router.register(stub, ProviderProfile(provider_id="unconfigured", local=True, data_classes=set(DataClass)))
-    return router, [], False
-
+    stub = MockModelProvider("unconfigured", handler=missing); router.register(stub, ProviderProfile(provider_id="unconfigured", local=True, data_classes=set(DataClass))); return router, [], False
 
 def build_stack(config: AppConfig | None = None, workspace: str = "workspace", auth_token: str | None = None, no_auth: bool = False) -> Stack:
     config = config or AppConfig.from_env(); workspace = os.path.abspath(workspace); os.makedirs(workspace, exist_ok=True)
@@ -122,9 +114,10 @@ def build_stack(config: AppConfig | None = None, workspace: str = "workspace", a
     for tool, handler in bundles: registry.register(tool, handler)
     floor = {"LOW": RiskLevel.LOW, "MEDIUM": RiskLevel.MEDIUM, "HIGH": RiskLevel.HIGH, "CRITICAL": RiskLevel.CRITICAL}.get(config.require_approval.strip().upper())
     approval_store = ApprovalStore(SqliteApprovalRepository(runtime.db))
-    authorizer = AuthorizationManager(registry, policy_engine=PolicyEngine(Policy(name="local-operator", auto_grant_up_to=RiskLevel.MEDIUM, deny_critical=False, approval_required_from=floor)),
-                                      context=RiskContext(agent_id="single-agent", root=workspace), allow_shells=config.allow_shells, approval_store=approval_store)
-    runner = ToolRunner(registry, authorizer, bus); router, providers, model_configured = build_router()
+    authorizer = AuthorizationManager(registry, policy_engine=PolicyEngine(Policy(name="local-operator", auto_grant_up_to=RiskLevel.MEDIUM, deny_critical=False, approval_required_from=floor)), context=RiskContext(agent_id="single-agent", root=workspace), allow_shells=config.allow_shells, approval_store=approval_store)
+    execution_ledger = ExecutionLedger(runtime.db)
+    execution_ledger.recover_unknowns()
+    runner = ToolRunner(registry, authorizer, bus, execution_ledger=execution_ledger); router, providers, model_configured = build_router()
     verifier = Verifier(repository=SqliteVerificationRepository(runtime.db), bus=bus).with_test_command(runner, registry)
     memories = MemoryStore(SqliteMemoryRepository(runtime.db), bus=bus); personalities = PersonalityStore(runtime.db, bus); preferences = PreferenceStore(runtime.db, bus)
     personalization = PersonalizationEngine(personalities, preferences, memories, bus); skills = SqliteSkillRepository(runtime.db).list()
@@ -132,19 +125,13 @@ def build_stack(config: AppConfig | None = None, workspace: str = "workspace", a
     try: awareness = SystemAwarenessManager(LocalSystemProbe(), bus=bus)
     except Exception: log.warning("system awareness unavailable")
     tokens: dict[str, CancellationToken] = {}; tokens_lock = threading.Lock(); dispatcher = BoundedDispatcher(max_workers=config.max_workers, max_queued=config.max_queued_tasks)
-
     def agent_factory() -> SingleAgent:
         import platform
         provider = router.select(RoutingRequirements()); tools = list(registry.list_tools())
-        required = {tool.name: set(tool.input_schema.get("required", [])) for tool in tools}
-        schemas = {tool.name: {"required": tool.input_schema.get("required", []), "properties": tool.input_schema.get("properties", {})} for tool in tools}
-        docs = {tool.name: {"description": tool.description, "required": tool.input_schema.get("required", []), "properties": tool.input_schema.get("properties", {})} for tool in tools}
+        required = {tool.name: set(tool.input_schema.get("required", [])) for tool in tools}; schemas = {tool.name: {"required": tool.input_schema.get("required", []), "properties": tool.input_schema.get("properties", {})} for tool in tools}; docs = {tool.name: {"description": tool.description, "required": tool.input_schema.get("required", []), "properties": tool.input_schema.get("properties", {})} for tool in tools}
         shell_hint = ("shell interpreters explicitly allowed; prefer direct executables" if config.allow_shells else f"{platform.system()}; shell interpreters blocked by policy; use direct executables and file tools")
-        planner = ModelReasoningBackend(provider, tool_arguments=required, tool_schemas=schemas, tool_docs=docs, platform_hint=shell_hint,
-            structured_requester=lambda request, model_cls: router.request_structured(RoutingRequirements(), request, model_cls))
-        return SingleAgent(runtime=runtime, router=router, requirements=RoutingRequirements(), registry=registry, runner=runner, planner=planner, verifier=verifier,
-                           memories=memories, personalization=personalization, executor_factory=lambda: ParallelExecutor(runner, registry, bus), bus=bus)
-
+        planner = ModelReasoningBackend(provider, tool_arguments=required, tool_schemas=schemas, tool_docs=docs, platform_hint=shell_hint, structured_requester=lambda request, model_cls: router.request_structured(RoutingRequirements(), request, model_cls))
+        return SingleAgent(runtime=runtime, router=router, requirements=RoutingRequirements(), registry=registry, runner=runner, planner=planner, verifier=verifier, memories=memories, personalization=personalization, executor_factory=lambda: ParallelExecutor(runner, registry, bus), bus=bus)
     def dispatch(task_id: str) -> None:
         token = CancellationToken()
         with tokens_lock: tokens[task_id] = token
@@ -170,11 +157,9 @@ def build_stack(config: AppConfig | None = None, workspace: str = "workspace", a
             except ApiError: log.error("could not enqueue recovery for %s", task.id)
         else:
             try:
-                runtime.manager.transition(task.id, TaskState.FAILED)
-                bus.publish(Event(event_type=EventType.TASK_FAILED, task_id=task.id, payload={"error": "interrupted before a resumable plan was persisted"}))
+                runtime.manager.transition(task.id, TaskState.FAILED); bus.publish(Event(event_type=EventType.TASK_FAILED, task_id=task.id, payload={"error": "interrupted before a resumable plan was persisted"}))
             except Exception: log.exception("could not settle interrupted task %s", task.id)
     return Stack(config=config, runtime=runtime, api=api, server=server, agent=agent, providers=providers, model_configured=model_configured, workspace=workspace, auth_token=token, dispatcher=dispatcher)
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Serve the AI Ecosystem local runtime API")
@@ -196,6 +181,5 @@ def main(argv: list[str] | None = None) -> int:
         if stack.dispatcher is not None: stack.dispatcher.shutdown()
         stack.runtime.shutdown()
     return 0
-
 
 if __name__ == "__main__": raise SystemExit(main())
