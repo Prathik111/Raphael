@@ -65,6 +65,8 @@ __all__ = [
     "RiskAssessment",
     "RiskLevel",
     "Skill",
+    "SkillStatus",
+    "SkillType",
     "StepState",
     "Task",
     "TaskState",
