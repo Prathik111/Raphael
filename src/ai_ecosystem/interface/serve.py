@@ -65,6 +65,7 @@ from ai_ecosystem.tools import (
 )
 from ai_ecosystem.tools.registry import ToolHandler
 from ai_ecosystem.tools.registry.execution_ledger import ExecutionLedger
+import contextlib
 
 log = logging.getLogger("ai_ecosystem.serve")
 
@@ -155,10 +156,8 @@ def load_or_create_token(path: str) -> str:
         raise RuntimeError("credential file exists but contains no token") from None
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(token)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o600)
-    except OSError:
-        pass
     return token
 
 

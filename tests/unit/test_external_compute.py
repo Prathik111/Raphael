@@ -214,7 +214,7 @@ def test_local_only_task_rejection():
 
 
 def test_cloud_safe_task_execution():
-    agent = _cloud_agent(allowed_tools=["compute"])
+    _cloud_agent(allowed_tools=["compute"])
     assert cloud_safe_plan(_plan("compute"), {"compute"})[0] is True
     assert cloud_safe_plan(_plan("terminal.execute"), {"compute"})[0] is False
 

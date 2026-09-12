@@ -192,9 +192,7 @@ class MemoryStore:
             return True
         if memory.scope is scope and memory.scope_id == scope_id:
             return True
-        if project_id and memory.scope is MemoryScope.PROJECT and memory.scope_id == project_id:
-            return True
-        return False
+        return bool(project_id and memory.scope is MemoryScope.PROJECT and memory.scope_id == project_id)
 
     @staticmethod
     def _relevance(query_words: set[str], memory: Memory) -> float:
@@ -328,9 +326,8 @@ class MemoryStore:
                 memory.retention_days is not None
                 and (moment - memory.created_at).total_seconds() / 86400.0 > memory.retention_days
             )
-            if expired_by_date or expired_by_retention:
-                if self.delete(memory.id):
-                    purged.append(memory.id)
+            if (expired_by_date or expired_by_retention) and self.delete(memory.id):
+                purged.append(memory.id)
         return purged
 
     def list_cloud_eligible(self) -> list[Memory]:

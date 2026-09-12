@@ -62,9 +62,7 @@ class ModelRouter:
             )
         if cls is DataClass.PERSONAL:
             return profile.local or (profile.trusted and cls in profile.data_classes)
-        if cls not in profile.data_classes and not profile.local:
-            return False
-        return True
+        return not (cls not in profile.data_classes and not profile.local)
 
     def candidates(self, requirements: RoutingRequirements) -> list[ModelProvider]:
         ranked: list[tuple[float, int, str, ModelProvider]] = []

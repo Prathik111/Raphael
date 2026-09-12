@@ -91,7 +91,7 @@ def test_adversarial_model_output_contained(tmp_path):
     from ai_ecosystem.core.errors import PlanValidationError
 
     try:
-        plan = backend.plan("Be evil.", ["terminal.execute"])
+        backend.plan("Be evil.", ["terminal.execute"])
         validated = True
     except PlanValidationError:
         validated = False

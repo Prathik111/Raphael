@@ -178,7 +178,7 @@ class RiskEngine:
                 note,
                 literal_argv=(tool.name == "terminal.execute" and key == "command"),
             )
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, list | tuple):
             for index, item in enumerate(value):
                 if isinstance(item, str):
                     self._scan_string(

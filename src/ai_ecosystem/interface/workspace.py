@@ -165,7 +165,7 @@ def _scan_value(value: Any) -> None:
             if lowered in _FORBIDDEN_KEYS or _is_handler_key(str(key)):
                 raise DomainValidationError(f"forbidden nested key {key!r}")
             _scan_value(item)
-    elif isinstance(value, (list, tuple, set, frozenset)):
+    elif isinstance(value, list | tuple | set | frozenset):
         for item in value:
             _scan_value(item)
 
@@ -359,7 +359,7 @@ class WorkspaceManager:
         if not 0.0 <= salience <= 1.0:
             raise DomainValidationError("salience must be within [0, 1]")
         raw_affordances = update.get("affordances", [])
-        if not isinstance(raw_affordances, (list, tuple)):
+        if not isinstance(raw_affordances, list | tuple):
             raise DomainValidationError("affordances must be a list")
         if any(not isinstance(name, str) for name in raw_affordances):
             raise DomainValidationError("affordances must be strings")

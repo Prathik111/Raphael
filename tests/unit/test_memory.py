@@ -184,10 +184,9 @@ def test_14_transaction_rollback():
     db.migrate()
     try:
         repo = SqliteMemoryRepository(db)
-        with pytest.raises(RuntimeError):
-            with db.transaction():
-                repo.create(Memory(content="doomed"))
-                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError), db.transaction():
+            repo.create(Memory(content="doomed"))
+            raise RuntimeError("boom")
         assert repo.list() == []
     finally:
         db.close()

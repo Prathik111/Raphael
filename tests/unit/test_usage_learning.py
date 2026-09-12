@@ -204,8 +204,8 @@ def test_14_sensitive_content_not_captured(db):
     observer = _observer(db, ObservationMode.LOCAL_PERSISTENCE)
     observer.observe_tool("filesystem.read", True)
     stored = observer.stored_events()[0]
-    dumped = stored.model_dump_json().lower()
-    assert "arguments" not in dumped or True  # schema has no such field at all
+    stored.model_dump_json().lower()
+    assert True  # schema has no such field at all
     assert stored.metadata == {}
     assert "content" not in type(stored).model_fields
 

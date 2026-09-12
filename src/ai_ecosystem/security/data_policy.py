@@ -88,7 +88,7 @@ def _contains_secret(value: object) -> bool:
             looks_secret(str(k)) or _contains_secret(v) or looks_like_secret_value(v)
             for k, v in value.items()
         )
-    if isinstance(value, (list, tuple, set, frozenset)):
+    if isinstance(value, list | tuple | set | frozenset):
         return any(_contains_secret(v) for v in value)
     return looks_like_secret_value(value)
 

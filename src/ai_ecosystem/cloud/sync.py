@@ -296,7 +296,7 @@ class SyncManager:
         if local is None:
             raise DomainValidationError(f"unknown object {object_id!r}")
         try:
-            remote_versions = self._transport.list_versions()
+            self._transport.list_versions()
         except (ConnectionError, OSError) as exc:
             return SyncResult(
                 object_id=object_id,

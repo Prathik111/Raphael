@@ -185,9 +185,7 @@ class ComputeRouter:
             return False
         if requirements.model and requirements.model not in caps.models:
             return False
-        if requirements.network and not caps.network:
-            return False
-        return True
+        return not (requirements.network and not caps.network)
 
     def _permitted(
         self, name: str, caps: ProviderCapabilities, requirements: ComputeRequirements | None = None

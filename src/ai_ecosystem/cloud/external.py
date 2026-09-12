@@ -67,7 +67,7 @@ def _contains_secrets(payload: Any) -> bool:
         return any(
             looks_secret(str(key)) or _contains_secrets(value) for key, value in payload.items()
         )
-    if isinstance(payload, (list, tuple)):
+    if isinstance(payload, list | tuple):
         return any(_contains_secrets(item) for item in payload)
     return looks_like_secret_value(payload)
 

@@ -11,6 +11,7 @@ from ai_ecosystem.core.errors.exceptions import ToolExecutionError, ToolTimeoutE
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.tools.registry.registry import ToolHandler
+import contextlib
 
 OUTPUT_CAP = 100_000
 CONTRACT_TIMEOUT_S = 120.0
@@ -76,10 +77,8 @@ def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
             return
         except (OSError, subprocess.TimeoutExpired):
             pass
-    try:
+    with contextlib.suppress(OSError):
         proc.kill()
-    except OSError:
-        pass
 
 
 def _run(arguments: dict, root: object, env_allowlist: frozenset[str] | None = None) -> ToolResult:
