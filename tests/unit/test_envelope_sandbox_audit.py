@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from ai_ecosystem.core.errors import DomainValidationError
+from ai_ecosystem.core.errors import DomainValidationError, ToolExecutionError
 from ai_ecosystem.core.models import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.core.persistence import Database
@@ -75,24 +75,33 @@ def test_sandbox_timeout():
 
 def test_sandbox_filesystem_restriction(tmp_path):
     provider = LocalSandboxProvider()
-    seen = {}
 
     def probe(args):
         import os as _os
 
-        seen["cwd"] = args.get("cwd")
-        seen["exists"] = _os.path.isdir(args.get("cwd", ""))
-        return ToolResult(success=True, output="probed")
+        cwd = args.get("cwd", "")
+        return ToolResult(
+            success=True,
+            output=f"cwd={cwd}\nexists={_os.path.isdir(cwd)}",
+        )
 
     tool = Tool(name="walk", input_schema={"required": []}, capabilities=["subprocess"])
-    provider.run(tool, probe, {}, SandboxProfile(name="t", fs_root=str(tmp_path)), 5.0)
-    assert seen["cwd"] == str(tmp_path)
-    assert seen["exists"] is True
+    result = provider.run(
+        tool, probe, {}, SandboxProfile(name="t", fs_root=str(tmp_path)), 5.0
+    )
+    assert result.success
+    assert f"cwd={tmp_path}" in result.output
+    assert "exists=True" in result.output
 
 
 def test_sandbox_network_restriction():
     provider = LocalSandboxProvider()
-    tool = Tool(name="fetch", input_schema={"required": []}, capabilities=["network"])
+    tool = Tool(
+        name="fetch",
+        input_schema={"required": []},
+        capabilities=["network"],
+        network_access=True,
+    )
     with pytest.raises(Exception, match="network use denied"):
         provider.run(
             tool,
@@ -114,16 +123,15 @@ def test_sandbox_network_restriction():
 def test_sandbox_env_scrub():
     os.environ["AI_ECO_TEST_SECRET_KEY"] = "supersecret"
     provider = LocalSandboxProvider()
-    seen = {}
 
     def probe(args):
         import os as _os
 
-        seen["leaked"] = _os.environ.get("AI_ECO_TEST_SECRET_KEY")
-        return ToolResult(success=True, output="ok")
+        value = _os.environ.get("AI_ECO_TEST_SECRET_KEY")
+        return ToolResult(success=True, output=f"secret={value!r}")
 
     try:
-        provider.run(
+        result = provider.run(
             Tool(name="probe", input_schema={"required": []}),
             probe,
             {},
@@ -132,8 +140,9 @@ def test_sandbox_env_scrub():
         )
     finally:
         os.environ.pop("AI_ECO_TEST_SECRET_KEY", None)
-    assert seen["leaked"] is None
-    assert "AI_ECO_TEST_SECRET_KEY" not in os.environ  # restored
+    assert result.success
+    assert "secret=None" in result.output
+    assert "AI_ECO_TEST_SECRET_KEY" not in os.environ
 
 
 def test_sandbox_cleanup_on_crash():
@@ -142,7 +151,7 @@ def test_sandbox_cleanup_on_crash():
     def boom(args):
         raise RuntimeError("handler exploded")
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ToolExecutionError, match="handler exploded"):
         provider.run(
             Tool(name="boom", input_schema={"required": []}),
             boom,
@@ -150,7 +159,6 @@ def test_sandbox_cleanup_on_crash():
             SandboxProfile(name="t"),
             5.0,
         )
-    # Lock released: the provider still works afterwards.
     result = provider.run(
         Tool(name="ok", input_schema={"required": []}),
         lambda args: ToolResult(success=True, output="ok"),
@@ -188,7 +196,7 @@ def test_sandbox_requires_authorization_first(tmp_path):
         sandbox_profiles={"strict": SandboxProfile(name="strict")},
     )
     result = runner.run(registry.build_call("t", "danger", {}))
-    assert result.success is False  # HIGH denied by default policy first
+    assert result.success is False
     assert "denied" in result.error
 
 
@@ -203,7 +211,7 @@ def test_sandbox_fail_closed_without_provider():
         ),
         lambda args: ToolResult(success=True, output="x"),
     )
-    runner = ToolRunner(registry, GrantAllAuthorizer())  # no sandbox
+    runner = ToolRunner(registry, GrantAllAuthorizer())
     result = runner.run(registry.build_call("t", "danger", {}))
     assert result.success is False
     assert "sandbox" in result.error
@@ -292,7 +300,6 @@ def test_audit_integrity_and_tampering(tmp_path):
         first = log.record(action="tool.execute", actor="a1")
         log.record(action="tool.execute", actor="a1")
         assert log.verify()[0] is True
-        # Attacker rewrites history directly in the database.
         db.execute("UPDATE audit_log SET snapshot = ? WHERE id = ?", ('{"forged": true}', first.id))
         ok, offender = log.verify()
         assert ok is False
@@ -324,11 +331,10 @@ def test_audit_rotation_and_retention(tmp_path):
         log.record(action="tool.execute", actor="a2")
         archive = str(tmp_path / "audit.jsonl")
         assert log.rotate(archive) == 2
-        assert log.verify()[0] is True  # fresh chain with checkpoint
-        assert len(log.query()) == 1  # only the checkpoint remains
+        assert log.verify()[0] is True
+        assert len(log.query()) == 1
         lines = open(archive).read().strip().splitlines()
-        assert len(lines) == 2  # retention via archival, nothing lost
-        # Retention of aged data archives instead of silently dropping.
+        assert len(lines) == 2
         assert log.purge_older_than(days=-1, archive_path=archive) >= 0
         assert log.verify()[0] is True
     finally:
