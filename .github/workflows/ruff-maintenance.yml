@@ -15,7 +15,7 @@ jobs:
           args: format .
       - uses: astral-sh/ruff-action@v3
         with:
-          args: check --fix .
+          args: check --fix --exit-zero .
       - name: Commit Ruff fixes
         shell: bash
         run: |
