@@ -20,7 +20,9 @@ from ai_ecosystem.core.models.domain import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from ai_ecosystem.agent.multi.messages import AgentMessage
+    from ai_ecosystem.learning.models import LearningProposal, UsageEvent, UsagePattern
+    from ai_ecosystem.system.monitor.models import SystemSnapshot
 
 T = TypeVar("T")
 
