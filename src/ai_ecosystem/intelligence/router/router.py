@@ -42,8 +42,9 @@ class ModelRouter:
         self._profiles: dict[str, ProviderProfile] = {}
 
     def register(self, provider: ModelProvider, profile: ProviderProfile) -> None:
-        if profile.provider_id and profile.provider_id != provider.provider_id:
-            raise ValueError("provider profile id does not match provider id")
+        # The provider object is the authoritative identity. Normalize the
+        # profile to it rather than rejecting stale metadata during a provider
+        # switch or test/restore path.
         self._providers[provider.provider_id] = provider
         self._profiles[provider.provider_id] = profile.model_copy(
             update={"provider_id": provider.provider_id}
