@@ -45,8 +45,7 @@ class LearningPipeline:
         self._min_confidence = min_confidence
         self._bus = bus
 
-    def generate(self, events: list[UsageEvent],
-                 scope: str = "") -> list[LearningProposal]:
+    def generate(self, events: list[UsageEvent], scope: str = "") -> list[LearningProposal]:
         """Detect patterns and file validated proposals (persisted)."""
         created = []
         for pattern in self._detector.detect(events, scope):
@@ -68,9 +67,13 @@ class LearningPipeline:
                 return False, "critical learning content refused"
         return True, "proposal valid"
 
-    def approve(self, proposal_id: str, target: str = "memory",
-                stores: dict[str, Any] | None = None,
-                project_id: str = "") -> Any:
+    def approve(
+        self,
+        proposal_id: str,
+        target: str = "memory",
+        stores: dict[str, Any] | None = None,
+        project_id: str = "",
+    ) -> Any:
         """Adopt a validated proposal (explicit operator action)."""
         proposal = self._proposals.get(proposal_id)
         if proposal is None:
@@ -90,8 +93,7 @@ class LearningPipeline:
             preferences = stores.get("preferences")
             if preferences is None:
                 raise DomainValidationError("no preference store provided")
-            created = self._engine.adopt_to_preferences(
-                proposal, preferences, project_id)
+            created = self._engine.adopt_to_preferences(proposal, preferences, project_id)
         else:
             raise DomainValidationError(f"unknown adoption target {target!r}")
         proposal.provenance["adopted_object"] = getattr(created, "id", "")
@@ -107,8 +109,7 @@ class LearningPipeline:
         rejected = self._engine.reject(proposal, reason)
         return self._proposals.update(rejected)
 
-    def rollback(self, proposal_id: str,
-                 stores: dict[str, Any] | None = None) -> bool:
+    def rollback(self, proposal_id: str, stores: dict[str, Any] | None = None) -> bool:
         """Reverse an adoption (memory delete / preference revert)."""
         proposal = self._proposals.get(proposal_id)
         if proposal is None:
@@ -135,8 +136,7 @@ class LearningPipeline:
         self._proposals.update(proposal)
         return True
 
-    def _revert_preference(self, preferences: Any,
-                           proposal: LearningProposal) -> None:
+    def _revert_preference(self, preferences: Any, proposal: LearningProposal) -> None:
         from ai_ecosystem.personalization.personality.profiles import PreferenceProfile
 
         scope_id = proposal.provenance.get("adopted_scope_id", "")
@@ -147,25 +147,26 @@ class LearningPipeline:
         else:
             current = preferences.get_global()
         revert = PreferenceProfile(
-            scope=current.scope, scope_id=current.scope_id,
-            preferred_workflows=[w for w in current.preferred_workflows
-                                 if w != proposal.content
-                                 and proposal.content not in w],
+            scope=current.scope,
+            scope_id=current.scope_id,
+            preferred_workflows=[
+                w
+                for w in current.preferred_workflows
+                if w != proposal.content and proposal.content not in w
+            ],
             preferred_tools=list(current.preferred_tools),
             output_format=current.output_format,
-            defaults={k: v for k, v in current.defaults.items()
-                      if proposal.content not in str(v)},
+            defaults={k: v for k, v in current.defaults.items() if proposal.content not in str(v)},
         )
         preferences.save(revert)
 
-    def detect_conflicts(
-            self, proposals: list[LearningProposal]) -> list[tuple[str, str]]:
+    def detect_conflicts(self, proposals: list[LearningProposal]) -> list[tuple[str, str]]:
         """Pairs of same-scope proposals with overlapping keywords."""
         from ai_ecosystem.personalization.memory.store import keywords
 
         pairs = []
         for index, first in enumerate(proposals):
-            for second in proposals[index + 1:]:
+            for second in proposals[index + 1 :]:
                 if first.scope != second.scope:
                     continue
                 if keywords(first.content) & keywords(second.content):

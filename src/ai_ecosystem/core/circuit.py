@@ -59,7 +59,8 @@ class CircuitBreaker:
 
     def _state_unlocked(self) -> BreakerState:
         if self._state is BreakerState.OPEN and (
-                self._clock() - self._opened_at >= self._reset_timeout):
+            self._clock() - self._opened_at >= self._reset_timeout
+        ):
             self._state = BreakerState.HALF_OPEN
             self._half_open_in_flight = False
         return self._state
@@ -91,8 +92,7 @@ class CircuitBreaker:
     def _record_failure(self) -> None:
         with self._lock:
             self._failures += 1
-            if self._state is BreakerState.HALF_OPEN or (
-                    self._failures >= self._threshold):
+            if self._state is BreakerState.HALF_OPEN or (self._failures >= self._threshold):
                 self._state = BreakerState.OPEN
                 self._opened_at = self._clock()
                 self._half_open_in_flight = False

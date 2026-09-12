@@ -69,7 +69,8 @@ class SourceCollector:
         for attempt in range(1, self._max_attempts + 1):
             attempts = attempt
             call = self._registry.build_call(
-                task_id, self._search_tool,
+                task_id,
+                self._search_tool,
                 {"query": query.query, "max_results": query.max_sources},
             )
             try:
@@ -106,10 +107,13 @@ class SourceCollector:
                 continue
             key = source_key(source)
             if key in seen:
-                collected.duplicates.append(DuplicateRef(
-                    source_id=source.id, duplicate_of=seen[key],
-                    reason="identical source reference already collected",
-                ))
+                collected.duplicates.append(
+                    DuplicateRef(
+                        source_id=source.id,
+                        duplicate_of=seen[key],
+                        reason="identical source reference already collected",
+                    )
+                )
                 continue
             seen[key] = source.id
             collected.sources.append(source)

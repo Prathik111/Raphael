@@ -100,7 +100,8 @@ class RecoveryEngine:
     ) -> RecoveryOutcome:
         """Execute, verify, and recover until terminal (bounded)."""
         return self.run_with_prior(
-            task_id, plan, execute_fn, verify_fn, arguments, max_attempts, None, None)
+            task_id, plan, execute_fn, verify_fn, arguments, max_attempts, None, None
+        )
 
     def run_with_prior(
         self,
@@ -132,13 +133,19 @@ class RecoveryEngine:
         verification = prior_verification
         if result is not None:
             executions = 1
-            if (verification is not None
-                    and result.status is OverallStatus.COMPLETED
-                    and verification.status is VerificationStatus.PASSED):
+            if (
+                verification is not None
+                and result.status is OverallStatus.COMPLETED
+                and verification.status is VerificationStatus.PASSED
+            ):
                 return RecoveryOutcome(
-                    task_id=task_id, status=OutcomeStatus.RECOVERED,
-                    attempts=0, retries=0, replans=0,
-                    plan_versions=versions, audit=audit,
+                    task_id=task_id,
+                    status=OutcomeStatus.RECOVERED,
+                    attempts=0,
+                    retries=0,
+                    replans=0,
+                    plan_versions=versions,
+                    audit=audit,
                     final_verification=verification,
                     reason="verification passed",
                 )
@@ -152,8 +159,15 @@ class RecoveryEngine:
                 verification = None
                 if result.status is OverallStatus.CANCELLED:
                     return self._terminal(
-                        task_id, OutcomeStatus.FAILED, executions, retries, replans,
-                        versions, audit, verification, "execution cancelled",
+                        task_id,
+                        OutcomeStatus.FAILED,
+                        executions,
+                        retries,
+                        replans,
+                        versions,
+                        audit,
+                        verification,
+                        "execution cancelled",
                     )
             if verification is None:
                 try:
@@ -161,14 +175,24 @@ class RecoveryEngine:
                 except Exception as exc:  # noqa: BLE001 -- verification must not escape
                     classification = FailureClassifier.classify_exception(exc)
                     return self._give_up(
-                        task_id, executions, retries, replans, versions, audit,
-                        classification, f"verification raised: {exc}",
+                        task_id,
+                        executions,
+                        retries,
+                        replans,
+                        versions,
+                        audit,
+                        classification,
+                        f"verification raised: {exc}",
                     )
             if verification.status is VerificationStatus.PASSED:
                 return RecoveryOutcome(
-                    task_id=task_id, status=OutcomeStatus.RECOVERED,
-                    attempts=executions, retries=retries, replans=replans,
-                    plan_versions=versions, audit=audit,
+                    task_id=task_id,
+                    status=OutcomeStatus.RECOVERED,
+                    attempts=executions,
+                    retries=retries,
+                    replans=replans,
+                    plan_versions=versions,
+                    audit=audit,
                     final_verification=verification,
                     reason="verification passed",
                 )
@@ -192,23 +216,39 @@ class RecoveryEngine:
             if action is RecoveryAction.REPLAN:
                 if self._planner is None:
                     return self._terminal(
-                        task_id, OutcomeStatus.FAILED, executions, retries, replans,
-                        versions, audit, verification, "replan requested but no planner",
+                        task_id,
+                        OutcomeStatus.FAILED,
+                        executions,
+                        retries,
+                        replans,
+                        versions,
+                        audit,
+                        verification,
+                        "replan requested but no planner",
                     )
                 try:
                     candidate = self._planner.request_replan(
                         task_id, current, classification.detail, seen
                     )
                 except (PlanValidationError, AuthorizationDeniedError) as exc:
-                    audit.append(RecoveryRecord(
-                        attempt=executions, classification=classification.failure_class,
-                        action=RecoveryAction.FAIL,
-                        reason=f"replacement plan rejected: {exc}",
-                        verification=verification.status.value,
-                    ))
+                    audit.append(
+                        RecoveryRecord(
+                            attempt=executions,
+                            classification=classification.failure_class,
+                            action=RecoveryAction.FAIL,
+                            reason=f"replacement plan rejected: {exc}",
+                            verification=verification.status.value,
+                        )
+                    )
                     return self._terminal(
-                        task_id, OutcomeStatus.FAILED, executions, retries, replans,
-                        versions, audit, verification,
+                        task_id,
+                        OutcomeStatus.FAILED,
+                        executions,
+                        retries,
+                        replans,
+                        versions,
+                        audit,
+                        verification,
                         f"replacement plan rejected: {exc}",
                     )
                 replans += 1
@@ -220,28 +260,54 @@ class RecoveryEngine:
                 continue
             if action is RecoveryAction.SKIP:
                 return self._terminal(
-                    task_id, OutcomeStatus.PARTIAL, executions, retries, replans,
-                    versions, audit, verification,
+                    task_id,
+                    OutcomeStatus.PARTIAL,
+                    executions,
+                    retries,
+                    replans,
+                    versions,
+                    audit,
+                    verification,
                     f"skipped after {classification.failure_class.value}",
                 )
             if action is RecoveryAction.ESCALATE:
                 self._escalation.escalate(
-                    task_id, classification.detail,
+                    task_id,
+                    classification.detail,
                     [verification.reason, verification.status.value],
                 )
                 return self._terminal(
-                    task_id, OutcomeStatus.ESCALATED, executions, retries, replans,
-                    versions, audit, verification,
+                    task_id,
+                    OutcomeStatus.ESCALATED,
+                    executions,
+                    retries,
+                    replans,
+                    versions,
+                    audit,
+                    verification,
                     f"escalated: {classification.detail}",
                 )
             return self._terminal(
-                task_id, OutcomeStatus.FAILED, executions, retries, replans,
-                versions, audit, verification,
+                task_id,
+                OutcomeStatus.FAILED,
+                executions,
+                retries,
+                replans,
+                versions,
+                audit,
+                verification,
                 f"failed: {classification.detail}",
             )
         return self._terminal(
-            task_id, OutcomeStatus.FAILED, executions, retries, replans,
-            versions, audit, verification, "attempt budget exhausted",
+            task_id,
+            OutcomeStatus.FAILED,
+            executions,
+            retries,
+            replans,
+            versions,
+            audit,
+            verification,
+            "attempt budget exhausted",
         )
 
     def _classify(
@@ -263,7 +329,8 @@ class RecoveryEngine:
             if result.skipped:
                 return Classification(
                     FailureClass.DEPENDENCY_FAILURE,
-                    f"steps skipped: {', '.join(result.skipped)}", "execution",
+                    f"steps skipped: {', '.join(result.skipped)}",
+                    "execution",
                 )
             return Classification(FailureClass.UNKNOWN, "execution failed", "execution")
         return FailureClassifier.classify_verification(verification)
@@ -274,40 +341,73 @@ class RecoveryEngine:
         return result.all_tool_results()
 
     def _give_up(
-        self, task_id: str, attempt: int, retries: int, replans: int,
-        versions: list[str], audit: list[RecoveryRecord],
-        classification: Classification, reason: str,
+        self,
+        task_id: str,
+        attempt: int,
+        retries: int,
+        replans: int,
+        versions: list[str],
+        audit: list[RecoveryRecord],
+        classification: Classification,
+        reason: str,
     ) -> RecoveryOutcome:
-        audit.append(RecoveryRecord(
-            attempt=attempt, classification=classification.failure_class,
-            action=RecoveryAction.FAIL, reason=reason, verification="ERROR",
-        ))
+        audit.append(
+            RecoveryRecord(
+                attempt=attempt,
+                classification=classification.failure_class,
+                action=RecoveryAction.FAIL,
+                reason=reason,
+                verification="ERROR",
+            )
+        )
         self._emit_decided(task_id, audit[-1])
         return self._terminal(
-            task_id, OutcomeStatus.FAILED, attempt, retries, replans,
-            versions, audit, None, reason,
+            task_id,
+            OutcomeStatus.FAILED,
+            attempt,
+            retries,
+            replans,
+            versions,
+            audit,
+            None,
+            reason,
         )
 
     def _terminal(
-        self, task_id: str, status: OutcomeStatus, attempt: int,
-        retries: int, replans: int, versions: list[str],
-        audit: list[RecoveryRecord], verification: VerificationResult | None,
+        self,
+        task_id: str,
+        status: OutcomeStatus,
+        attempt: int,
+        retries: int,
+        replans: int,
+        versions: list[str],
+        audit: list[RecoveryRecord],
+        verification: VerificationResult | None,
         reason: str,
     ) -> RecoveryOutcome:
         return RecoveryOutcome(
-            task_id=task_id, status=status, attempts=attempt,
-            retries=retries, replans=replans, plan_versions=versions,
-            audit=audit, final_verification=verification, reason=reason,
+            task_id=task_id,
+            status=status,
+            attempts=attempt,
+            retries=retries,
+            replans=replans,
+            plan_versions=versions,
+            audit=audit,
+            final_verification=verification,
+            reason=reason,
         )
 
     def _emit_decided(self, task_id: str, record: RecoveryRecord) -> None:
         if self._bus is not None:
-            self._bus.publish(Event(
-                event_type=EventType.RECOVERY_DECIDED, task_id=task_id,
-                payload={
-                    "attempt": record.attempt,
-                    "classification": record.classification.value,
-                    "action": record.action.value,
-                    "reason": record.reason,
-                },
-            ))
+            self._bus.publish(
+                Event(
+                    event_type=EventType.RECOVERY_DECIDED,
+                    task_id=task_id,
+                    payload={
+                        "attempt": record.attempt,
+                        "classification": record.classification.value,
+                        "action": record.action.value,
+                        "reason": record.reason,
+                    },
+                )
+            )

@@ -10,7 +10,11 @@ from pydantic import BaseModel
 
 from ai_ecosystem.agent.planner.validator import PlanValidator
 from ai_ecosystem.core.models.domain import Plan
-from ai_ecosystem.intelligence.models.providers import ModelProvider, ModelRequest, request_structured
+from ai_ecosystem.intelligence.models.providers import (
+    ModelProvider,
+    ModelRequest,
+    request_structured,
+)
 
 
 class ReasoningBackend(ABC):
@@ -66,16 +70,23 @@ class ModelReasoningBackend(ReasoningBackend):
         for name, doc in self._tool_docs.items():
             if isinstance(doc, dict):
                 required.setdefault(name, set(doc.get("required", [])))
-                schemas.setdefault(name, {
-                    "required": doc.get("required", []),
-                    "properties": doc.get("properties", {}),
-                })
+                schemas.setdefault(
+                    name,
+                    {
+                        "required": doc.get("required", []),
+                        "properties": doc.get("properties", {}),
+                    },
+                )
         return required, schemas
 
-    def _prompt_body(self, goal: str, available_tools: list[str], error: str = "", context: str = "") -> dict:
+    def _prompt_body(
+        self, goal: str, available_tools: list[str], error: str = "", context: str = ""
+    ) -> dict:
         body: dict = {"goal": goal, "available_tools": available_tools}
         if self._tool_docs:
-            body["tool_reference"] = {name: self._tool_docs[name] for name in available_tools if name in self._tool_docs}
+            body["tool_reference"] = {
+                name: self._tool_docs[name] for name in available_tools if name in self._tool_docs
+            }
         if self._platform_hint:
             body["platform"] = self._platform_hint
         if context.strip():
@@ -86,7 +97,9 @@ class ModelReasoningBackend(ReasoningBackend):
             }
         if error:
             body["previous_draft_rejected"] = error[:800]
-            body["instruction"] = "Return ONLY the corrected JSON object and fix the rejected fields."
+            body["instruction"] = (
+                "Return ONLY the corrected JSON object and fix the rejected fields."
+            )
         return body
 
     def _structured(self, request: ModelRequest, model_cls: type[BaseModel]) -> Plan:

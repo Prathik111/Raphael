@@ -28,8 +28,9 @@ from ai_ecosystem.system.monitor.models import (
 )
 
 
-def classify_pressure(cpu: float | None, memory: float | None,
-                      storage: float | None) -> PressureLevel:
+def classify_pressure(
+    cpu: float | None, memory: float | None, storage: float | None
+) -> PressureLevel:
     """Worst of the known signals; UNKNOWN when nothing is known."""
     known = [v for v in (cpu, memory, storage) if v is not None]
     if not known:
@@ -58,7 +59,8 @@ class MockProbe(SystemProbe):
 
     def __init__(self, snapshot: SystemSnapshot | None = None) -> None:
         self._snapshot = snapshot or SystemSnapshot(
-            operating_system="MockOS", architecture="x86_64")
+            operating_system="MockOS", architecture="x86_64"
+        )
         self.calls = 0
 
     def snapshot(self, include_host: bool = False) -> SystemSnapshot:
@@ -111,11 +113,13 @@ class LocalSystemProbe(SystemProbe):
                 for proc in psutil.process_iter(["name", "cpu_percent", "memory_info"]):
                     info = proc.info
                     rss = info.get("memory_info").rss if info.get("memory_info") else 0
-                    processes.append(ProcessInfo(
-                        name=str(info.get("name") or "?"),
-                        cpu_percent=info.get("cpu_percent"),
-                        memory_bytes=int(rss or 0),
-                    ))
+                    processes.append(
+                        ProcessInfo(
+                            name=str(info.get("name") or "?"),
+                            cpu_percent=info.get("cpu_percent"),
+                            memory_bytes=int(rss or 0),
+                        )
+                    )
                     if len(processes) >= 50:
                         break
             except Exception:  # noqa: BLE001 -- degraded snapshot beats no snapshot
@@ -125,11 +129,14 @@ class LocalSystemProbe(SystemProbe):
             try:
                 usage = shutil.disk_usage(mount)
                 percent = (usage.used / usage.total * 100.0) if usage.total else None
-                storage.append(StorageVolume(
-                    mount=mount, total_bytes=usage.total,
-                    available_bytes=usage.free,
-                    utilization_percent=percent,
-                ))
+                storage.append(
+                    StorageVolume(
+                        mount=mount,
+                        total_bytes=usage.total,
+                        available_bytes=usage.free,
+                        utilization_percent=percent,
+                    )
+                )
             except OSError:
                 continue
         gpus = self._detect_gpus()
@@ -152,10 +159,15 @@ class LocalSystemProbe(SystemProbe):
             operating_system=f"{platform.system()} {platform.release()}".strip(),
             architecture=platform.machine(),
             hostname=platform.node() if include_host else "",
-            cpu=cpu, memory=memory, gpus=gpus, storage=storage,
-            processes=processes, capabilities=capabilities,
+            cpu=cpu,
+            memory=memory,
+            gpus=gpus,
+            storage=storage,
+            processes=processes,
+            capabilities=capabilities,
             pressure=classify_pressure(
-                cpu.utilization_percent, memory.utilization_percent, worst_storage),
+                cpu.utilization_percent, memory.utilization_percent, worst_storage
+            ),
             collected_at=utcnow(),
         )
 
