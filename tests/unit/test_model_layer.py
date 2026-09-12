@@ -108,7 +108,7 @@ def test_router_fallback_on_provider_failure():
 
     router.register(
         MockModelProvider("primary", ModelCapabilities(), handler=fail),
-        ProviderProfile(provider_id="primary", cost_per_1k=0.0),
+        ProviderProfile(provider_id="primary", local=True, cost_per_1k=0.0),
     )
     router.register(
         MockModelProvider(
@@ -116,7 +116,7 @@ def test_router_fallback_on_provider_failure():
             ModelCapabilities(),
             handler=lambda req: ModelResponse(text="backup-answer"),
         ),
-        ProviderProfile(provider_id="backup", cost_per_1k=5.0),
+        ProviderProfile(provider_id="backup", local=True, cost_per_1k=5.0),
     )
     response = router.complete(RoutingRequirements(), ModelRequest(prompt="p"))
     assert response.text == "backup-answer"
@@ -130,7 +130,7 @@ def test_router_raises_last_error_when_all_fail():
 
     router.register(
         MockModelProvider("only", ModelCapabilities(), handler=fail),
-        ProviderProfile(provider_id="only"),
+        ProviderProfile(provider_id="only", local=True),
     )
     with pytest.raises(ModelUnavailableError):
         router.complete(RoutingRequirements(), ModelRequest(prompt="p"))
@@ -169,8 +169,8 @@ def _http_provider(monkeypatch, payload, status=200):
             self._body = body
             self.code = code
 
-        def read(self):
-            return self._body
+        def read(self, size=-1):
+            return self._body if size < 0 else self._body[:size]
 
         def __enter__(self):
             return self
@@ -299,13 +299,13 @@ def test_planner_repairs_rejected_draft():
     def handle(req):
         calls.append(req.prompt)
         if len(calls) == 1:
-            return ModelResponse(text='{"goal": "g"}')  # missing steps
+            return ModelResponse(text='{"goal": "g"}')
         return ModelResponse(text=good)
 
     backend = ModelReasoningBackend(MockModelProvider("m", handler=handle))
     plan = backend.plan("g", ["work"])
     assert [s.id for s in plan.steps] == ["s1"]
-    assert len(calls) == 2  # draft + one repair
+    assert len(calls) == 2
     assert "rejected" in calls[1]
 
 
