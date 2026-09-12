@@ -113,24 +113,13 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, self.api.list_tasks())
             elif method == "GET" and len(parts) == 2 and parts[0] == "tasks":
                 self._send(200, self.api.get_task(parts[1]))
-            elif (
-                method == "GET" and len(parts) == 3 and parts[0] == "tasks" and parts[2] == "status"
-            ):
+            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" and parts[2] == "status":
                 self._send(200, self.api.get_task_status(parts[1]))
-            elif (
-                method == "GET" and len(parts) == 3 and parts[0] == "tasks" and parts[2] == "result"
-            ):
+            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" and parts[2] == "result":
                 self._send(200, self.api.get_task_result(parts[1]))
-            elif (
-                method == "POST"
-                and len(parts) == 3
-                and parts[0] == "tasks"
-                and parts[2] == "cancel"
-            ):
+            elif method == "POST" and len(parts) == 3 and parts[0] == "tasks" and parts[2] == "cancel":
                 self._send(200, self.api.cancel_task(parts[1]))
-            elif (
-                method == "GET" and len(parts) == 3 and parts[0] == "tasks" and parts[2] == "events"
-            ):
+            elif method == "GET" and len(parts) == 3 and parts[0] == "tasks" and parts[2] == "events":
                 try:
                     since = int(query.get("since", ["0"])[0] or 0)
                 except (TypeError, ValueError):
@@ -147,22 +136,10 @@ class _Handler(BaseHTTPRequestHandler):
             elif method == "GET" and parts == ["skills"]:
                 self._send(200, self.api.get_skills())
             elif method == "GET" and parts == ["approvals"]:
-                self._send(
-                    200, self.api.list_approvals(query.get("status", ["PENDING"])[0] or "PENDING")
-                )
-            elif (
-                method == "POST"
-                and len(parts) == 3
-                and parts[0] == "approvals"
-                and parts[2] in ("approve", "deny")
-            ):
+                self._send(200, self.api.list_approvals(query.get("status", ["PENDING"])[0] or "PENDING"))
+            elif method == "POST" and len(parts) == 3 and parts[0] == "approvals" and parts[2] in ("approve", "deny"):
                 self._read_json()
-                self._send(
-                    200,
-                    self.api.decide_approval(
-                        parts[1], parts[2] == "approve", decided_by="authenticated-operator"
-                    ),
-                )
+                self._send(200, self.api.decide_approval(parts[1], parts[2] == "approve", decided_by="authenticated-operator"))
             else:
                 self._send(404, {"code": "not_found", "message": "unknown route"})
         except Exception as exc:
@@ -171,9 +148,7 @@ class _Handler(BaseHTTPRequestHandler):
             if status >= 500:
                 import logging
 
-                logging.getLogger("ai_ecosystem.server").warning(
-                    "internal error on %s: %s", self.path, exc
-                )
+                logging.getLogger("ai_ecosystem.server").warning("internal error on %s: %s", self.path, exc)
             self._send(status, {"code": code, "message": message})
 
     do_GET = _route
@@ -196,29 +171,27 @@ class LocalHttpServer:
     ) -> None:
         remote = host not in LOOPBACK_HOSTS
         if not allow_remote and remote:
-            raise ApiError(
-                "malformed_request",
-                f"refusing non-loopback bind {host!r} without allow_remote=True",
-            )
+            raise ApiError("malformed_request", f"refusing non-loopback bind {host!r} without allow_remote=True")
         if remote and not auth_token:
             raise ApiError("unauthorized", "remote API exposure requires authentication")
-        if remote and (not tls_certfile or not tls_keyfile):
-            raise ApiError(
-                "malformed_request", "remote API exposure requires TLS certificate and private key"
-            )
+        certfile = tls_certfile
+        keyfile = tls_keyfile
+        if remote and (not certfile or not keyfile):
+            raise ApiError("malformed_request", "remote API exposure requires TLS certificate and private key")
         handler = type("BoundHandler", (_Handler,), {"api": api, "auth_token": auth_token})
-        self._tls = bool(tls_certfile and tls_keyfile)
+        self._tls = bool(certfile and keyfile)
         self._server = ThreadingHTTPServer((host, port), handler)
-        if self._tls:
+        if certfile and keyfile:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.minimum_version = ssl.TLSVersion.TLSv1_2
-            context.load_cert_chain(tls_certfile, tls_keyfile)
+            context.load_cert_chain(certfile, keyfile)
             self._server.socket = context.wrap_socket(self._server.socket, server_side=True)
         self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
-        host, port = self._server.server_address
+        address = self._server.server_address
+        host, port = address[0], address[1]
         return f"{'https' if self._tls else 'http'}://{host}:{port}"
 
     def start(self) -> LocalHttpServer:
@@ -254,21 +227,15 @@ class ApiClient:
         headers = {"Content-Type": "application/json"}
         if self._auth_token:
             headers["Authorization"] = f"Bearer {self._auth_token}"
-        request = urllib.request.Request(
-            self._base + path, data=data, method=method, headers=headers
-        )
+        request = urllib.request.Request(self._base + path, data=data, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(
-                request, timeout=self._timeout, context=self._ssl_context
-            ) as response:
+            with urllib.request.urlopen(request, timeout=self._timeout, context=self._ssl_context) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")
             try:
                 payload = json.loads(detail)
-                raise ApiError(
-                    payload.get("code", "http_error"), payload.get("message", detail)
-                ) from exc
+                raise ApiError(payload.get("code", "http_error"), payload.get("message", detail)) from exc
             except (ValueError, AttributeError):
                 raise ApiError("http_error", f"{exc.code}: {detail}") from exc
         except OSError as exc:
