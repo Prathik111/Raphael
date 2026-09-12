@@ -104,16 +104,32 @@ _BASE_ENV_KEYS = frozenset(
         "LC_ALL",
     }
 )
+_SECRET_ENV_MARKERS = (
+    "API_KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "PRIVATE_KEY",
+    "ACCESS_KEY",
+    "CLIENT_SECRET",
+)
+
+
+def _is_secret_env(key: str) -> bool:
+    upper = key.upper()
+    return any(marker in upper for marker in _SECRET_ENV_MARKERS)
 
 
 def _scrubbed_env(
     extra: dict[str, str] | None = None, allowed: frozenset[str] | None = None
 ) -> dict[str, str]:
-    keys = _BASE_ENV_KEYS | (allowed or frozenset())
+    """Preserve ordinary runtime configuration while filtering credential-like values."""
+    explicit = allowed or frozenset()
     result: dict[str, str] = {}
-    for key in keys:
-        value = os.environ.get(key)
-        if value is not None:
+    for key, value in os.environ.items():
+        if key in _BASE_ENV_KEYS or key in explicit or not _is_secret_env(key):
             result[key] = value
     if extra:
         result.update({str(k): str(v) for k, v in extra.items()})
@@ -241,12 +257,7 @@ class _WindowsJob:
         self._kernel32 = kernel32
         kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
         kernel32.CreateJobObjectW.restype = ctypes.c_void_p
-        kernel32.SetInformationJobObject.argtypes = [
-            ctypes.c_void_p,
-            ctypes.c_int,
-            ctypes.c_void_p,
-            ctypes.c_uint32,
-        ]
+        kernel32.SetInformationJobObject.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
         kernel32.SetInformationJobObject.restype = ctypes.c_int
         kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
         kernel32.OpenProcess.restype = ctypes.c_void_p
@@ -287,9 +298,7 @@ class _WindowsJob:
     def assign(self, process: mp.Process) -> None:
         if self.handle is None or process.pid is None:
             return
-        access = (
-            self.PROCESS_SET_QUOTA | self.PROCESS_TERMINATE | self.PROCESS_QUERY_LIMITED_INFORMATION
-        )
+        access = self.PROCESS_SET_QUOTA | self.PROCESS_TERMINATE | self.PROCESS_QUERY_LIMITED_INFORMATION
         process_handle = self._kernel32.OpenProcess(access, 0, process.pid)
         if not process_handle:
             error = cast(Any, ctypes).get_last_error()
@@ -324,9 +333,7 @@ class LocalSandboxProvider(SandboxProvider):
         with self._meta_lock:
             return self._locks.setdefault(profile, threading.RLock())
 
-    def scrubbed_env(
-        self, extra: dict[str, str] | None = None, allowed: frozenset[str] | None = None
-    ) -> dict[str, str]:
+    def scrubbed_env(self, extra: dict[str, str] | None = None, allowed: frozenset[str] | None = None) -> dict[str, str]:
         return _scrubbed_env(extra, allowed)
 
     def run(
@@ -341,18 +348,11 @@ class LocalSandboxProvider(SandboxProvider):
         if profile.max_processes < 1:
             raise ToolExecutionError(tool.name, "sandbox max_processes must be at least 1")
         if profile.max_disk_mb:
-            raise ToolExecutionError(
-                tool.name,
-                "disk quotas are not enforceable by this local provider; refusing execution",
-            )
+            raise ToolExecutionError(tool.name, "disk quotas are not enforceable by this local provider; refusing execution")
         if os.name != "nt" and (profile.max_memory_mb or profile.max_cpu_s):
-            raise ToolExecutionError(
-                tool.name, "requested memory/CPU quota is not enforceable by this provider"
-            )
+            raise ToolExecutionError(tool.name, "requested memory/CPU quota is not enforceable by this provider")
         if tool.network_access and not profile.allow_network:
-            raise ToolExecutionError(
-                tool.name, f"network use denied by sandbox profile {profile.name!r}"
-            )
+            raise ToolExecutionError(tool.name, f"network use denied by sandbox profile {profile.name!r}")
         if tool.secrets_access:
             raise ToolExecutionError(tool.name, "secret access is not granted by the local sandbox")
         deadline = min(timeout_s, profile.timeout_s)
@@ -380,9 +380,7 @@ class LocalSandboxProvider(SandboxProvider):
                         job.assign(process)
                     except OSError as exc:
                         _terminate_process(process)
-                        raise ToolExecutionError(
-                            tool.name, f"could not attach worker to Windows Job Object: {exc}"
-                        ) from exc
+                        raise ToolExecutionError(tool.name, f"could not attach worker to Windows Job Object: {exc}") from exc
                 start_event.set()
                 started = time.monotonic()
                 while process.is_alive():
@@ -408,9 +406,7 @@ class LocalSandboxProvider(SandboxProvider):
                         result_ok, result_value = result_queue.get(timeout=0.2)
                         result_received = True
                     except queue.Empty as exc:
-                        raise ToolExecutionError(
-                            tool.name, "sandbox worker exited without a result"
-                        ) from exc
+                        raise ToolExecutionError(tool.name, "sandbox worker exited without a result") from exc
                 if not result_ok:
                     raise ToolExecutionError(tool.name, result_value)
                 if not isinstance(result_value, ToolResult):
