@@ -94,6 +94,33 @@ def _terminate_process(process: mp.Process) -> None:
     process.join(timeout=1.0)
 
 
+# Windows Job Object ctypes structures must be module-level because nested
+# class bodies cannot resolve sibling nested classes by lexical scope.
+class _BasicLimit(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_longlong),
+        ("PerJobUserTimeLimit", ctypes.c_longlong),
+        ("LimitFlags", ctypes.c_uint32),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", ctypes.c_uint32),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", ctypes.c_uint32),
+        ("SchedulingClass", ctypes.c_uint32),
+    ]
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_uint64),
+        ("WriteOperationCount", ctypes.c_uint64),
+        ("OtherOperationCount", ctypes.c_uint64),
+        ("ReadTransferCount", ctypes.c_uint64),
+        ("WriteTransferCount", ctypes.c_uint64),
+        ("OtherTransferCount", ctypes.c_uint64),
+    ]
+
+
 class _WindowsJob:
     """Windows Job Object enforcing descendant lifetime and resource limits."""
 
@@ -171,8 +198,6 @@ class _WindowsJob:
         flags = self.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         if profile.max_processes > 0:
             flags |= self.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-            # max_processes describes child processes; the sandbox worker itself
-            # is also a member of the Job Object.
             limits.BasicLimitInformation.ActiveProcessLimit = profile.max_processes + (
                 1 if has_subprocess_capability else 0
             )
