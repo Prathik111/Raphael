@@ -370,6 +370,9 @@ class LocalSandboxProvider(SandboxProvider):
                 ),
             )
             job = _WindowsJob(profile, "subprocess" in set(tool.capabilities))
+            result_received = False
+            result_ok = False
+            result_value: Any = None
             try:
                 process.start()
                 if os.name == "nt":
@@ -383,6 +386,11 @@ class LocalSandboxProvider(SandboxProvider):
                 start_event.set()
                 started = time.monotonic()
                 while process.is_alive():
+                    try:
+                        result_ok, result_value = result_queue.get_nowait()
+                        result_received = True
+                    except queue.Empty:
+                        pass
                     if cancel_token is not None and getattr(cancel_token, "cancelled", False):
                         if os.name == "nt":
                             job.terminate()
@@ -395,17 +403,19 @@ class LocalSandboxProvider(SandboxProvider):
                         raise ToolTimeoutError(tool.name, deadline)
                     time.sleep(0.02)
                 process.join(timeout=0.2)
-                try:
-                    ok, value = result_queue.get(timeout=0.2)
-                except queue.Empty as exc:
-                    raise ToolExecutionError(
-                        tool.name, "sandbox worker exited without a result"
-                    ) from exc
-                if not ok:
-                    raise ToolExecutionError(tool.name, value)
-                if not isinstance(value, ToolResult):
+                if not result_received:
+                    try:
+                        result_ok, result_value = result_queue.get(timeout=0.2)
+                        result_received = True
+                    except queue.Empty as exc:
+                        raise ToolExecutionError(
+                            tool.name, "sandbox worker exited without a result"
+                        ) from exc
+                if not result_ok:
+                    raise ToolExecutionError(tool.name, result_value)
+                if not isinstance(result_value, ToolResult):
                     raise DomainValidationError("sandbox worker returned a non-ToolResult")
-                return value
+                return result_value
             finally:
                 if os.name == "nt":
                     job.close()
