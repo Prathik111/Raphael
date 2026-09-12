@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from typing import Any
 
 from ai_ecosystem.core.events.bus import Event, EventHandler, EventStore
@@ -15,13 +16,10 @@ class SqliteEventStore(EventStore):
         self._db = db
 
     def append(self, event: Event) -> int:
-        _, lastrowid = self._db.write(
-            "INSERT INTO events (snapshot) VALUES (?)",
-            (event.model_dump_json(),),
-        )
+        _, lastrowid = self._db.write("INSERT INTO events (snapshot) VALUES (?)", (event.model_dump_json(),))
         return lastrowid
 
-    def list(self) -> list[Event]:
+    def list(self) -> builtins.list[Event]:
         rows = self._db.query("SELECT snapshot FROM events ORDER BY seq")
         return [Event.model_validate_json(row[0]) for row in rows]
 
@@ -32,10 +30,9 @@ class SqliteEventStore(EventStore):
             count += 1
         return count
 
-    def events_since(self, seq: int) -> list[tuple[int, Event]]:
+    def events_since(self, seq: int) -> builtins.list[tuple[int, Event]]:
         rows = self._db.query(
-            "SELECT seq, snapshot FROM events WHERE seq > ? ORDER BY seq",
-            (seq,),
+            "SELECT seq, snapshot FROM events WHERE seq > ? ORDER BY seq", (seq,)
         )
         return [(int(row[0]), Event.model_validate_json(row[1])) for row in rows]
 
