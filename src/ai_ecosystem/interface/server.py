@@ -14,9 +14,7 @@ from ai_ecosystem.core.errors.exceptions import AiEcosystemError, ResourceNotFou
 from ai_ecosystem.interface.api import ApiError, RuntimeAPI
 
 MAX_BODY_BYTES = 1_000_000
-ALLOWED_ORIGINS = frozenset(
-    {"http://tauri.localhost", "tauri://localhost", "http://localhost:1420"}
-)
+ALLOWED_ORIGINS = frozenset({"http://tauri.localhost", "tauri://localhost", "http://localhost:1420"})
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
@@ -26,15 +24,7 @@ class ApiUnavailableError(AiEcosystemError):
 
 def _error_code(exc: Exception) -> tuple[int, str]:
     if isinstance(exc, ApiError):
-        table = {
-            "malformed_request": 400,
-            "invalid_transition": 409,
-            "unsupported": 501,
-            "unavailable": 503,
-            "unauthorized": 401,
-            "forbidden": 403,
-            "queue_full": 429,
-        }
+        table = {"malformed_request": 400, "invalid_transition": 409, "unsupported": 501, "unavailable": 503, "unauthorized": 401, "forbidden": 403, "queue_full": 429}
         return table.get(exc.code, 400), exc.code
     if isinstance(exc, ResourceNotFoundError):
         return 404, "not_found"
@@ -147,7 +137,6 @@ class _Handler(BaseHTTPRequestHandler):
             message = "internal error" if status >= 500 else str(exc)
             if status >= 500:
                 import logging
-
                 logging.getLogger("ai_ecosystem.server").warning("internal error on %s: %s", self.path, exc)
             self._send(status, {"code": code, "message": message})
 
@@ -159,23 +148,13 @@ class _Handler(BaseHTTPRequestHandler):
 class LocalHttpServer:
     """Threaded API server. Loopback may use HTTP; remote binds require TLS + bearer auth."""
 
-    def __init__(
-        self,
-        api: RuntimeAPI,
-        host: str = "127.0.0.1",
-        port: int = 0,
-        allow_remote: bool = False,
-        auth_token: str | None = None,
-        tls_certfile: str | None = None,
-        tls_keyfile: str | None = None,
-    ) -> None:
+    def __init__(self, api: RuntimeAPI, host: str = "127.0.0.1", port: int = 0, allow_remote: bool = False, auth_token: str | None = None, tls_certfile: str | None = None, tls_keyfile: str | None = None) -> None:
         remote = host not in LOOPBACK_HOSTS
         if not allow_remote and remote:
             raise ApiError("malformed_request", f"refusing non-loopback bind {host!r} without allow_remote=True")
         if remote and not auth_token:
             raise ApiError("unauthorized", "remote API exposure requires authentication")
-        certfile = tls_certfile
-        keyfile = tls_keyfile
+        certfile, keyfile = tls_certfile, tls_keyfile
         if remote and (not certfile or not keyfile):
             raise ApiError("malformed_request", "remote API exposure requires TLS certificate and private key")
         handler = type("BoundHandler", (_Handler,), {"api": api, "auth_token": auth_token})
@@ -191,7 +170,10 @@ class LocalHttpServer:
     @property
     def url(self) -> str:
         address = self._server.server_address
-        host, port = address[0], address[1]
+        host = address[0]
+        if isinstance(host, bytes):
+            host = host.decode("utf-8", "replace")
+        port = address[1]
         return f"{'https' if self._tls else 'http'}://{host}:{port}"
 
     def start(self) -> LocalHttpServer:
@@ -207,13 +189,7 @@ class LocalHttpServer:
 
 
 class ApiClient:
-    def __init__(
-        self,
-        base_url: str,
-        timeout_s: float = 5.0,
-        auth_token: str | None = None,
-        ssl_context: ssl.SSLContext | None = None,
-    ) -> None:
+    def __init__(self, base_url: str, timeout_s: float = 5.0, auth_token: str | None = None, ssl_context: ssl.SSLContext | None = None) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout_s
         self._auth_token = auth_token
@@ -222,7 +198,6 @@ class ApiClient:
     def _call(self, method: str, path: str, body: Any = None) -> Any:
         import urllib.error
         import urllib.request
-
         data = json.dumps(body).encode() if body is not None else None
         headers = {"Content-Type": "application/json"}
         if self._auth_token:
