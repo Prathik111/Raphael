@@ -10,7 +10,6 @@ skepticism each deserves.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 
@@ -24,8 +23,7 @@ class TrustLevel(str, Enum):
     SYSTEM = "SYSTEM"
 
 
-_ORDER = [TrustLevel.UNTRUSTED, TrustLevel.LIMITED, TrustLevel.TRUSTED,
-          TrustLevel.SYSTEM]
+_ORDER = [TrustLevel.UNTRUSTED, TrustLevel.LIMITED, TrustLevel.TRUSTED, TrustLevel.SYSTEM]
 
 
 def meets(actual: TrustLevel, required: TrustLevel) -> bool:
@@ -44,7 +42,8 @@ CAPABILITY_RISK = {
 }
 
 DANGEROUS_CAPABILITIES = frozenset(
-    {name for name, risk in CAPABILITY_RISK.items() if risk in ("HIGH", "CRITICAL")})
+    {name for name, risk in CAPABILITY_RISK.items() if risk in ("HIGH", "CRITICAL")}
+)
 
 
 class ComponentTrust:
@@ -57,12 +56,12 @@ class ComponentTrust:
         """Current tier (UNTRUSTED when never assigned)."""
         return self._levels.get(component, TrustLevel.UNTRUSTED)
 
-    def assign(self, component: str, level: TrustLevel,
-               actor: str, actor_trust: TrustLevel) -> TrustLevel:
+    def assign(
+        self, component: str, level: TrustLevel, actor: str, actor_trust: TrustLevel
+    ) -> TrustLevel:
         """Set a tier; only SYSTEM actors may assign (up or down)."""
         if actor_trust is not TrustLevel.SYSTEM:
-            raise DomainValidationError(
-                f"actor {actor!r} cannot assign trust (SYSTEM required)")
+            raise DomainValidationError(f"actor {actor!r} cannot assign trust (SYSTEM required)")
         self._levels[component] = level
         return level
 
@@ -71,7 +70,8 @@ class ComponentTrust:
         if not meets(self.level_of(component), minimum):
             raise DomainValidationError(
                 f"component {component!r} is {self.level_of(component).value}, "
-                f"requires {minimum.value}")
+                f"requires {minimum.value}"
+            )
 
 
 def capability_risk(capability: str) -> str:

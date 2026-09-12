@@ -8,7 +8,8 @@ duck-typed tool object, and only live server connections require it.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import Tool, ToolResult

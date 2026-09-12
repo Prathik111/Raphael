@@ -11,9 +11,9 @@ import os
 import platform
 import shutil
 import socket
-import sys
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from ai_ecosystem.core.models.base import utcnow
 from ai_ecosystem.system.monitor.models import (
@@ -28,8 +28,9 @@ from ai_ecosystem.system.monitor.models import (
 )
 
 
-def classify_pressure(cpu: float | None, memory: float | None,
-                      storage: float | None) -> PressureLevel:
+def classify_pressure(
+    cpu: float | None, memory: float | None, storage: float | None
+) -> PressureLevel:
     """Worst of the known signals; UNKNOWN when nothing is known."""
     known = [v for v in (cpu, memory, storage) if v is not None]
     if not known:
@@ -56,9 +57,10 @@ class SystemProbe(ABC):
 class MockProbe(SystemProbe):
     """Deterministic probe for tests (no hardware dependence)."""
 
-    def __init__(self, snapshot: Optional[SystemSnapshot] = None) -> None:
+    def __init__(self, snapshot: SystemSnapshot | None = None) -> None:
         self._snapshot = snapshot or SystemSnapshot(
-            operating_system="MockOS", architecture="x86_64")
+            operating_system="MockOS", architecture="x86_64"
+        )
         self.calls = 0
 
     def snapshot(self, include_host: bool = False) -> SystemSnapshot:
@@ -80,9 +82,9 @@ class LocalSystemProbe(SystemProbe):
 
     def __init__(
         self,
-        checkers: Optional[dict[str, Callable[[], bool]]] = None,
-        gpu_provider: Optional[Callable[[], list[GpuInfo]]] = None,
-        network_target: Optional[tuple[str, int]] = None,
+        checkers: dict[str, Callable[[], bool]] | None = None,
+        gpu_provider: Callable[[], list[GpuInfo]] | None = None,
+        network_target: tuple[str, int] | None = None,
     ) -> None:
         self._checkers = dict(checkers or {})
         self._gpu_provider = gpu_provider
@@ -111,11 +113,13 @@ class LocalSystemProbe(SystemProbe):
                 for proc in psutil.process_iter(["name", "cpu_percent", "memory_info"]):
                     info = proc.info
                     rss = info.get("memory_info").rss if info.get("memory_info") else 0
-                    processes.append(ProcessInfo(
-                        name=str(info.get("name") or "?"),
-                        cpu_percent=info.get("cpu_percent"),
-                        memory_bytes=int(rss or 0),
-                    ))
+                    processes.append(
+                        ProcessInfo(
+                            name=str(info.get("name") or "?"),
+                            cpu_percent=info.get("cpu_percent"),
+                            memory_bytes=int(rss or 0),
+                        )
+                    )
                     if len(processes) >= 50:
                         break
             except Exception:  # noqa: BLE001 -- degraded snapshot beats no snapshot
@@ -125,11 +129,14 @@ class LocalSystemProbe(SystemProbe):
             try:
                 usage = shutil.disk_usage(mount)
                 percent = (usage.used / usage.total * 100.0) if usage.total else None
-                storage.append(StorageVolume(
-                    mount=mount, total_bytes=usage.total,
-                    available_bytes=usage.free,
-                    utilization_percent=percent,
-                ))
+                storage.append(
+                    StorageVolume(
+                        mount=mount,
+                        total_bytes=usage.total,
+                        available_bytes=usage.free,
+                        utilization_percent=percent,
+                    )
+                )
             except OSError:
                 continue
         gpus = self._detect_gpus()
@@ -152,10 +159,15 @@ class LocalSystemProbe(SystemProbe):
             operating_system=f"{platform.system()} {platform.release()}".strip(),
             architecture=platform.machine(),
             hostname=platform.node() if include_host else "",
-            cpu=cpu, memory=memory, gpus=gpus, storage=storage,
-            processes=processes, capabilities=capabilities,
+            cpu=cpu,
+            memory=memory,
+            gpus=gpus,
+            storage=storage,
+            processes=processes,
+            capabilities=capabilities,
             pressure=classify_pressure(
-                cpu.utilization_percent, memory.utilization_percent, worst_storage),
+                cpu.utilization_percent, memory.utilization_percent, worst_storage
+            ),
             collected_at=utcnow(),
         )
 

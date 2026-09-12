@@ -7,7 +7,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -71,9 +71,7 @@ class ModelProvider(ABC):
 
     def stream(self, request: ModelRequest) -> Iterator[str]:
         if not self.capabilities.streaming:
-            raise ModelUnavailableError(
-                f"provider {self.provider_id!r} does not support streaming"
-            )
+            raise ModelUnavailableError(f"provider {self.provider_id!r} does not support streaming")
         yield self.complete(request).text
 
 
@@ -83,13 +81,11 @@ class MockModelProvider(ModelProvider):
     def __init__(
         self,
         provider_id: str = "mock",
-        capabilities: Optional[ModelCapabilities] = None,
-        handler: Optional[Callable[[ModelRequest], ModelResponse]] = None,
+        capabilities: ModelCapabilities | None = None,
+        handler: Callable[[ModelRequest], ModelResponse] | None = None,
     ) -> None:
         super().__init__(provider_id, capabilities or ModelCapabilities(structured_output=True))
-        self._handler = handler or (
-            lambda req: ModelResponse(text="mock", model=provider_id)
-        )
+        self._handler = handler or (lambda req: ModelResponse(text="mock", model=provider_id))
         self.calls: list[ModelRequest] = []
 
     def complete(self, request: ModelRequest) -> ModelResponse:
@@ -103,9 +99,7 @@ class MockModelProvider(ModelProvider):
 
     def stream(self, request: ModelRequest) -> Iterator[str]:
         if not self.capabilities.streaming:
-            raise ModelUnavailableError(
-                f"provider {self.provider_id!r} does not support streaming"
-            )
+            raise ModelUnavailableError(f"provider {self.provider_id!r} does not support streaming")
         text = self.complete(request).text
         for index in range(0, len(text), 8):
             yield text[index : index + 8]

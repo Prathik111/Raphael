@@ -10,16 +10,32 @@ from __future__ import annotations
 
 from collections import Counter
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.models.base import Entity
 from ai_ecosystem.learning.models import LearningProposal, ProposalKind
 
-_CRITICAL_HINTS = ("permission", "permissions", "authorize", "authorized",
-                    "authorization", "policy", "policies", "credential",
-                    "credentials", "secret", "secrets", "sandbox", "password",
-                    "passwords", "token", "tokens", "sudo", "admin")
+_CRITICAL_HINTS = (
+    "permission",
+    "permissions",
+    "authorize",
+    "authorized",
+    "authorization",
+    "policy",
+    "policies",
+    "credential",
+    "credentials",
+    "secret",
+    "secrets",
+    "sandbox",
+    "password",
+    "passwords",
+    "token",
+    "tokens",
+    "sudo",
+    "admin",
+)
 _HIGH_HINTS = ("skill", "allow", "always", "every", "bypass", "disable")
 _MEDIUM_HINTS = ("workflow", "prefer", "default")
 
@@ -75,16 +91,14 @@ def classify_change(kind: ProposalKind, content: str) -> LearningRisk:
 class DriftDetector:
     """Session-scoped anomaly watch over adoptions and proposals."""
 
-    def __init__(self, risky_rate_threshold: float = 0.5,
-                 contradiction_window: int = 50) -> None:
+    def __init__(self, risky_rate_threshold: float = 0.5, contradiction_window: int = 50) -> None:
         self._adopted: list[LearningProposal] = []
         self._proposed_risky = 0
         self._proposed_total = 0
         self._risky_rate_threshold = risky_rate_threshold
         self._window = contradiction_window
 
-    def note_proposal(self, proposal: LearningProposal,
-                      risk: LearningRisk) -> None:
+    def note_proposal(self, proposal: LearningProposal, risk: LearningRisk) -> None:
         """Feed one proposal into the drift counters."""
         self._proposed_total += 1
         if risk in (LearningRisk.HIGH, LearningRisk.CRITICAL):
@@ -93,17 +107,17 @@ class DriftDetector:
     def note_adoption(self, proposal: LearningProposal) -> None:
         """Feed one adoption (bounded window)."""
         self._adopted.append(proposal)
-        del self._adopted[:-self._window]
+        del self._adopted[: -self._window]
 
     def suspicious(self) -> list[str]:
         """Human-readable drift findings (empty when healthy)."""
         findings = []
         if self._proposed_total >= 4 and (
-                self._proposed_risky / self._proposed_total
-                >= self._risky_rate_threshold):
+            self._proposed_risky / self._proposed_total >= self._risky_rate_threshold
+        ):
             findings.append(
-                f"risky proposal rate "
-                f"{self._proposed_risky}/{self._proposed_total}")
+                f"risky proposal rate " f"{self._proposed_risky}/{self._proposed_total}"
+            )
         kinds = Counter(p.kind.value for p in self._adopted)
         model_switches = kinds.get(ProposalKind.MODEL_HINT.value, 0)
         if model_switches >= 3:
@@ -120,8 +134,9 @@ class DriftDetector:
 class LearningGovernor:
     """Gatekeeper for every adoption (kill switch included)."""
 
-    def __init__(self, mode: LearningMode = LearningMode.APPROVAL_REQUIRED,
-                 killed: bool = False) -> None:
+    def __init__(
+        self, mode: LearningMode = LearningMode.APPROVAL_REQUIRED, killed: bool = False
+    ) -> None:
         self._mode = mode
         self._killed = killed
 
@@ -151,8 +166,7 @@ class LearningGovernor:
         """Risk tier of a proposal."""
         return classify_change(proposal.kind, proposal.content)
 
-    def may_adopt(self, proposal: LearningProposal,
-                  approved: bool = False) -> bool:
+    def may_adopt(self, proposal: LearningProposal, approved: bool = False) -> bool:
         """Adoption verdict under the current posture."""
         if self._killed or self._mode is LearningMode.DISABLED:
             return False
@@ -169,8 +183,7 @@ class LearningGovernor:
 
     def persist(self, repository: Any) -> Any:
         """Save posture (single row id 'global')."""
-        state = LearningPolicyState(id="global", mode=self._mode,
-                                    killed=self._killed)
+        state = LearningPolicyState(id="global", mode=self._mode, killed=self._killed)
         existing = repository.get("global")
         if existing is None:
             return repository.create(state)
@@ -180,7 +193,7 @@ class LearningGovernor:
         return repository.update(existing)
 
     @staticmethod
-    def load(repository: Any) -> "LearningGovernor":
+    def load(repository: Any) -> LearningGovernor:
         """Restore posture (defaults when never saved)."""
         state = repository.get("global")
         if state is None:

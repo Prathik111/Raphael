@@ -43,8 +43,9 @@ def candidate_hash(candidate: MemoryCandidate) -> str:
 class MemoryVerifier:
     """Mint receipts only from independently supplied evidence."""
 
-    def verify(self, candidate: MemoryCandidate, *, evidence_ids: list[str],
-               verifier: str, method: str) -> VerificationReceipt:
+    def verify(
+        self, candidate: MemoryCandidate, *, evidence_ids: list[str], verifier: str, method: str
+    ) -> VerificationReceipt:
         if not verifier.strip():
             raise ValueError("verifier identity is required")
         if not method.strip():

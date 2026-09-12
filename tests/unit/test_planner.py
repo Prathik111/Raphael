@@ -46,6 +46,7 @@ def _backend(payload):
         known_tools=set(TOOLS),
     )
 
+
 def _step(sid, deps=(), tools=("filesystem.read",), **kw):
     args = {
         "id": sid,
@@ -140,8 +141,7 @@ def test_empty_plan_rejected():
 
 
 def test_missing_step_arguments_rejected_when_contracts_known():
-    validator = PlanValidator(
-        {"terminal.execute"}, {"terminal.execute": {"command"}})
+    validator = PlanValidator({"terminal.execute"}, {"terminal.execute": {"command"}})
     step = _step("s1", tools=("terminal.execute",))
     with pytest.raises(PlanValidationError, match="missing required arguments"):
         validator.validate(Plan(goal="g", steps=[step], final_verification="v"))
@@ -150,13 +150,16 @@ def test_missing_step_arguments_rejected_when_contracts_known():
 def test_step_arguments_satisfy_contracts():
     from ai_ecosystem.core.models import PlanStep
 
-    validator = PlanValidator(
-        {"terminal.execute"}, {"terminal.execute": {"command"}})
-    step = PlanStep(id="s1", description="d", tools=["terminal.execute"],
-                    arguments={"command": ["echo", "hi"]},
-                    verification="v", completion_criteria="c")
-    plan = validator.validate(
-        Plan(goal="g", steps=[step], final_verification="v"))
+    validator = PlanValidator({"terminal.execute"}, {"terminal.execute": {"command"}})
+    step = PlanStep(
+        id="s1",
+        description="d",
+        tools=["terminal.execute"],
+        arguments={"command": ["echo", "hi"]},
+        verification="v",
+        completion_criteria="c",
+    )
+    plan = validator.validate(Plan(goal="g", steps=[step], final_verification="v"))
     assert plan.steps[0].arguments == {"command": ["echo", "hi"]}
 
 
@@ -165,11 +168,18 @@ def test_step_argument_wrong_type_rejected():
 
     validator = PlanValidator(
         {"terminal.execute"},
-        tool_schemas={"terminal.execute": {
-            "required": ["command"], "properties": {"command": "array"}}})
-    step = PlanStep(id="s1", description="d", tools=["terminal.execute"],
-                    arguments={"command": "echo hi"},
-                    verification="v", completion_criteria="c")
+        tool_schemas={
+            "terminal.execute": {"required": ["command"], "properties": {"command": "array"}}
+        },
+    )
+    step = PlanStep(
+        id="s1",
+        description="d",
+        tools=["terminal.execute"],
+        arguments={"command": "echo hi"},
+        verification="v",
+        completion_criteria="c",
+    )
     with pytest.raises(PlanValidationError, match="must be array"):
         validator.validate(Plan(goal="g", steps=[step], final_verification="v"))
 
@@ -179,17 +189,20 @@ def test_backend_repairs_missing_arguments():
     missing = dict(VALID)
     missing["steps"] = [dict(VALID["steps"][0])]
     fixed = dict(VALID)
-    fixed["steps"] = [dict(VALID["steps"][0], arguments={"path": "a.txt"}),
-                      dict(VALID["steps"][1], arguments={"path": "b.txt"})]
+    fixed["steps"] = [
+        dict(VALID["steps"][0], arguments={"path": "a.txt"}),
+        dict(VALID["steps"][1], arguments={"path": "b.txt"}),
+    ]
 
     def handle(req):
         calls.append(req.prompt)
-        return ModelResponse(
-            structured=missing if len(calls) == 1 else fixed)
+        return ModelResponse(structured=missing if len(calls) == 1 else fixed)
 
     backend = ModelReasoningBackend(
-        MockModelProvider("m", handler=handle), known_tools=set(TOOLS),
-        tool_arguments={"filesystem.read": {"path"}})
+        MockModelProvider("m", handler=handle),
+        known_tools=set(TOOLS),
+        tool_arguments={"filesystem.read": {"path"}},
+    )
     plan = backend.plan("g", sorted(TOOLS))
     assert plan.steps[0].arguments == {"path": "a.txt"}
     assert len(calls) == 2

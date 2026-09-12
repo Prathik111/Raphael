@@ -8,7 +8,7 @@ call fails loudly instead of leaking to a cloud.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
@@ -90,9 +90,9 @@ class ComputeRouter:
 
     def __init__(
         self,
-        providers: Optional[dict[str, ProviderCapabilities]] = None,
-        availability: Optional[Callable[[str], bool]] = None,
-        policy: Optional[ComputePolicy] = None,
+        providers: dict[str, ProviderCapabilities] | None = None,
+        availability: Callable[[str], bool] | None = None,
+        policy: ComputePolicy | None = None,
     ) -> None:
         self._providers = dict(providers or {})
         self._availability = availability or (lambda name: True)
@@ -112,10 +112,7 @@ class ComputeRouter:
         deprioritized, so a cheaper cloud can never win.
         """
         self._validate(requirements)
-        local_only = (
-            requirements.privacy == "high"
-            and self._policy.require_local_for_high_privacy
-        )
+        local_only = requirements.privacy == "high" and self._policy.require_local_for_high_privacy
         candidates: list[tuple[float, int, float, str, str]] = []
         for name, caps in self._providers.items():
             if local_only and not caps.local:
@@ -127,16 +124,20 @@ class ComputeRouter:
             if not self._permitted(name, caps, requirements):
                 continue
             cost = caps.cost_per_hour * max(0.0, requirements.duration_s) / 3600.0
-            candidates.append((
-                cost,
-                self._LATENCY_RANK.get(caps.latency_class, 2),
-                -caps.reliability,
-                name,
-                self._reason(requirements, caps),
-            ))
+            candidates.append(
+                (
+                    cost,
+                    self._LATENCY_RANK.get(caps.latency_class, 2),
+                    -caps.reliability,
+                    name,
+                    self._reason(requirements, caps),
+                )
+            )
         candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
-        return [ComputeTarget(provider=name, reason=reason, estimated_cost=cost)
-                for cost, _, _, name, reason in candidates]
+        return [
+            ComputeTarget(provider=name, reason=reason, estimated_cost=cost)
+            for cost, _, _, name, reason in candidates
+        ]
 
     def route(self, requirements: ComputeRequirements) -> ComputeTarget:
         """Best target, or an explicit error (never a silent default)."""
@@ -146,7 +147,8 @@ class ComputeRouter:
         return ranked[0]
 
     def select_first_available(
-        self, ranked: list[ComputeTarget],
+        self,
+        ranked: list[ComputeTarget],
         probe: Callable[[str], bool],
     ) -> ComputeTarget:
         """Walk ranked targets until one probes healthy (fallback)."""
@@ -163,16 +165,16 @@ class ComputeRouter:
 
     # -- filters -----------------------------------------------------------
 
-    def _available(self, name: str, requirements: ComputeRequirements,
-                   caps: ProviderCapabilities) -> bool:
+    def _available(
+        self, name: str, requirements: ComputeRequirements, caps: ProviderCapabilities
+    ) -> bool:
         try:
             return bool(self._availability(name))
         except Exception:  # noqa: BLE001 -- availability errors mean down
             return False
 
     @staticmethod
-    def _capable(requirements: ComputeRequirements,
-                 caps: ProviderCapabilities) -> bool:
+    def _capable(requirements: ComputeRequirements, caps: ProviderCapabilities) -> bool:
         if requirements.gpu and not caps.gpu:
             return False
         if requirements.vram_gb > caps.vram_gb:
@@ -187,8 +189,9 @@ class ComputeRouter:
             return False
         return True
 
-    def _permitted(self, name: str, caps: ProviderCapabilities,
-                   requirements: ComputeRequirements | None = None) -> bool:
+    def _permitted(
+        self, name: str, caps: ProviderCapabilities, requirements: ComputeRequirements | None = None
+    ) -> bool:
         policy = self._policy
         if name in policy.blocked_providers:
             return False
@@ -205,29 +208,34 @@ class ComputeRouter:
     def _validate(self, requirements: ComputeRequirements) -> None:
         if requirements.privacy == "high" and self._policy.require_local_for_high_privacy:
             local_ok = any(
-                caps.local and self._available(name, requirements, caps)
+                caps.local
+                and self._available(name, requirements, caps)
                 and self._capable(requirements, caps)
                 and self._permitted(name, caps, requirements)
-                for name, caps in self._providers.items())
+                for name, caps in self._providers.items()
+            )
             if not local_ok:
                 raise PolicyRejectionError(
                     "high-privacy work requires local execution, "
-                    "which is unavailable or incapable")
+                    "which is unavailable or incapable"
+                )
         if requirements.max_cost >= 0:
             affordable = any(
                 caps.cost_per_hour * max(0.0, requirements.duration_s) / 3600.0
                 <= requirements.max_cost
-                for caps in self._providers.values())
+                for caps in self._providers.values()
+            )
             if not affordable:
                 raise PolicyRejectionError("no provider within max_cost")
 
     def _why_empty(self, requirements: ComputeRequirements) -> str:
-        return (f"requirements {requirements.model_dump()} match no provider "
-                f"under policy {self._policy.model_dump()}")
+        return (
+            f"requirements {requirements.model_dump()} match no provider "
+            f"under policy {self._policy.model_dump()}"
+        )
 
     @staticmethod
-    def _reason(requirements: ComputeRequirements,
-                caps: ProviderCapabilities) -> str:
+    def _reason(requirements: ComputeRequirements, caps: ProviderCapabilities) -> str:
         bits = []
         if caps.local:
             bits.append("local")

@@ -19,16 +19,21 @@ from ai_ecosystem.core.models.enums import EventType
 
 
 def _obj(object_id="task:1", object_type="task", payload=None, version="v1"):
-    return make_sync_object(object_type, object_id,
-                            payload if payload is not None else {"state": "CREATED"},
-                            version=version)
+    return make_sync_object(
+        object_type,
+        object_id,
+        payload if payload is not None else {"state": "CREATED"},
+        version=version,
+    )
 
 
 def test_1_manifest_creation():
     manager = SyncManager()
     manifest = manager.manifest([_obj(), _obj("skill:1", "skill")])
     assert [(m.object_id, m.object_type) for m in manifest] == [
-        ("task:1", "task"), ("skill:1", "skill")]
+        ("task:1", "task"),
+        ("skill:1", "skill"),
+    ]
     assert all(m.content_hash for m in manifest)
     assert manifest[0].sync_class is SyncClass.SYNC_ALLOWED
 
@@ -42,7 +47,8 @@ def test_2_allowed_object():
 def test_3_forbidden_object():
     manager = SyncManager(
         policy=SyncPolicy(overrides={"task:1": SyncClass.SYNC_FORBIDDEN}),
-        transport=MockSyncTransport())
+        transport=MockSyncTransport(),
+    )
     report = manager.sync([_obj()])
     assert report.results[0].state is SyncState.SKIPPED
     assert manager._transport.remote == {}
@@ -103,8 +109,7 @@ def test_10_conflict():
     manager = SyncManager(transport=transport)
     manager.sync([_obj(version="v1")])
     # Remote changes behind our back (different version+hash, no handshake).
-    transport.remote["task:1"] = _obj(version="v9",
-                                      payload={"state": "REMOTE-EDIT"})
+    transport.remote["task:1"] = _obj(version="v9", payload={"state": "REMOTE-EDIT"})
     report = manager.sync([_obj(version="v2")])
     assert report.results[0].state is SyncState.CONFLICT
     # Nothing silently overwritten either way.
@@ -152,9 +157,9 @@ def test_14_retry_and_15_retry_limit():
 
 
 def test_16_credential_redaction():
-    leaked = make_sync_object("task", "task:1",
-                              {"state": "x", "api_key": "SECRET-1",
-                               "nested": {"password": "SECRET-2"}})
+    leaked = make_sync_object(
+        "task", "task:1", {"state": "x", "api_key": "SECRET-1", "nested": {"password": "SECRET-2"}}
+    )
     manager = SyncManager(policy=SyncPolicy(), transport=MockSyncTransport())
     assert manager.policy.classify(leaked) is SyncClass.SYNC_FORBIDDEN
     report = manager.sync([leaked])
@@ -162,8 +167,10 @@ def test_16_credential_redaction():
 
 
 def test_17_secret_filtering():
-    assert SyncPolicy().classify(
-        make_sync_object("memory", "m:1", {"token": "abc"})) is SyncClass.SYNC_FORBIDDEN
+    assert (
+        SyncPolicy().classify(make_sync_object("memory", "m:1", {"token": "abc"}))
+        is SyncClass.SYNC_FORBIDDEN
+    )
     allowed = make_sync_object("memory", "m:1", {"content": "plain summary"})
     assert SyncPolicy().classify(allowed) is SyncClass.SYNC_RESTRICTED
 
@@ -213,8 +220,7 @@ def test_20_audit_events():
 def test_sync_perf_smoke():
     transport = MockSyncTransport()
     manager = SyncManager(transport=transport)
-    objects = [make_sync_object("task", f"task:{i}", {"state": "x"})
-               for i in range(200)]
+    objects = [make_sync_object("task", f"task:{i}", {"state": "x"}) for i in range(200)]
     started = time.monotonic()
     manifest = manager.manifest(objects)
     report = manager.sync(objects)

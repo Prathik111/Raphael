@@ -36,8 +36,7 @@ class OCIModelProvider(ModelProvider):
     ) -> None:
         super().__init__(
             provider_id,
-            capabilities or ModelCapabilities(structured_output=True,
-                                              context_length=128000),
+            capabilities or ModelCapabilities(structured_output=True, context_length=128000),
         )
         self._oci = oci
         self._model = model
@@ -47,11 +46,9 @@ class OCIModelProvider(ModelProvider):
         try:
             text = self._oci.complete_remote(self._model, request.prompt)
         except (CloudUnavailableError, CloudAuthError) as exc:
-            raise ModelUnavailableError(
-                f"OCI model {self._model!r} unavailable: {exc}") from exc
+            raise ModelUnavailableError(f"OCI model {self._model!r} unavailable: {exc}") from exc
         except ModelError:
             raise
         except Exception as exc:  # noqa: BLE001 -- normalize foreign errors
-            raise ModelUnavailableError(
-                f"OCI model {self._model!r} failed") from exc
+            raise ModelUnavailableError(f"OCI model {self._model!r} failed") from exc
         return ModelResponse(text=text, model=self.provider_id)

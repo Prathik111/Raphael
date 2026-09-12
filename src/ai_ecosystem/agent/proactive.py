@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import time
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 from ai_ecosystem.core.errors.exceptions import DomainValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
-from ai_ecosystem.core.models.base import Entity, utcnow
+from ai_ecosystem.core.models.base import Entity
 from ai_ecosystem.core.models.enums import EventType
 from ai_ecosystem.learning.safety import LearningRisk
 
@@ -79,9 +80,9 @@ class ProactiveEngine:
 
     def __init__(
         self,
-        config: Optional[ProactiveConfig] = None,
-        bus: Optional[EventBus] = None,
-        clock: Optional[Callable[[], float]] = None,
+        config: ProactiveConfig | None = None,
+        bus: EventBus | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._config = config or ProactiveConfig()
         self._bus = bus
@@ -100,15 +101,20 @@ class ProactiveEngine:
         """Remove a trigger."""
         return self._triggers.pop(trigger_id, None) is not None
 
-    def evaluate(self, trigger_id: str, subject: str = "",
-                 risk: LearningRisk = LearningRisk.LOW,
-                 summary: str = "") -> Optional[ProactiveProposal]:
+    def evaluate(
+        self,
+        trigger_id: str,
+        subject: str = "",
+        risk: LearningRisk = LearningRisk.LOW,
+        summary: str = "",
+    ) -> ProactiveProposal | None:
         """Turn one fired trigger into a proposal (or None: suppressed)."""
         trigger = self._triggers.get(trigger_id)
         if trigger is None or not self._config.enabled or not trigger.enabled:
             return None
-        if trigger.kind.value not in (self._config.allowed_categories or
-                                      [k.value for k in TriggerKind]):
+        if trigger.kind.value not in (
+            self._config.allowed_categories or [k.value for k in TriggerKind]
+        ):
             return None
         if self._in_quiet_hours():
             return None
@@ -120,13 +126,16 @@ class ProactiveEngine:
         if len(self._proposal_times) >= self._config.max_per_hour:
             return None  # frequency cap applies to proposals, not just runs
         proposal = ProactiveProposal(
-            trigger_id=trigger_id, subject=subject,
-            summary=summary or trigger.summary, risk=risk)
+            trigger_id=trigger_id, subject=subject, summary=summary or trigger.summary, risk=risk
+        )
         self._proposals[proposal.id] = proposal
         self._proposal_times.append(now)
         self._last_fired[key] = now
-        self._emit(EventType.PROACTIVE_TRIGGERED, "", {
-            "trigger_id": trigger_id, "proposal_id": proposal.id})
+        self._emit(
+            EventType.PROACTIVE_TRIGGERED,
+            "",
+            {"trigger_id": trigger_id, "proposal_id": proposal.id},
+        )
         if not self._config.require_approval and risk is LearningRisk.LOW:
             proposal.state = ProposalState.APPROVED
         return proposal
@@ -147,8 +156,12 @@ class ProactiveEngine:
         proposal.state = ProposalState.REJECTED
         return proposal
 
-    def execute(self, proposal_id: str, execute_fn: Callable[[], Any],
-                verify_fn: Optional[Callable[[Any], bool]] = None) -> ProactiveProposal:
+    def execute(
+        self,
+        proposal_id: str,
+        execute_fn: Callable[[], Any],
+        verify_fn: Callable[[Any], bool] | None = None,
+    ) -> ProactiveProposal:
         """Run an approved proposal through injected callables."""
         proposal = self._require(proposal_id)
         if proposal.state is not ProposalState.APPROVED:
@@ -157,21 +170,22 @@ class ProactiveEngine:
             outcome = execute_fn()
         except Exception as exc:  # noqa: BLE001 -- proposal fails, engine stands
             proposal.state = ProposalState.FAILED
-            self._emit(EventType.PROACTIVE_EXECUTED, "",
-                       {"proposal_id": proposal.id, "success": False,
-                        "error": str(exc)})
+            self._emit(
+                EventType.PROACTIVE_EXECUTED,
+                "",
+                {"proposal_id": proposal.id, "success": False, "error": str(exc)},
+            )
             return proposal
         verified = verify_fn(outcome) if verify_fn is not None else True
-        proposal.state = (ProposalState.EXECUTED if verified
-                          else ProposalState.FAILED)
-        self._emit(EventType.PROACTIVE_EXECUTED, "",
-                   {"proposal_id": proposal.id, "success": verified})
+        proposal.state = ProposalState.EXECUTED if verified else ProposalState.FAILED
+        self._emit(
+            EventType.PROACTIVE_EXECUTED, "", {"proposal_id": proposal.id, "success": verified}
+        )
         return proposal
 
     def pending(self) -> list[ProactiveProposal]:
         """Proposals awaiting a decision."""
-        return [p for p in self._proposals.values()
-                if p.state is ProposalState.PROPOSED]
+        return [p for p in self._proposals.values() if p.state is ProposalState.PROPOSED]
 
     def _in_quiet_hours(self) -> bool:
         import time as _time
@@ -194,5 +208,4 @@ class ProactiveEngine:
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
-            self._bus.publish(
-                Event(event_type=event_type, task_id=task_id, payload=payload))
+            self._bus.publish(Event(event_type=event_type, task_id=task_id, payload=payload))

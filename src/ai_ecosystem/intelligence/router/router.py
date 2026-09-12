@@ -6,7 +6,12 @@ from pydantic import BaseModel, Field
 
 from ai_ecosystem.core.errors.exceptions import ModelError, NoSuitableModelError
 from ai_ecosystem.security.data_policy import DataClass
-from ai_ecosystem.intelligence.models.providers import ModelProvider, ModelRequest, ModelResponse, request_structured
+from ai_ecosystem.intelligence.models.providers import (
+    ModelProvider,
+    ModelRequest,
+    ModelResponse,
+    request_structured,
+)
 
 
 class ProviderProfile(BaseModel):
@@ -40,7 +45,9 @@ class ModelRouter:
         if profile.provider_id and profile.provider_id != provider.provider_id:
             raise ValueError("provider profile id does not match provider id")
         self._providers[provider.provider_id] = provider
-        self._profiles[provider.provider_id] = profile.model_copy(update={"provider_id": provider.provider_id})
+        self._profiles[provider.provider_id] = profile.model_copy(
+            update={"provider_id": provider.provider_id}
+        )
 
     @staticmethod
     def _privacy_allowed(profile: ProviderProfile, requirements: RoutingRequirements) -> bool:
@@ -50,7 +57,9 @@ class ModelRouter:
         if requirements.privacy == "local-only":
             return profile.local
         if cls is DataClass.SENSITIVE:
-            return profile.local or (profile.trusted and cls in profile.data_classes and not profile.trains_on_data)
+            return profile.local or (
+                profile.trusted and cls in profile.data_classes and not profile.trains_on_data
+            )
         if cls is DataClass.PERSONAL:
             return profile.local or (profile.trusted and cls in profile.data_classes)
         if cls not in profile.data_classes and not profile.local:
@@ -94,8 +103,9 @@ class ModelRouter:
         assert last_error is not None
         raise last_error
 
-    def request_structured(self, requirements: RoutingRequirements, request: ModelRequest,
-                           model_cls: type[BaseModel]) -> BaseModel:
+    def request_structured(
+        self, requirements: RoutingRequirements, request: ModelRequest, model_cls: type[BaseModel]
+    ) -> BaseModel:
         options = self.candidates(requirements)
         if not options:
             raise NoSuitableModelError(f"no provider satisfies {requirements.model_dump()}")

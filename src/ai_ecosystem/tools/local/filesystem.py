@@ -78,16 +78,34 @@ def filesystem_tools(root: str | Path) -> list[tuple[Tool, ToolHandler]]:
     """Build spawn-safe (contract, handler) pairs; no lambdas/closures."""
     base = _root(root)
     return [
-        (Tool(name="filesystem.read", description="Read a UTF-8 text file under the allowed root.",
-              input_schema={"required": ["path"], "properties": {"path": "string"}},
-              risk_level=RiskLevel.LOW, capabilities=["read-only"]),
-         partial(_read, root=base)),
-        (Tool(name="filesystem.list", description="List directory entries under the allowed root.",
-              input_schema={"required": [], "properties": {"path": "string"}},
-              risk_level=RiskLevel.LOW, capabilities=["read-only"]),
-         partial(_list, root=base)),
-        (Tool(name="filesystem.exists", description="Check whether a path exists under the allowed root.",
-              input_schema={"required": ["path"], "properties": {"path": "string"}},
-              risk_level=RiskLevel.LOW, capabilities=["read-only"]),
-         partial(_exists, root=base)),
+        (
+            Tool(
+                name="filesystem.read",
+                description="Read a UTF-8 text file under the allowed root.",
+                input_schema={"required": ["path"], "properties": {"path": "string"}},
+                risk_level=RiskLevel.LOW,
+                capabilities=["read-only"],
+            ),
+            partial(_read, root=base),
+        ),
+        (
+            Tool(
+                name="filesystem.list",
+                description="List directory entries under the allowed root.",
+                input_schema={"required": [], "properties": {"path": "string"}},
+                risk_level=RiskLevel.LOW,
+                capabilities=["read-only"],
+            ),
+            partial(_list, root=base),
+        ),
+        (
+            Tool(
+                name="filesystem.exists",
+                description="Check whether a path exists under the allowed root.",
+                input_schema={"required": ["path"], "properties": {"path": "string"}},
+                risk_level=RiskLevel.LOW,
+                capabilities=["read-only"],
+            ),
+            partial(_exists, root=base),
+        ),
     ]

@@ -9,7 +9,7 @@ plan schema.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import Field
 
@@ -34,12 +34,8 @@ _NON_SUCCESS_TERMINAL = frozenset(
 )
 
 _GRAPH_TRANSITIONS: dict[StepState, frozenset[StepState]] = {
-    StepState.PENDING: frozenset(
-        {StepState.READY, StepState.SKIPPED, StepState.CANCELLED}
-    ),
-    StepState.READY: frozenset(
-        {StepState.RUNNING, StepState.SKIPPED, StepState.CANCELLED}
-    ),
+    StepState.PENDING: frozenset({StepState.READY, StepState.SKIPPED, StepState.CANCELLED}),
+    StepState.READY: frozenset({StepState.RUNNING, StepState.SKIPPED, StepState.CANCELLED}),
     StepState.RUNNING: frozenset(
         {
             StepState.SUCCEEDED,
@@ -62,13 +58,13 @@ class GraphNode(Entity):
     step: PlanStep = Field(default_factory=PlanStep)
     state: StepState = StepState.PENDING
     attempts: int = 0
-    result: Optional[ToolResult] = None
+    result: ToolResult | None = None
     tool_results: list[ToolResult] = Field(default_factory=list)
     error: str = ""
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     interrupted: bool = False
-    timeout_s: Optional[float] = None
+    timeout_s: float | None = None
 
     def transition(self, to_state: StepState) -> None:
         """Move state; raises DomainValidationError on illegal edges."""
@@ -94,7 +90,8 @@ class TaskGraph:
             for dep in node.step.dependencies:
                 if dep not in known:
                     raise DomainValidationError(
-                        f"step {node.step.id!r} depends on unknown step {dep!r}")
+                        f"step {node.step.id!r} depends on unknown step {dep!r}"
+                    )
         self.nodes = list(nodes)
         self._by_id = {node.step.id: node for node in nodes}
         self._dependents: dict[str, list[str]] = {sid: [] for sid in ids}
@@ -103,7 +100,7 @@ class TaskGraph:
                 self._dependents[dep].append(node.step.id)
 
     @classmethod
-    def from_plan(cls, plan: Plan) -> "TaskGraph":
+    def from_plan(cls, plan: Plan) -> TaskGraph:
         """Build from a plan; invalid graphs raise PlanValidationError."""
         DependencyResolver.order(plan.steps)  # cycle + missing-dep check
         return cls([GraphNode(step=step) for step in plan.steps])
@@ -118,10 +115,7 @@ class TaskGraph:
         for node in self.nodes:
             if node.state is not StepState.PENDING:
                 continue
-            if all(
-                self._by_id[dep].state is StepState.SUCCEEDED
-                for dep in node.step.dependencies
-            ):
+            if all(self._by_id[dep].state is StepState.SUCCEEDED for dep in node.step.dependencies):
                 result.append(node)
         return result
 
@@ -161,16 +155,14 @@ class TaskGraph:
                 "interrupted": node.interrupted,
                 "timeout_s": node.timeout_s,
                 "started_at": node.started_at.isoformat() if node.started_at else None,
-                "completed_at": node.completed_at.isoformat()
-                if node.completed_at
-                else None,
+                "completed_at": node.completed_at.isoformat() if node.completed_at else None,
                 "result": node.result.model_dump() if node.result else None,
                 "tool_results": [r.model_dump() for r in node.tool_results],
             }
         return {"nodes": states}
 
     @classmethod
-    def restore(cls, plan: Plan, snapshot: dict[str, Any]) -> "TaskGraph":
+    def restore(cls, plan: Plan, snapshot: dict[str, Any]) -> TaskGraph:
         """Rebuild from a plan + snapshot.
 
         RUNNING nodes become PENDING with ``interrupted=True``: a dead
@@ -213,8 +205,7 @@ class TaskGraph:
                 if saved.get("result"):
                     node.result = ToolResult.model_validate(saved["result"])
                 node.tool_results = [
-                    ToolResult.model_validate(r)
-                    for r in saved.get("tool_results", [])
+                    ToolResult.model_validate(r) for r in saved.get("tool_results", [])
                 ]
             except (ValueError, TypeError) as exc:
                 node.state = StepState.PENDING

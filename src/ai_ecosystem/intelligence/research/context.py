@@ -34,15 +34,13 @@ class ContextBuilder:
             if not items:
                 lines.append("(no evidence extracted)")
             for item in items:
-                lines.append(
-                    f"- [{item.id[:8]}|conf {item.confidence:.2f}] {item.claim}"
-                )
+                lines.append(f"- [{item.id[:8]}|conf {item.confidence:.2f}] {item.claim}")
             lines.append("")
         if result.conflicts:
             lines.append("--- Conflicts (unresolved, all sides preserved) ---")
             for conflict in result.conflicts:
                 lines.append(f"Topic: {conflict.topic}")
-                for claim, source_id in zip(conflict.claims, conflict.source_ids):
+                for claim, source_id in zip(conflict.claims, conflict.source_ids, strict=False):
                     lines.append(f"  x [{source_id[:8]}] {claim}")
             lines.append("")
         if result.duplicates:

@@ -20,8 +20,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from functools import partial
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -92,14 +91,26 @@ class SandboxUnavailableError(ToolExecutionError):
 # These are process metadata rather than application secrets.  Everything else
 # is excluded by default so credentials, proxy tokens and application-specific
 # variables never enter an untrusted worker accidentally.
-_BASE_ENV_KEYS = frozenset({
-    "PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
-    "COMSPEC", "PATHEXT", "HOME", "LANG", "LC_ALL",
-})
+_BASE_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "SystemRoot",
+        "SYSTEMROOT",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "PATHEXT",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+    }
+)
 
 
-def _scrubbed_env(extra: Optional[dict[str, str]] = None,
-                  allowed: frozenset[str] | None = None) -> dict[str, str]:
+def _scrubbed_env(
+    extra: dict[str, str] | None = None, allowed: frozenset[str] | None = None
+) -> dict[str, str]:
     keys = _BASE_ENV_KEYS | (allowed or frozenset())
     result: dict[str, str] = {}
     for key in keys:
@@ -204,7 +215,12 @@ class _WindowsJob:
         self._kernel32 = kernel32
         kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
         kernel32.CreateJobObjectW.restype = ctypes.c_void_p
-        kernel32.SetInformationJobObject.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.SetInformationJobObject.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        ]
         kernel32.SetInformationJobObject.restype = ctypes.c_int
         kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
         kernel32.OpenProcess.restype = ctypes.c_void_p
@@ -231,8 +247,12 @@ class _WindowsJob:
             flags |= self.JOB_OBJECT_LIMIT_JOB_TIME
             limits.BasicLimitInformation.PerJobUserTimeLimit = int(profile.max_cpu_s * 10_000_000)
         limits.BasicLimitInformation.LimitFlags = flags
-        ok = kernel32.SetInformationJobObject(handle, self.JobObjectExtendedLimitInformation,
-                                               ctypes.byref(limits), ctypes.sizeof(limits))
+        ok = kernel32.SetInformationJobObject(
+            handle,
+            self.JobObjectExtendedLimitInformation,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        )
         if not ok:
             error = ctypes.get_last_error()
             self.close()
@@ -241,7 +261,9 @@ class _WindowsJob:
     def assign(self, process: mp.Process) -> None:
         if self.handle is None or process.pid is None:
             return
-        access = self.PROCESS_SET_QUOTA | self.PROCESS_TERMINATE | self.PROCESS_QUERY_LIMITED_INFORMATION
+        access = (
+            self.PROCESS_SET_QUOTA | self.PROCESS_TERMINATE | self.PROCESS_QUERY_LIMITED_INFORMATION
+        )
         process_handle = self._kernel32.OpenProcess(access, 0, process.pid)
         if not process_handle:
             error = ctypes.get_last_error()
@@ -277,20 +299,35 @@ class LocalSandboxProvider(SandboxProvider):
         with self._meta_lock:
             return self._locks.setdefault(profile, threading.RLock())
 
-    def scrubbed_env(self, extra: Optional[dict[str, str]] = None,
-                     allowed: frozenset[str] | None = None) -> dict[str, str]:
+    def scrubbed_env(
+        self, extra: dict[str, str] | None = None, allowed: frozenset[str] | None = None
+    ) -> dict[str, str]:
         return _scrubbed_env(extra, allowed)
 
-    def run(self, tool: Tool, handler: ToolHandler, arguments: dict,
-            profile: SandboxProfile, timeout_s: float, cancel_token: Any = None) -> ToolResult:
+    def run(
+        self,
+        tool: Tool,
+        handler: ToolHandler,
+        arguments: dict,
+        profile: SandboxProfile,
+        timeout_s: float,
+        cancel_token: Any = None,
+    ) -> ToolResult:
         if profile.max_processes < 1:
             raise ToolExecutionError(tool.name, "sandbox max_processes must be at least 1")
         if profile.max_disk_mb:
-            raise ToolExecutionError(tool.name, "disk quotas are not enforceable by this local provider; refusing execution")
+            raise ToolExecutionError(
+                tool.name,
+                "disk quotas are not enforceable by this local provider; refusing execution",
+            )
         if os.name != "nt" and (profile.max_memory_mb or profile.max_cpu_s):
-            raise ToolExecutionError(tool.name, "requested memory/CPU quota is not enforceable by this provider")
+            raise ToolExecutionError(
+                tool.name, "requested memory/CPU quota is not enforceable by this provider"
+            )
         if tool.network_access and not profile.allow_network:
-            raise ToolExecutionError(tool.name, f"network use denied by sandbox profile {profile.name!r}")
+            raise ToolExecutionError(
+                tool.name, f"network use denied by sandbox profile {profile.name!r}"
+            )
         if tool.secrets_access:
             raise ToolExecutionError(tool.name, "secret access is not granted by the local sandbox")
         deadline = min(timeout_s, profile.timeout_s)
@@ -312,7 +349,9 @@ class LocalSandboxProvider(SandboxProvider):
                         job.assign(process)
                     except OSError as exc:
                         _terminate_process(process)
-                        raise ToolExecutionError(tool.name, f"could not attach worker to Windows Job Object: {exc}") from exc
+                        raise ToolExecutionError(
+                            tool.name, f"could not attach worker to Windows Job Object: {exc}"
+                        ) from exc
                 start_event.set()
                 started = time.monotonic()
                 while process.is_alive():
@@ -331,7 +370,9 @@ class LocalSandboxProvider(SandboxProvider):
                 try:
                     ok, value = result_queue.get(timeout=0.2)
                 except queue.Empty as exc:
-                    raise ToolExecutionError(tool.name, "sandbox worker exited without a result") from exc
+                    raise ToolExecutionError(
+                        tool.name, "sandbox worker exited without a result"
+                    ) from exc
                 if not ok:
                     raise ToolExecutionError(tool.name, value)
                 if not isinstance(value, ToolResult):

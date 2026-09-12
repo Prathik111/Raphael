@@ -74,8 +74,7 @@ class RuntimeAPI:
 
     def list_tasks(self) -> list[dict[str, Any]]:
         """All known tasks, newest last."""
-        tasks = sorted(self._runtime.manager._tasks.list(),
-                       key=lambda t: t.created_at)
+        tasks = sorted(self._runtime.manager._tasks.list(), key=lambda t: t.created_at)
         return [self._task_view(task) for task in tasks]
 
     def cancel_task(self, task_id: str) -> dict[str, Any]:
@@ -104,8 +103,11 @@ class RuntimeAPI:
     def get_task_status(self, task_id: str) -> dict[str, Any]:
         """Current lifecycle state of one task."""
         task = self._require(task_id)
-        return {"task_id": task.id, "state": task.state.value,
-                "next": sorted(s.value for s in sm.next_states(task.state))}
+        return {
+            "task_id": task.id,
+            "state": task.state.value,
+            "next": sorted(s.value for s in sm.next_states(task.state)),
+        }
 
     def get_task_events(self, task_id: str, since: int = 0) -> list[dict[str, Any]]:
         """Event Store entries for one task (polling fallback for the UI).
@@ -116,9 +118,13 @@ class RuntimeAPI:
         """
         self._require(task_id)
         return [
-            {"seq": seq, "type": event.event_type.value,
-             "task_id": event.task_id, "payload": _redacted(event),
-             "created_at": event.created_at.isoformat()}
+            {
+                "seq": seq,
+                "type": event.event_type.value,
+                "task_id": event.task_id,
+                "payload": _redacted(event),
+                "created_at": event.created_at.isoformat(),
+            }
             for seq, event in self._events_for_since(task_id, since)
         ]
 
@@ -146,13 +152,18 @@ class RuntimeAPI:
             arguments = redact(dict(request.arguments))
         except Exception:  # noqa: BLE001 -- redaction degrades, never fails
             arguments = {"redacted": True}
-        return {"id": request.id, "task_id": request.task_id,
-                "tool": request.tool, "arguments": arguments,
-                "risk": request.risk, "reason": request.reason,
-                "policy": request.policy, "status": request.status.value,
-                "created_at": request.created_at.isoformat(),
-                "expires_at": (request.expires_at.isoformat()
-                               if request.expires_at else None)}
+        return {
+            "id": request.id,
+            "task_id": request.task_id,
+            "tool": request.tool,
+            "arguments": arguments,
+            "risk": request.risk,
+            "reason": request.reason,
+            "policy": request.policy,
+            "status": request.status.value,
+            "created_at": request.created_at.isoformat(),
+            "expires_at": (request.expires_at.isoformat() if request.expires_at else None),
+        }
 
     def _approval_store(self) -> Any:
         if self._approvals is None:
@@ -171,23 +182,19 @@ class RuntimeAPI:
             try:
                 wanted = ApprovalStatus(status)
             except ValueError:
-                raise ApiError(
-                    "malformed_request",
-                    f"unknown approval status {status!r}") from None
-            requests = [r for r in self._approvals.all()
-                        if r.status is wanted]
+                raise ApiError("malformed_request", f"unknown approval status {status!r}") from None
+            requests = [r for r in self._approvals.all() if r.status is wanted]
         return [self._approval_view(r) for r in requests]
 
-    def decide_approval(self, approval_id: str, approved: bool,
-                        decided_by: str = "operator") -> dict[str, Any]:
+    def decide_approval(
+        self, approval_id: str, approved: bool, decided_by: str = "operator"
+    ) -> dict[str, Any]:
         """Approve or deny one PENDING request (human path only)."""
         if not isinstance(approval_id, str) or not approval_id:
-            raise ApiError("malformed_request",
-                           "approval_id must be a non-empty string")
+            raise ApiError("malformed_request", "approval_id must be a non-empty string")
         store = self._approval_store()
         try:
-            decided = store.decide(approval_id, approved,
-                                   decided_by=decided_by or "operator")
+            decided = store.decide(approval_id, approved, decided_by=decided_by or "operator")
         except Exception as exc:
             raise ApiError("invalid_transition", str(exc)) from exc
         return self._approval_view(decided)
@@ -206,37 +213,45 @@ class RuntimeAPI:
         if self._event_store is None:
             return []
         kinds = {"PermissionGranted", "PermissionDenied"}
-        matched = [event for event in self._event_store.list()
-                   if event.event_type.value in kinds]
-        return [{"type": event.event_type.value, "task_id": event.task_id,
-                 "payload": _redacted(event),
-                 "created_at": event.created_at.isoformat()}
-                for event in matched[-max(0, limit):]]
+        matched = [event for event in self._event_store.list() if event.event_type.value in kinds]
+        return [
+            {
+                "type": event.event_type.value,
+                "task_id": event.task_id,
+                "payload": _redacted(event),
+                "created_at": event.created_at.isoformat(),
+            }
+            for event in matched[-max(0, limit) :]
+        ]
 
     def get_system_awareness(self) -> dict[str, Any]:
         """Redacted awareness summary (unavailable when not configured)."""
         if self._awareness is None:
             raise ApiError("unavailable", "system awareness not configured")
         snapshot = self._awareness.snapshot()
-        return {"os": snapshot.operating_system, "arch": snapshot.architecture,
-                "pressure": snapshot.pressure.value,
-                "capabilities": {n: v for n, v in
-                                 snapshot.capabilities.model_dump().items() if v}}
+        return {
+            "os": snapshot.operating_system,
+            "arch": snapshot.architecture,
+            "pressure": snapshot.pressure.value,
+            "capabilities": {n: v for n, v in snapshot.capabilities.model_dump().items() if v},
+        }
 
     def get_models(self) -> list[dict[str, Any]]:
         """Provider ids + capabilities only (never credentials)."""
         if self._models is None:
             return []
-        return [{"provider_id": p.provider_id,
-                 "capabilities": p.capabilities.model_dump()}
-                for p in self._models]
+        return [
+            {"provider_id": p.provider_id, "capabilities": p.capabilities.model_dump()}
+            for p in self._models
+        ]
 
     def get_skills(self) -> list[dict[str, Any]]:
         """Skill names + versions only (templates stay runtime-side)."""
         if self._skills is None:
             return []
-        return [{"name": s.name, "version": s.version, "status": s.status.value}
-                for s in self._skills]
+        return [
+            {"name": s.name, "version": s.version, "status": s.status.value} for s in self._skills
+        ]
 
     # -- internals ----------------------------------------------------------
 
@@ -250,29 +265,33 @@ class RuntimeAPI:
 
     @staticmethod
     def _task_view(task: Task) -> dict[str, Any]:
-        return {"task_id": task.id, "title": task.title,
-                "state": task.state.value,
-                "created_at": task.created_at.isoformat(),
-                "completed": task.state in (TaskState.COMPLETED, TaskState.FAILED,
-                                            TaskState.CANCELLED)}
+        return {
+            "task_id": task.id,
+            "title": task.title,
+            "state": task.state.value,
+            "created_at": task.created_at.isoformat(),
+            "completed": task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED),
+        }
 
     def _events_for(self, task_id: str) -> list[Event]:
         if self._event_store is None:
             return []
         return [e for e in self._event_store.list() if e.task_id == task_id]
 
-    def _events_for_since(self, task_id: str,
-                          since: int) -> list[tuple[int, Event]]:
+    def _events_for_since(self, task_id: str, since: int) -> list[tuple[int, Event]]:
         """(durable sequence, event) for one task newer than ``since``."""
         if self._event_store is None:
             return []
         events_since = getattr(self._event_store, "events_since", None)
         if callable(events_since):
-            return [(seq, event) for seq, event in events_since(since - 1)
-                    if event.task_id == task_id]
-        return [(seq, event)
-                for seq, event in enumerate(self._event_store.list())
-                if event.task_id == task_id and seq >= since]
+            return [
+                (seq, event) for seq, event in events_since(since - 1) if event.task_id == task_id
+            ]
+        return [
+            (seq, event)
+            for seq, event in enumerate(self._event_store.list())
+            if event.task_id == task_id and seq >= since
+        ]
 
 
 def _redacted(event: Event) -> dict[str, Any]:

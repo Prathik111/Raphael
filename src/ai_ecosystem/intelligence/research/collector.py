@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.agent.recovery.classification import FailureClassifier
 from ai_ecosystem.agent.recovery.policy import RetryPolicy
@@ -53,7 +53,7 @@ class SourceCollector:
         runner: ToolRunner,
         registry: ToolRegistry,
         search_tool: str = "web.search",
-        retry_policy: Optional[RetryPolicy] = None,
+        retry_policy: RetryPolicy | None = None,
         max_attempts: int = 2,
     ) -> None:
         self._runner = runner
@@ -69,7 +69,8 @@ class SourceCollector:
         for attempt in range(1, self._max_attempts + 1):
             attempts = attempt
             call = self._registry.build_call(
-                task_id, self._search_tool,
+                task_id,
+                self._search_tool,
                 {"query": query.query, "max_results": query.max_sources},
             )
             try:
@@ -106,10 +107,13 @@ class SourceCollector:
                 continue
             key = source_key(source)
             if key in seen:
-                collected.duplicates.append(DuplicateRef(
-                    source_id=source.id, duplicate_of=seen[key],
-                    reason="identical source reference already collected",
-                ))
+                collected.duplicates.append(
+                    DuplicateRef(
+                        source_id=source.id,
+                        duplicate_of=seen[key],
+                        reason="identical source reference already collected",
+                    )
+                )
                 continue
             seen[key] = source.id
             collected.sources.append(source)

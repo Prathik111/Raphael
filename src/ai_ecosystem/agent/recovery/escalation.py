@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.base import utcnow
@@ -27,17 +27,15 @@ class Escalation:
 class EscalationManager:
     """Records escalations and announces them on the event bus."""
 
-    def __init__(self, bus: Optional[EventBus] = None) -> None:
+    def __init__(self, bus: EventBus | None = None) -> None:
         self._bus = bus
         self.escalations: list[Escalation] = []
 
     def escalate(
-        self, task_id: str, reason: str, evidence: Optional[list[str]] = None
+        self, task_id: str, reason: str, evidence: list[str] | None = None
     ) -> Escalation:
         """Record an escalation and emit RECOVERY_EXHAUSTED."""
-        escalation = Escalation(
-            task_id=task_id, reason=reason, evidence=list(evidence or [])
-        )
+        escalation = Escalation(task_id=task_id, reason=reason, evidence=list(evidence or []))
         self.escalations.append(escalation)
         if self._bus is not None:
             self._bus.publish(

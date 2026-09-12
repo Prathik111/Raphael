@@ -27,7 +27,11 @@ def _resolve_cwd(raw: object, root: object, tool: str) -> str:
     candidate = Path(raw)
     if root is not None:
         root_path = Path(root).resolve()
-        resolved = (root_path / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+        resolved = (
+            (root_path / candidate).resolve()
+            if not candidate.is_absolute()
+            else candidate.resolve()
+        )
         try:
             resolved.relative_to(root_path)
         except ValueError:
@@ -102,7 +106,10 @@ def git_tools(root: object = None) -> list[tuple[Tool, ToolHandler]]:
             Tool(
                 name="git.status",
                 description="Show short git status for a repository.",
-                input_schema={"required": ["cwd"], "properties": {"cwd": "string", "timeout_s": "number"}},
+                input_schema={
+                    "required": ["cwd"],
+                    "properties": {"cwd": "string", "timeout_s": "number"},
+                },
                 risk_level=RiskLevel.LOW,
                 timeout_s=CONTRACT_TIMEOUT_S,
                 capabilities=["read-only"],
@@ -113,7 +120,10 @@ def git_tools(root: object = None) -> list[tuple[Tool, ToolHandler]]:
             Tool(
                 name="git.diff",
                 description="Show git diff stat for a repository.",
-                input_schema={"required": ["cwd"], "properties": {"cwd": "string", "timeout_s": "number"}},
+                input_schema={
+                    "required": ["cwd"],
+                    "properties": {"cwd": "string", "timeout_s": "number"},
+                },
                 risk_level=RiskLevel.LOW,
                 timeout_s=CONTRACT_TIMEOUT_S,
                 capabilities=["read-only"],

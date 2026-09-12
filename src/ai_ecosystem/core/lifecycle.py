@@ -9,19 +9,22 @@ SQLite's online backup API (consistent snapshots, no dump parsing).
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 
-def startup_recovery(db: Any, runtime: Any = None,
-                     scheduler_repo: Any = None) -> dict[str, Any]:
+def startup_recovery(db: Any, runtime: Any = None, scheduler_repo: Any = None) -> dict[str, Any]:
     """Recover crash-interrupted state; returns a structured report."""
     # Local imports: core must not depend on tools/agents at module load.
     from ai_ecosystem.agent.multi.manager import AgentManager, AgentRegistry
     from ai_ecosystem.security.audit import AuditLog
     from ai_ecosystem.tools.registry.registry import ToolRegistry
 
-    report: dict[str, Any] = {"agent_tasks_reset": 0, "scheduler_jobs_reset": 0,
-                              "audit_ok": True, "audit_detail": ""}
+    report: dict[str, Any] = {
+        "agent_tasks_reset": 0,
+        "scheduler_jobs_reset": 0,
+        "audit_ok": True,
+        "audit_detail": "",
+    }
     if runtime is not None:
         manager = AgentManager(AgentRegistry(db), runtime, ToolRegistry())
         reset = manager.resume_interrupted()

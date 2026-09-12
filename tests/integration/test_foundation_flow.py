@@ -67,9 +67,7 @@ def test_foundation_flow(tmp_path):
             runtime.manager.transition(task.id, state)
 
         backend = ModelReasoningBackend(
-            MockModelProvider(
-                "mock", handler=lambda req: ModelResponse(structured=CANNED)
-            )
+            MockModelProvider("mock", handler=lambda req: ModelResponse(structured=CANNED))
         )
         registry = ToolRegistry()
         for tool, handler in filesystem_tools(workspace):
@@ -92,9 +90,7 @@ def test_foundation_flow(tmp_path):
         arguments = {"s1": {"path": "."}, "s2": {"path": "notes.txt"}}
         for step in ordered:
             call = registry.build_call(task.id, step.tools[0], arguments[step.id])
-            ctx.permissions.append(
-                authorizer.authorize(task.id, registry.get(call.tool), call)
-            )
+            ctx.permissions.append(authorizer.authorize(task.id, registry.get(call.tool), call))
             result = runner.run(call)
             assert result.success, result.error
             ctx.tool_results.append(result)

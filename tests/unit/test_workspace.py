@@ -10,7 +10,6 @@ from ai_ecosystem.core.models.enums import EventType
 from ai_ecosystem.core.persistence import Database
 from ai_ecosystem.interface import (
     DataRef,
-    NodeLayout,
     NodeState,
     NodeType,
     SqliteWorkspaceRepository,
@@ -40,8 +39,7 @@ def test_2_node_update(manager):
     workspaces, _ = manager
     workspace = workspaces.create()
     node = workspaces.add_node(workspace.id, NodeType.CODE, {"language": "python"})
-    updated = workspaces.update_node(workspace.id, node.id, {"language": "python",
-                                                             "lines": 10})
+    updated = workspaces.update_node(workspace.id, node.id, {"language": "python", "lines": 10})
     assert updated.props["lines"] == 10
 
 
@@ -140,24 +138,28 @@ def test_11_oversized_payload_rejection(manager):
     workspaces, _ = manager
     workspace = workspaces.create()
     with pytest.raises(DomainValidationError, match="exceed"):
-        workspaces.apply_update(workspace.id, {"type": "prose",
-                                               "props": {"blob": "x" * 100_000}})
+        workspaces.apply_update(workspace.id, {"type": "prose", "props": {"blob": "x" * 100_000}})
 
 
 def test_12_model_generated_update_validated(manager):
     workspaces, _ = manager
     workspace = workspaces.create("research")
     # Shape a model would produce via structured output:
-    update = {"type": "prose", "props": {"title": "Findings", "body": "watts"},
-              "salience": 0.9, "affordances": ["expand", "inspect"],
-              "data_ref": {"kind": "research", "ref_id": "r1"}}
+    update = {
+        "type": "prose",
+        "props": {"title": "Findings", "body": "watts"},
+        "salience": 0.9,
+        "affordances": ["expand", "inspect"],
+        "data_ref": {"kind": "research", "ref_id": "r1"},
+    }
     node = workspaces.apply_update(workspace.id, update)
     assert node.props["title"] == "Findings"
     assert node.data_ref == DataRef(kind="research", ref_id="r1")
     assert node.salience == 0.9
     with pytest.raises(DomainValidationError):
-        workspaces.apply_update(workspace.id, {"type": "prose", "props": {},
-                                               "affordances": ["execute"]})
+        workspaces.apply_update(
+            workspace.id, {"type": "prose", "props": {}, "affordances": ["execute"]}
+        )
 
 
 def test_13_project_scoping(manager):

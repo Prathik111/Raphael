@@ -17,10 +17,21 @@ CONTRACT_TIMEOUT_S = 120.0
 
 # Explicitly safe process metadata. Credentials/proxy tokens/application
 # configuration are never inherited by an untrusted command.
-SAFE_ENV = frozenset({
-    "PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
-    "COMSPEC", "PATHEXT", "HOME", "LANG", "LC_ALL",
-})
+SAFE_ENV = frozenset(
+    {
+        "PATH",
+        "SystemRoot",
+        "SYSTEMROOT",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "PATHEXT",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+    }
+)
 
 
 def _scrubbed_env(allowlist: frozenset[str] | None = None) -> dict[str, str]:
@@ -54,9 +65,14 @@ def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
         return
     if os.name == "nt":
         try:
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=5, check=False)
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
             return
         except (OSError, subprocess.TimeoutExpired):
             pass
@@ -66,11 +82,16 @@ def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
         pass
 
 
-def _run(arguments: dict, root: object,
-         env_allowlist: frozenset[str] | None = None) -> ToolResult:
+def _run(arguments: dict, root: object, env_allowlist: frozenset[str] | None = None) -> ToolResult:
     command = arguments.get("command")
-    if not isinstance(command, list) or not command or any(not isinstance(part, str) for part in command):
-        raise ToolExecutionError("terminal.execute", "'command' must be a non-empty argv list of strings")
+    if (
+        not isinstance(command, list)
+        or not command
+        or any(not isinstance(part, str) for part in command)
+    ):
+        raise ToolExecutionError(
+            "terminal.execute", "'command' must be a non-empty argv list of strings"
+        )
     try:
         timeout_s = float(arguments.get("timeout_s", 60.0))
     except (TypeError, ValueError):
@@ -79,9 +100,16 @@ def _run(arguments: dict, root: object,
         raise ToolExecutionError("terminal.execute", "'timeout_s' must be positive")
     timeout_s = min(timeout_s, CONTRACT_TIMEOUT_S)
     cwd = _resolve_cwd(arguments.get("cwd"), root)
-    kwargs = dict(args=command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                  text=True, cwd=cwd, shell=False, stdin=subprocess.DEVNULL,
-                  env=_scrubbed_env(env_allowlist))
+    kwargs = dict(
+        args=command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        shell=False,
+        stdin=subprocess.DEVNULL,
+        env=_scrubbed_env(env_allowlist),
+    )
     if os.name == "nt":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     else:
@@ -89,7 +117,9 @@ def _run(arguments: dict, root: object,
     try:
         proc = subprocess.Popen(**kwargs)
     except FileNotFoundError:
-        raise ToolExecutionError("terminal.execute", f"executable not found: {command[0]!r}") from None
+        raise ToolExecutionError(
+            "terminal.execute", f"executable not found: {command[0]!r}"
+        ) from None
     try:
         stdout, stderr = proc.communicate(timeout=timeout_s)
     except subprocess.TimeoutExpired:
@@ -102,26 +132,39 @@ def _run(arguments: dict, root: object,
     output = stdout + stderr
     if len(output) > OUTPUT_CAP:
         output = output[:OUTPUT_CAP] + "\n[truncated: output exceeded cap]"
-    return ToolResult(success=proc.returncode == 0, output=output,
-                      exit_code=proc.returncode,
-                      error=None if proc.returncode == 0 else f"exit {proc.returncode}",
-                      rollback={"rollbackable": False,
-                                "reason": "arbitrary process side effects cannot be undone"})
+    return ToolResult(
+        success=proc.returncode == 0,
+        output=output,
+        exit_code=proc.returncode,
+        error=None if proc.returncode == 0 else f"exit {proc.returncode}",
+        rollback={
+            "rollbackable": False,
+            "reason": "arbitrary process side effects cannot be undone",
+        },
+    )
 
 
-def terminal_tools(root: object = None,
-                   env_allowlist: frozenset[str] | None = None) -> list[tuple[Tool, ToolHandler]]:
+def terminal_tools(
+    root: object = None, env_allowlist: frozenset[str] | None = None
+) -> list[tuple[Tool, ToolHandler]]:
     resolved = str(Path(root).resolve()) if root is not None else None
-    return [(Tool(
-        name="terminal.execute",
-        description="Run a direct argv process through the sandbox supervisor; explicit human authorization required.",
-        input_schema={"required": ["command"],
-                      "properties": {"command": "array", "timeout_s": "number", "cwd": "string"}},
-        risk_level=RiskLevel.CRITICAL,
-        timeout_s=CONTRACT_TIMEOUT_S,
-        capabilities=["subprocess", "arbitrary-code-execution"],
-        requires_approval=True,
-        requires_sandbox=True,
-        sandbox_profile="terminal",
-        network_access=False,
-    ), partial(_run, root=resolved, env_allowlist=env_allowlist))]
+    return [
+        (
+            Tool(
+                name="terminal.execute",
+                description="Run a direct argv process through the sandbox supervisor; explicit human authorization required.",
+                input_schema={
+                    "required": ["command"],
+                    "properties": {"command": "array", "timeout_s": "number", "cwd": "string"},
+                },
+                risk_level=RiskLevel.CRITICAL,
+                timeout_s=CONTRACT_TIMEOUT_S,
+                capabilities=["subprocess", "arbitrary-code-execution"],
+                requires_approval=True,
+                requires_sandbox=True,
+                sandbox_profile="terminal",
+                network_access=False,
+            ),
+            partial(_run, root=resolved, env_allowlist=env_allowlist),
+        )
+    ]

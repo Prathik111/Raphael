@@ -1,5 +1,9 @@
 from ai_ecosystem.core.persistence import Database
-from ai_ecosystem.tools.registry.execution_ledger import ExecutionLedger, ExecutionState, action_hash
+from ai_ecosystem.tools.registry.execution_ledger import (
+    ExecutionLedger,
+    ExecutionState,
+    action_hash,
+)
 
 
 def test_action_hash_is_semantic_and_deterministic():

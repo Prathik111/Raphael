@@ -38,13 +38,18 @@ def _read_test_secret(_arguments: dict) -> ToolResult:
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Objects are only available on Windows")
 def test_timeout_kills_worker_and_child(tmp_path: Path) -> None:
     marker = str(tmp_path / "escaped.txt")
-    tool = Tool(name="test.child", risk_level=RiskLevel.HIGH,
-                capabilities=["subprocess"], requires_sandbox=True)
+    tool = Tool(
+        name="test.child",
+        risk_level=RiskLevel.HIGH,
+        capabilities=["subprocess"],
+        requires_sandbox=True,
+    )
     profile = SandboxProfile(name="windows-test", timeout_s=0.25, max_processes=1)
 
     with pytest.raises(ToolTimeoutError):
-        LocalSandboxProvider().run(tool, _spawn_sleeping_child, {"marker": marker},
-                                    profile, timeout_s=0.25)
+        LocalSandboxProvider().run(
+            tool, _spawn_sleeping_child, {"marker": marker}, profile, timeout_s=0.25
+        )
 
     time.sleep(0.5)
     assert not Path(marker).exists(), "child process survived the sandbox timeout"
@@ -56,7 +61,9 @@ def test_registered_filesystem_handler_is_spawn_safe(tmp_path: Path) -> None:
     target.write_text("hello", encoding="utf-8")
     tool, handler = filesystem_tools(tmp_path)[0]
     result = LocalSandboxProvider().run(
-        tool, handler, {"path": "hello.txt"},
+        tool,
+        handler,
+        {"path": "hello.txt"},
         SandboxProfile(name="filesystem-test", fs_root=str(tmp_path), timeout_s=2),
         timeout_s=2,
     )
@@ -70,8 +77,11 @@ def test_worker_environment_does_not_inherit_application_secrets(tmp_path: Path)
     try:
         tool = Tool(name="test.env", risk_level=RiskLevel.LOW, requires_sandbox=True)
         result = LocalSandboxProvider().run(
-            tool, _read_test_secret, {},
-            SandboxProfile(name="env-test", timeout_s=2), timeout_s=2,
+            tool,
+            _read_test_secret,
+            {},
+            SandboxProfile(name="env-test", timeout_s=2),
+            timeout_s=2,
         )
         assert result.success is True
         assert result.output == "missing"

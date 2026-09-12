@@ -12,7 +12,6 @@ proposal-without-policy-change, event trace, and restart safety.
 
 import time
 
-from ai_ecosystem.agent.executor import OverallStatus
 from ai_ecosystem.agent.multi import (
     AgentDefinition,
     AgentManager,
@@ -22,14 +21,12 @@ from ai_ecosystem.agent.multi import (
     SubtaskSpec,
 )
 from ai_ecosystem.agent.verifier import Verifier
-from ai_ecosystem.core.events import EventBus
 from ai_ecosystem.core.models import Plan, PlanStep, Tool, ToolResult
 from ai_ecosystem.core.models.enums import (
     EventType,
     MemoryScope,
     MemoryType,
     RiskLevel,
-    VerificationStatus,
 )
 from ai_ecosystem.core.persistence import (
     Database,
@@ -52,8 +49,6 @@ from ai_ecosystem.personalization.personality import (
     PersonalityStore,
     PreferenceStore,
 )
-from ai_ecosystem.security import Policy
-from ai_ecosystem.skills import SkillPlanBuilder, SkillRegistry
 from ai_ecosystem.system.monitor import SystemAwarenessManager
 from ai_ecosystem.system.monitor.probe import MockProbe
 from ai_ecosystem.system.monitor.models import (
@@ -74,8 +69,14 @@ def _ok(output="ok"):
 
 
 def _step(sid, tool, deps=()):
-    return PlanStep(id=sid, description=sid, dependencies=list(deps),
-                    tools=[tool], verification="v", completion_criteria="c")
+    return PlanStep(
+        id=sid,
+        description=sid,
+        dependencies=list(deps),
+        tools=[tool],
+        verification="v",
+        completion_criteria="c",
+    )
 
 
 def test_multi_agent_end_to_end(tmp_path):
@@ -98,30 +99,52 @@ def test_multi_agent_end_to_end(tmp_path):
         return ToolResult(success=True, output="pwned")
 
     registry = ToolRegistry()
-    registry.register(Tool(name="filesystem.read", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW),
-                      lambda args: ToolResult(success=True, output="print('hi')"))
-    registry.register(Tool(name="web.search", input_schema={"required": ["query"]},
-                           risk_level=RiskLevel.LOW),
-                      lambda args: ToolResult(success=True, output={"sources": [
-                          {"title": "Guide", "origin": "docs",
-                           "url": "https://docs.test/g",
-                           "claims": ["Small projects benefit from a single entry point."]}]}))
-    registry.register(Tool(name="analyze", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW), _ok("analysis done"))
-    registry.register(Tool(name="report", input_schema={"required": []},
-                           risk_level=RiskLevel.LOW), _ok("report written"))
-    registry.register(Tool(name="danger", input_schema={"required": []},
-                           risk_level=RiskLevel.HIGH), danger)
+    registry.register(
+        Tool(name="filesystem.read", input_schema={"required": []}, risk_level=RiskLevel.LOW),
+        lambda args: ToolResult(success=True, output="print('hi')"),
+    )
+    registry.register(
+        Tool(name="web.search", input_schema={"required": ["query"]}, risk_level=RiskLevel.LOW),
+        lambda args: ToolResult(
+            success=True,
+            output={
+                "sources": [
+                    {
+                        "title": "Guide",
+                        "origin": "docs",
+                        "url": "https://docs.test/g",
+                        "claims": ["Small projects benefit from a single entry point."],
+                    }
+                ]
+            },
+        ),
+    )
+    registry.register(
+        Tool(name="analyze", input_schema={"required": []}, risk_level=RiskLevel.LOW),
+        _ok("analysis done"),
+    )
+    registry.register(
+        Tool(name="report", input_schema={"required": []}, risk_level=RiskLevel.LOW),
+        _ok("report written"),
+    )
+    registry.register(
+        Tool(name="danger", input_schema={"required": []}, risk_level=RiskLevel.HIGH), danger
+    )
 
     # -- understanding + awareness ( Gates 14/15 inputs to decomposition) --
     snapshot = SystemSnapshot(
-        operating_system="TestOS", architecture="x86_64",
+        operating_system="TestOS",
+        architecture="x86_64",
         cpu=CpuInfo(model="t", logical_processors=8, utilization_percent=20.0),
-        memory=MemoryInfo(total_bytes=8_000_000_000, available_bytes=6_000_000_000,
-                          used_bytes=2_000_000_000, utilization_percent=25.0),
+        memory=MemoryInfo(
+            total_bytes=8_000_000_000,
+            available_bytes=6_000_000_000,
+            used_bytes=2_000_000_000,
+            utilization_percent=25.0,
+        ),
         capabilities=Capabilities(python_available=True, storage_available=True),
-        pressure=PressureLevel.LOW)
+        pressure=PressureLevel.LOW,
+    )
     awareness = SystemAwarenessManager(MockProbe(snapshot), bus=bus)
     context = awareness.context()
     assert context.can_compute_locally is True
@@ -133,20 +156,39 @@ def test_multi_agent_end_to_end(tmp_path):
     authorizer = AuthorizationManager(registry)
     runner = ToolRunner(registry, authorizer, bus)
     research = ResearchManager(runner, registry, bus=bus).research(
-        ResearchQuery(query="project entry points"))
+        ResearchQuery(query="project entry points")
+    )
     assert len(research.evidence) == 1
 
     # -- supervisor decomposes across three specialists --
     agents = AgentRegistry(db, bus)
-    agents.register(AgentDefinition(id="researcher", name="researcher",
-                                    role="research", capabilities=["research"],
-                                    allowed_tools=["web.search", "filesystem.read"]))
-    agents.register(AgentDefinition(id="analyst", name="analyst", role="analysis",
-                                    capabilities=["analysis"],
-                                    allowed_tools=["filesystem.read", "analyze"]))
-    agents.register(AgentDefinition(id="coder", name="coder", role="coding",
-                                    capabilities=["coding"],
-                                    allowed_tools=["report"]))
+    agents.register(
+        AgentDefinition(
+            id="researcher",
+            name="researcher",
+            role="research",
+            capabilities=["research"],
+            allowed_tools=["web.search", "filesystem.read"],
+        )
+    )
+    agents.register(
+        AgentDefinition(
+            id="analyst",
+            name="analyst",
+            role="analysis",
+            capabilities=["analysis"],
+            allowed_tools=["filesystem.read", "analyze"],
+        )
+    )
+    agents.register(
+        AgentDefinition(
+            id="coder",
+            name="coder",
+            role="coding",
+            capabilities=["coding"],
+            allowed_tools=["report"],
+        )
+    )
     manager = AgentManager(agents, runtime, registry, max_workers=3, bus=bus)
     for agent_id in ("researcher", "analyst", "coder"):
         manager.spawn(agent_id)
@@ -155,19 +197,27 @@ def test_multi_agent_end_to_end(tmp_path):
         messages.register(agent_id)
     coordinator = Coordinator(manager, messages, verifier=Verifier(), bus=bus)
 
-    research_plan = Plan(goal="research", steps=[_step("s1", "web.search")],
-                         final_verification="v")
-    analysis_plan = Plan(goal="analyze", steps=[_step("s1", "filesystem.read"),
-                                                _step("s2", "analyze", ["s1"])],
-                         final_verification="v")
-    coding_plan = Plan(goal="report", steps=[_step("s1", "report")],
-                       final_verification="v")
-    outcome = coordinator.fan_out("supervisor", [
-        SubtaskSpec("researcher", "research entry points", research_plan,
-                    {"s1": {"query": "entry points"}}),
-        SubtaskSpec("analyst", "analyze project", analysis_plan,
-                    {"s1": {"path": "main.py"}}),
-        SubtaskSpec("coder", "write report", coding_plan)], "corr-e2e")
+    research_plan = Plan(goal="research", steps=[_step("s1", "web.search")], final_verification="v")
+    analysis_plan = Plan(
+        goal="analyze",
+        steps=[_step("s1", "filesystem.read"), _step("s2", "analyze", ["s1"])],
+        final_verification="v",
+    )
+    coding_plan = Plan(goal="report", steps=[_step("s1", "report")], final_verification="v")
+    outcome = coordinator.fan_out(
+        "supervisor",
+        [
+            SubtaskSpec(
+                "researcher",
+                "research entry points",
+                research_plan,
+                {"s1": {"query": "entry points"}},
+            ),
+            SubtaskSpec("analyst", "analyze project", analysis_plan, {"s1": {"path": "main.py"}}),
+            SubtaskSpec("coder", "write report", coding_plan),
+        ],
+        "corr-e2e",
+    )
 
     # -- decomposition / assignment / parallelism / aggregation --
     assert set(outcome.results) == {"researcher", "analyst", "coder"}
@@ -176,8 +226,7 @@ def test_multi_agent_end_to_end(tmp_path):
 
     # -- handoff: research hands findings to the coder as data --
     # (coder already holds its TASK_REQUEST, so the handoff is second)
-    messages.handoff("researcher", "coder", "t-e2e",
-                     "findings: single entry point", "corr-e2e")
+    messages.handoff("researcher", "coder", "t-e2e", "findings: single entry point", "corr-e2e")
     assert messages.pending("coder") == 2
 
     # -- unauthorized action is rejected (coder has no danger tool) --
@@ -188,17 +237,24 @@ def test_multi_agent_end_to_end(tmp_path):
 
     # -- memory only for meaningful information --
     memories = MemoryStore(SqliteMemoryRepository(db), bus=bus, database=db)
-    memory = memories.store(MemoryCandidate(
-        content="Analyzed project uses a single entry point.",
-        source="e2e", type=MemoryType.PROJECT,
-        confidence=0.9, importance=0.8, scope=MemoryScope.PROJECT,
-        scope_id="demo", reason="useful workflow observed"))
+    memory = memories.store(
+        MemoryCandidate(
+            content="Analyzed project uses a single entry point.",
+            source="e2e",
+            type=MemoryType.PROJECT,
+            confidence=0.9,
+            importance=0.8,
+            scope=MemoryScope.PROJECT,
+            scope_id="demo",
+            reason="useful workflow observed",
+        )
+    )
     assert memory.scope is MemoryScope.PROJECT
 
     # -- usage observation follows policy; learning proposes, never imposes --
     observer = UsageObserver(
-        ObservationPolicy(mode=ObservationMode.LOCAL_PERSISTENCE),
-        SqliteUsageEventRepository(db))
+        ObservationPolicy(mode=ObservationMode.LOCAL_PERSISTENCE), SqliteUsageEventRepository(db)
+    )
     for tool_name in ("web.search", "filesystem.read", "analyze", "report"):
         observer.observe_tool(tool_name, True, duration_ms=5.0, project="demo")
     patterns = PatternDetector(min_evidence=1).detect(observer.session_events())
@@ -211,17 +267,23 @@ def test_multi_agent_end_to_end(tmp_path):
 
     # -- personalization still works at the end of the chain --
     personalization = PersonalizationEngine(
-        PersonalityStore(db), PreferenceStore(db), memories, bus)
+        PersonalityStore(db), PreferenceStore(db), memories, bus
+    )
     personal_ctx = personalization.build_context(project_id="demo")
     assert personal_ctx.project_id == "demo"
 
     # -- event trace + restart safety --
     kinds = [e.event_type for e in events]
-    for expected in (EventType.SYSTEM_SNAPSHOT_CREATED,
-                     EventType.RESEARCH_COMPLETED, EventType.AGENT_STARTED,
-                     EventType.AGENT_MESSAGE_SENT, EventType.TOOL_COMPLETED,
-                     EventType.AGENT_COMPLETED, EventType.MEMORY_CREATED,
-                     EventType.LEARNING_PROPOSAL_CREATED):
+    for expected in (
+        EventType.SYSTEM_SNAPSHOT_CREATED,
+        EventType.RESEARCH_COMPLETED,
+        EventType.AGENT_STARTED,
+        EventType.AGENT_MESSAGE_SENT,
+        EventType.TOOL_COMPLETED,
+        EventType.AGENT_COMPLETED,
+        EventType.MEMORY_CREATED,
+        EventType.LEARNING_PROPOSAL_CREATED,
+    ):
         assert expected in kinds, expected
     runtime.shutdown()
     db.close()
@@ -232,6 +294,7 @@ def test_multi_agent_end_to_end(tmp_path):
     reopened_db.migrate()
     reopened = AgentRuntime(path)
     try:
+
         def count(table: str) -> int:
             return reopened_db.query(f"SELECT COUNT(*) FROM {table}")[0][0]
 

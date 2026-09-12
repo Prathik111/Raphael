@@ -9,7 +9,9 @@ import time
 class CancellationToken:
     """Thread-safe cancellation flag shared with executor and sandbox."""
 
-    def __init__(self, parent: "CancellationToken | None" = None, deadline: float | None = None) -> None:
+    def __init__(
+        self, parent: CancellationToken | None = None, deadline: float | None = None
+    ) -> None:
         self._event = threading.Event()
         self._parent = parent
         self._deadline = deadline
@@ -19,7 +21,11 @@ class CancellationToken:
 
     @property
     def cancelled(self) -> bool:
-        return self._event.is_set() or (self._parent is not None and self._parent.cancelled) or self.deadline_reached
+        return (
+            self._event.is_set()
+            or (self._parent is not None and self._parent.cancelled)
+            or self.deadline_reached
+        )
 
     @property
     def deadline(self) -> float | None:
@@ -29,7 +35,7 @@ class CancellationToken:
     def deadline_reached(self) -> bool:
         return self._deadline is not None and time.monotonic() >= self._deadline
 
-    def child(self, timeout_s: float | None = None) -> "CancellationToken":
+    def child(self, timeout_s: float | None = None) -> CancellationToken:
         """Create a child whose deadline cannot exceed its parent's deadline."""
         deadline = None
         if timeout_s is not None:

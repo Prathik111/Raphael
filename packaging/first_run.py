@@ -8,7 +8,7 @@ hardware steps are skippable: the product never forces them.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -45,7 +45,7 @@ class FirstRunState(BaseModel):
 class FirstRunWizard:
     """Step machine with skippable optional stages."""
 
-    def __init__(self, state: Optional[FirstRunState] = None) -> None:
+    def __init__(self, state: FirstRunState | None = None) -> None:
         self._state = state or FirstRunState()
 
     @property
@@ -63,7 +63,7 @@ class FirstRunWizard:
         """True once READY is reached."""
         return self._state.step is WizardStep.READY
 
-    def complete(self, settings: Optional[dict] = None) -> WizardStep:
+    def complete(self, settings: dict | None = None) -> WizardStep:
         """Finish the current stage and advance (settings recorded).
 
         Settings keys that smell like credentials are refused: wizard
@@ -80,7 +80,8 @@ class FirstRunWizard:
                 if looks_secret(str(key)):
                     raise DomainValidationError(
                         f"setup answer {key!r} looks like a credential; "
-                        "configure secrets via the environment instead")
+                        "configure secrets via the environment instead"
+                    )
             self._state.settings.update(settings)
         self._state.completed.append(current.value)
         self._state.step = _ORDER[_ORDER.index(current) + 1]
