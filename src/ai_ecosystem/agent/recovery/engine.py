@@ -184,7 +184,10 @@ class RecoveryEngine:
                         classification,
                         f"verification raised: {exc}",
                     )
-            if verification.status is VerificationStatus.PASSED:
+            if (
+                result.status is OverallStatus.COMPLETED
+                and verification.status is VerificationStatus.PASSED
+            ):
                 return RecoveryOutcome(
                     task_id=task_id,
                     status=OutcomeStatus.RECOVERED,
