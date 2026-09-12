@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 from pathlib import Path
 from typing import Final
@@ -10,7 +11,6 @@ from ai_ecosystem.core.errors.exceptions import ToolExecutionError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.tools.registry.registry import ToolHandler
-import contextlib
 
 OUTPUT_CAP: Final = 100_000
 CONTRACT_TIMEOUT_S: Final = 30.0
@@ -27,7 +27,7 @@ def _resolve_cwd(raw: object, root: object, tool: str) -> str:
 
     candidate = Path(raw)
     if root is not None:
-        root_path = Path(root).resolve()
+        root_path = Path(str(root)).resolve()
         resolved = (
             (root_path / candidate).resolve()
             if not candidate.is_absolute()
