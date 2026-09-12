@@ -2,10 +2,7 @@
 
 import pytest
 
-from ai_ecosystem.core.errors import (
-    AuthorizationDeniedError,
-    DomainValidationError,
-)
+from ai_ecosystem.core.errors import AuthorizationDeniedError, DomainValidationError
 from ai_ecosystem.core.models import Tool, ToolCall
 from ai_ecosystem.core.models.enums import PermissionDecision, RiskLevel
 from ai_ecosystem.security import (
@@ -15,13 +12,7 @@ from ai_ecosystem.security import (
     RiskContext,
     RiskEngine,
 )
-from ai_ecosystem.tools import (
-    GrantAllAuthorizer,
-    ToolRegistry,
-    ToolRunner,
-    filesystem_tools,
-    terminal_tools,
-)
+from ai_ecosystem.tools import GrantAllAuthorizer, ToolRegistry, ToolRunner, filesystem_tools, terminal_tools
 
 
 @pytest.fixture()
@@ -52,15 +43,13 @@ def test_terminal_is_critical_and_denied_by_default(manager, registry):
     call = registry.build_call("t", "terminal.execute", {"command": ["echo", "hi"]})
     permission = manager.authorize("t", registry.get("terminal.execute"), call)
     assert permission.decision is PermissionDecision.DENIED
-    assert "CRITICAL" in permission.reason
+    assert "requires human approval" in permission.reason
 
 
 def test_path_traversal_is_critical(manager, registry):
     engine = RiskEngine()
     call = registry.build_call("t", "filesystem.read", {"path": "../../etc/passwd"})
-    assessment = engine.assess(
-        "t", registry.get("filesystem.read"), call, RiskContext(root="/tmp/root")
-    )
+    assessment = engine.assess("t", registry.get("filesystem.read"), call, RiskContext(root="/tmp/root"))
     assert assessment.level is RiskLevel.CRITICAL
     assert any("traversal" in f for f in assessment.factors)
 
@@ -88,7 +77,7 @@ def test_argv_metachars_stay_literal_but_noted(registry):
     engine = RiskEngine()
     call = registry.build_call("t", "terminal.execute", {"command": ["echo", "a; b"]})
     assessment = engine.assess("t", registry.get("terminal.execute"), call, RiskContext())
-    assert assessment.level is RiskLevel.CRITICAL  # base CRITICAL now
+    assert assessment.level is RiskLevel.CRITICAL
     assert any("passed literally" in f for f in assessment.factors)
 
 
@@ -101,9 +90,7 @@ def test_malformed_call_rejected(manager, registry):
 def test_agent_scope_enforced(registry, tmp_path):
     scoped = AuthorizationManager(
         registry,
-        policy_engine=PolicyEngine(
-            Policy(name="scoped", agent_scopes={"reader": {"filesystem.read"}})
-        ),
+        policy_engine=PolicyEngine(Policy(name="scoped", agent_scopes={"reader": {"filesystem.read"}})),
         context=RiskContext(agent_id="reader", root=str(tmp_path)),
     )
     denied = scoped.authorize(
@@ -117,13 +104,9 @@ def test_agent_scope_enforced(registry, tmp_path):
 
 def test_unauthorized_action_never_reaches_handler(registry, tmp_path):
     executed = []
-    registry.register(
-        Tool(name="danger", input_schema={"required": []}),
-        lambda args: executed.append(True),
-    )
+    registry.register(Tool(name="danger", input_schema={"required": []}), lambda args: executed.append(True))
     strict = AuthorizationManager(
-        registry,
-        policy_engine=PolicyEngine(Policy(name="strict", denied_tools={"danger"})),
+        registry, policy_engine=PolicyEngine(Policy(name="strict", denied_tools={"danger"}))
     )
     runner = ToolRunner(registry, strict)
     result = runner.run(registry.build_call("t", "danger", {}))
@@ -133,22 +116,12 @@ def test_unauthorized_action_never_reaches_handler(registry, tmp_path):
 
 def test_enforce_raises_on_denial(manager, registry):
     with pytest.raises(AuthorizationDeniedError):
-        manager.enforce(
-            "t",
-            registry.get("terminal.execute"),
-            registry.build_call("t", "terminal.execute", {"command": ["x"]}),
-        )
+        manager.enforce("t", registry.get("terminal.execute"), registry.build_call("t", "terminal.execute", {"command": ["x"]}))
 
 
 def test_no_path_from_intention_to_tool_without_policy(registry, tmp_path):
-    """A raw model-style ToolCall dict still passes the choke point."""
-    runner = ToolRunner(
-        registry,
-        AuthorizationManager(registry, context=RiskContext(root=str(tmp_path))),
-    )
-    forged = ToolCall(
-        task_id="t", tool="terminal.execute", arguments={"command": ["echo", "pwned"]}
-    )
+    runner = ToolRunner(registry, AuthorizationManager(registry, context=RiskContext(root=str(tmp_path))))
+    forged = ToolCall(task_id="t", tool="terminal.execute", arguments={"command": ["echo", "pwned"]})
     result = runner.run(forged)
     assert result.success is False
     assert "denied" in result.error
@@ -156,19 +129,13 @@ def test_no_path_from_intention_to_tool_without_policy(registry, tmp_path):
 
 def test_shell_interpreters_blocked_by_default(registry):
     runner = ToolRunner(registry, AuthorizationManager(registry))
-    for shell in (
-        ["cmd", "/c", "echo hi"],
-        ["powershell", "-Command", "echo hi"],
-        ["bash", "-c", "echo hi"],
-    ):
+    for shell in (["cmd", "/c", "echo hi"], ["powershell", "-Command", "echo hi"], ["bash", "-c", "echo hi"]):
         result = runner.run(registry.build_call("t", "terminal.execute", {"command": shell}))
         assert result.success is False, shell
-        assert "shell interpreter" in result.error, shell
+        assert "requires human approval" in result.error, shell
 
 
 def test_shell_interpreters_allowed_with_opt_in(registry):
-    # Opt-in clears the shell-interpreter escalation; the CRITICAL base
-    # level still needs an explicit grant-all-critical policy to pass.
     manager = AuthorizationManager(
         registry,
         allow_shells=True,
@@ -181,7 +148,8 @@ def test_shell_interpreters_allowed_with_opt_in(registry):
         registry.get("terminal.execute"),
         registry.build_call("t", "terminal.execute", {"command": ["cmd", "/c", "echo hi"]}),
     )
-    assert permission.decision is PermissionDecision.GRANTED
+    assert permission.decision is PermissionDecision.DENIED
+    assert "requires human approval" in permission.reason
     assert "shell interpreter" not in permission.reason
 
 
