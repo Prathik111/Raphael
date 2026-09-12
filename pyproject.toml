@@ -41,6 +41,19 @@ exclude = ["build", "dist", ".venv"]
 select = ["E", "F", "B", "UP", "SIM"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# These callbacks intentionally isolate arbitrary subscriber/callback failures.
+"src/ai_ecosystem/core/events/bus.py" = ["SIM105"]
+"src/ai_ecosystem/core/logging/logger.py" = ["SIM105"]
+"src/ai_ecosystem/core/persistence/sqlite.py" = ["SIM105"]
+"src/ai_ecosystem/interface/api.py" = ["SIM105"]
+"src/ai_ecosystem/scheduler/scheduler.py" = ["SIM105"]
+# These benchmark/test constructs intentionally capture loop values or inspect source text.
+"src/ai_ecosystem/bench/benchmarks.py" = ["B023"]
+"tests/**/*.py" = ["B017", "SIM105", "SIM115", "B023"]
+# Packaging tests deliberately import after isolated bootstrap setup.
+"tests/unit/test_packaging.py" = ["E402"]
+
 [tool.mypy]
 python_version = "3.10"
 strict = false
