@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError, ToolTimeoutError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
 from ai_ecosystem.tools.registry.registry import ToolHandler
-import contextlib
 
 OUTPUT_CAP = 100_000
 CONTRACT_TIMEOUT_S = 120.0
 
-# Explicitly safe process metadata. Credentials/proxy tokens/application
-# configuration are never inherited by an untrusted command.
 SAFE_ENV = frozenset(
     {
         "PATH",
@@ -47,7 +46,7 @@ def _resolve_cwd(raw: object, root: object) -> str | None:
         raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
     candidate = Path(raw)
     if root is not None:
-        base = Path(root).resolve()
+        base = Path(str(root)).resolve()
         resolved = (base / candidate).resolve()
         try:
             resolved.relative_to(base)
@@ -99,7 +98,7 @@ def _run(arguments: dict, root: object, env_allowlist: frozenset[str] | None = N
         raise ToolExecutionError("terminal.execute", "'timeout_s' must be positive")
     timeout_s = min(timeout_s, CONTRACT_TIMEOUT_S)
     cwd = _resolve_cwd(arguments.get("cwd"), root)
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         args=command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -146,7 +145,7 @@ def _run(arguments: dict, root: object, env_allowlist: frozenset[str] | None = N
 def terminal_tools(
     root: object = None, env_allowlist: frozenset[str] | None = None
 ) -> list[tuple[Tool, ToolHandler]]:
-    resolved = str(Path(root).resolve()) if root is not None else None
+    resolved = str(Path(str(root)).resolve()) if root is not None else None
     return [
         (
             Tool(
