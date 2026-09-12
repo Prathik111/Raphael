@@ -1,6 +1,6 @@
 """Process-isolated sandbox provider with fail-closed boundaries.
 
-The sandbox is a containment boundary, not merely a timeout helper.  Workers
+The sandbox is a containment boundary, not merely a timeout helper. Workers
 receive a minimal environment, are started behind a parent-controlled gate so
 Windows Job Objects can be attached before user code runs, and are always
 terminated as a process tree/job on cancellation or timeout.
@@ -12,6 +12,7 @@ filesystem sandbox.
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import multiprocessing as mp
 import os
@@ -20,7 +21,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -30,7 +31,6 @@ from ai_ecosystem.core.errors.exceptions import (
     ToolTimeoutError,
 )
 from ai_ecosystem.core.models.domain import Tool, ToolResult
-import contextlib
 
 ToolHandler = Callable[[dict], ToolResult]
 
@@ -89,9 +89,6 @@ class SandboxUnavailableError(ToolExecutionError):
         super().__init__(tool, "sandbox required but no provider configured")
 
 
-# These are process metadata rather than application secrets.  Everything else
-# is excluded by default so credentials, proxy tokens and application-specific
-# variables never enter an untrusted worker accidentally.
 _BASE_ENV_KEYS = frozenset(
     {
         "PATH",
@@ -137,7 +134,6 @@ def _worker(
         os.environ.update(clean_env)
         if profile.fs_root:
             os.chdir(profile.fs_root)
-        # The parent assigns the Windows Job Object before releasing this gate.
         if not start_event.wait(timeout=30.0):
             raise ToolExecutionError("sandbox", "sandbox supervisor did not release worker")
         result_queue.put((True, handler(arguments)))
@@ -151,9 +147,14 @@ def _terminate_process(process: mp.Process) -> None:
     if not process.is_alive():
         process.join(timeout=0.2)
         return
+    pid = process.pid
+    if pid is None:
+        process.kill()
+        process.join(timeout=2.0)
+        return
     if os.name == "posix":
         try:
-            os.killpg(process.pid, 9)
+            os.killpg(pid, 9)
         except (ProcessLookupError, PermissionError, OSError):
             process.kill()
     else:
@@ -161,8 +162,6 @@ def _terminate_process(process: mp.Process) -> None:
     process.join(timeout=2.0)
 
 
-# ctypes structures used by the Windows Job Object must be module-level:
-# nested class bodies cannot resolve sibling nested classes lexically.
 class _BasicLimit(ctypes.Structure):
     _fields_ = [
         ("PerProcessUserTimeLimit", ctypes.c_longlong),
@@ -237,7 +236,8 @@ class _WindowsJob:
         self.handle = None
         if os.name != "nt":
             return
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ctypes_api = cast(Any, ctypes)
+        kernel32 = ctypes_api.WinDLL("kernel32", use_last_error=True)
         self._kernel32 = kernel32
         kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
         kernel32.CreateJobObjectW.restype = ctypes.c_void_p
@@ -259,7 +259,7 @@ class _WindowsJob:
 
         handle = kernel32.CreateJobObjectW(None, None)
         if not handle:
-            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+            raise OSError(ctypes_api.get_last_error(), "CreateJobObjectW failed")
         self.handle = handle
         limits = self._ExtendedLimit()
         flags = self.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -280,7 +280,7 @@ class _WindowsJob:
             ctypes.sizeof(limits),
         )
         if not ok:
-            error = ctypes.get_last_error()
+            error = ctypes_api.get_last_error()
             self.close()
             raise OSError(error, "SetInformationJobObject failed")
 
@@ -292,12 +292,12 @@ class _WindowsJob:
         )
         process_handle = self._kernel32.OpenProcess(access, 0, process.pid)
         if not process_handle:
-            error = ctypes.get_last_error()
+            error = cast(Any, ctypes).get_last_error()
             self.close()
             raise OSError(error, "OpenProcess failed")
         try:
             if not self._kernel32.AssignProcessToJobObject(self.handle, process_handle):
-                error = ctypes.get_last_error()
+                error = cast(Any, ctypes).get_last_error()
                 self.close()
                 raise OSError(error, "AssignProcessToJobObject failed")
         finally:
@@ -305,7 +305,6 @@ class _WindowsJob:
 
     def terminate(self) -> None:
         if self.handle and not self._kernel32.TerminateJobObject(self.handle, 1):
-            # Closing the job has KILL_ON_JOB_CLOSE as a second line of defense.
             pass
 
     def close(self) -> None:
@@ -363,9 +362,12 @@ class LocalSandboxProvider(SandboxProvider):
             result_queue = ctx.Queue(maxsize=1)
             start_event = ctx.Event()
             clean_env = _scrubbed_env(allowed=profile.allowed_env)
-            process = ctx.Process(
-                target=_worker,
-                args=(handler, dict(arguments), profile, clean_env, result_queue, start_event),
+            process = cast(
+                mp.Process,
+                ctx.Process(
+                    target=_worker,
+                    args=(handler, dict(arguments), profile, clean_env, result_queue, start_event),
+                ),
             )
             job = _WindowsJob(profile, "subprocess" in set(tool.capabilities))
             try:
