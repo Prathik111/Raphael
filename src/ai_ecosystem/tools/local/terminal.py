@@ -33,10 +33,32 @@ SAFE_ENV = frozenset(
     }
 )
 
+_SECRET_ENV_MARKERS = (
+    "API_KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "PRIVATE_KEY",
+    "ACCESS_KEY",
+    "CLIENT_SECRET",
+)
+
+
+def _is_secret_env(key: str) -> bool:
+    upper = key.upper()
+    return any(marker in upper for marker in _SECRET_ENV_MARKERS)
+
 
 def _scrubbed_env(allowlist: frozenset[str] | None = None) -> dict[str, str]:
-    keys = SAFE_ENV | (allowlist or frozenset())
-    return {key: os.environ[key] for key in keys if key in os.environ}
+    """Keep ordinary process configuration while excluding credential-like values."""
+    allowed = allowlist or frozenset()
+    result: dict[str, str] = {}
+    for key, value in os.environ.items():
+        if key in allowed or key in SAFE_ENV or not _is_secret_env(key):
+            result[key] = value
+    return result
 
 
 def _resolve_cwd(raw: object, root: object) -> str | None:
