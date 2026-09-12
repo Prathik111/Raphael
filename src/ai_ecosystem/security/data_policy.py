@@ -47,38 +47,51 @@ class DataPolicy(BaseModel):
     ) -> EgressDecision:
         classification = self.classify(value, declared=declared)
         if destination in self.local_destinations:
-            return EgressDecision(True, classification, destination, "local destination")
+            return EgressDecision(
+                allowed=True,
+                classification=classification,
+                destination=destination,
+                reason="local destination",
+            )
         if classification is DataClass.SECRET:
             return EgressDecision(
-                False,
-                classification,
-                destination,
-                "SECRET data may never leave the local trust boundary",
+                allowed=False,
+                classification=classification,
+                destination=destination,
+                reason="SECRET data may never leave the local trust boundary",
             )
         if classification is DataClass.SENSITIVE:
             allowed = destination in self.approved_sensitive_destinations
             return EgressDecision(
-                allowed,
-                classification,
-                destination,
-                "approved sensitive destination"
-                if allowed
-                else "SENSITIVE destination not approved",
+                allowed=allowed,
+                classification=classification,
+                destination=destination,
+                reason=(
+                    "approved sensitive destination"
+                    if allowed
+                    else "SENSITIVE destination not approved"
+                ),
             )
         if classification is DataClass.PERSONAL:
             allowed = destination in self.approved_personal_destinations
             return EgressDecision(
-                allowed,
-                classification,
-                destination,
-                "approved personal destination" if allowed else "PERSONAL destination not approved",
+                allowed=allowed,
+                classification=classification,
+                destination=destination,
+                reason=(
+                    "approved personal destination"
+                    if allowed
+                    else "PERSONAL destination not approved"
+                ),
             )
         return EgressDecision(
-            destination in self.approved_sensitive_destinations
-            or destination in self.approved_personal_destinations,
-            classification,
-            destination,
-            "destination is not explicitly approved",
+            allowed=(
+                destination in self.approved_sensitive_destinations
+                or destination in self.approved_personal_destinations
+            ),
+            classification=classification,
+            destination=destination,
+            reason="destination is not explicitly approved",
         )
 
 
@@ -97,7 +110,8 @@ def _looks_personal(value: object) -> bool:
     if isinstance(value, dict):
         keys = {str(k).lower() for k in value}
         return bool(
-            keys & {"email", "phone", "address", "name", "location", "dob", "date_of_birth"}
+            keys
+            & {"email", "phone", "address", "name", "location", "dob", "date_of_birth"}
         )
     return False
 
