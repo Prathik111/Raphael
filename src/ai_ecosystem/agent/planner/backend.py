@@ -22,14 +22,14 @@ class ReasoningBackend(ABC):
     def draft(self, goal: str, available_tools: list[str], context: str = "") -> Plan:
         raise NotImplementedError
 
+    @abstractmethod
+    def plan(self, goal: str, available_tools: list[str], context: str = "") -> Plan:
+        """Return a validated plan, including any backend-specific repair loop."""
+        raise NotImplementedError
+
 
 class ModelReasoningBackend(ReasoningBackend):
-    """Draft and repair plans through an interchangeable model provider.
-
-    ``structured_requester`` can point at ModelRouter.request_structured so
-    planning retains provider failover rather than pinning the agent to the
-    first selected provider.
-    """
+    """Draft and repair plans through an interchangeable model provider."""
 
     SYSTEM = (
         "You are a planner. Reply with exactly one JSON object, no prose "
@@ -70,13 +70,7 @@ class ModelReasoningBackend(ReasoningBackend):
         for name, doc in self._tool_docs.items():
             if isinstance(doc, dict):
                 required.setdefault(name, set(doc.get("required", [])))
-                schemas.setdefault(
-                    name,
-                    {
-                        "required": doc.get("required", []),
-                        "properties": doc.get("properties", {}),
-                    },
-                )
+                schemas.setdefault(name, {"required": doc.get("required", []), "properties": doc.get("properties", {})})
         return required, schemas
 
     def _prompt_body(
@@ -97,9 +91,7 @@ class ModelReasoningBackend(ReasoningBackend):
             }
         if error:
             body["previous_draft_rejected"] = error[:800]
-            body["instruction"] = (
-                "Return ONLY the corrected JSON object and fix the rejected fields."
-            )
+            body["instruction"] = "Return ONLY the corrected JSON object and fix the rejected fields."
         return body
 
     def _structured(self, request: ModelRequest, model_cls: type[BaseModel]) -> Plan:
