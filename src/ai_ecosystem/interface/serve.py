@@ -186,16 +186,17 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
     if provider is None:
         provider = discover_local_provider()
     if provider is not None:
+        is_local = provider.provider_id.startswith("local-")
         router.register(
             provider,
             ProviderProfile(
                 provider_id=provider.provider_id,
-                local=provider.provider_id.startswith("local-") or provider._api_key == "",  # noqa: SLF001
-                trusted=not provider.provider_id.startswith("local-"),
+                local=is_local,
+                trusted=not is_local,
                 data_classes={DataClass.PUBLIC, DataClass.INTERNAL},
                 latency_class="standard",
-                retains_data=not provider.provider_id.startswith("local-"),
-                trains_on_data=not provider.provider_id.startswith("local-"),
+                retains_data=not is_local,
+                trains_on_data=not is_local,
             ),
         )
         providers.append(provider)
@@ -211,7 +212,7 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
 
     stub = MockModelProvider("unconfigured", handler=missing)
     router.register(stub, ProviderProfile(provider_id="unconfigured", local=True, data_classes=set(DataClass)))
-    return router, [], False
+    return router, providers, False
 
 
 def build_stack(
@@ -336,6 +337,21 @@ def build_stack(
         )
 
     def dispatch(task_id: str) -> None:
+        if not model_configured:
+            try:
+                runtime.manager.transition(task_id, TaskState.FAILED)
+                bus.publish(
+                    Event(
+                        event_type=EventType.TASK_FAILED,
+                        task_id=task_id,
+                        payload={
+                            "error": "no model is configured or available; start a local model or configure AI_ECO_MODEL_ENDPOINT"
+                        },
+                    )
+                )
+            except Exception:
+                log.exception("could not fail task %s cleanly", task_id)
+            return
         token = CancellationToken()
         with tokens_lock:
             tokens[task_id] = token
