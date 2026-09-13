@@ -140,6 +140,30 @@ def extract_json_block(text: str) -> str:
     return stripped
 
 
+def _task_spec_fallback(request: ModelRequest, model_cls: type[BaseModel]) -> BaseModel | None:
+    """Build the minimal safe task spec without hiding provider failures.
+
+    Understanding is metadata, not authorization or execution. If a local
+    model answered conversationally instead of emitting the requested JSON,
+    the original goal is still the authoritative desired outcome and research
+    remains opt-in rather than guessed.
+    """
+    if model_cls.__name__ != "TaskSpec":
+        return None
+    marker = "UNDERSTAND:"
+    goal = request.prompt.split(marker, 1)[1].strip() if marker in request.prompt else request.prompt.strip()
+    if not goal:
+        return None
+    return model_cls.model_validate(
+        {
+            "title": goal[:120],
+            "constraints": [],
+            "desired_outcome": goal,
+            "needs_research": False,
+        }
+    )
+
+
 def request_structured(
     provider: ModelProvider, request: ModelRequest, model_cls: type[BaseModel]
 ) -> BaseModel:
@@ -149,6 +173,9 @@ def request_structured(
             return model_cls.model_validate(response.structured)
         return model_cls.model_validate_json(extract_json_block(response.text))
     except Exception as exc:
+        fallback = _task_spec_fallback(request, model_cls)
+        if fallback is not None:
+            return fallback
         raise ModelMalformedError(
             f"provider {provider.provider_id!r} returned invalid output: {exc}"
         ) from exc
