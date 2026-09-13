@@ -1,29 +1,36 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Raphael Stage</title>
-<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#02070d}body{opacity:1}canvas{display:block;width:100%;height:100%}#intro{position:fixed;inset:0;background:#02070d;pointer-events:none;opacity:1;transition:opacity 900ms cubic-bezier(.22,1,.36,1)}body.ready #intro{opacity:0}.tap{position:fixed;inset:0;pointer-events:none;backdrop-filter:blur(10px);opacity:.7;transition:opacity 900ms ease,backdrop-filter 900ms ease}body.ready .tap{opacity:0;backdrop-filter:blur(0)}</style></head><body>
-<div class="tap"></div><div id="intro"></div>
-<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-<script>
-(()=>{
-const scene=new THREE.Scene();
-const camera=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,.1,100);camera.position.set(0,0,22);
-const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(devicePixelRatio,1.8));renderer.setSize(innerWidth,innerHeight);renderer.outputEncoding=THREE.sRGBEncoding;document.body.appendChild(renderer.domElement);
-const world=new THREE.Group();world.position.y=1.05;scene.add(world);
-const bgScene=new THREE.Scene(),bgCam=new THREE.Camera(),bgUniforms={uTime:{value:0},uRes:{value:new THREE.Vector2(innerWidth,innerHeight)}};
-const bgMat=new THREE.ShaderMaterial({uniforms:bgUniforms,vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position,1.0);}',fragmentShader:`varying vec2 vUv;uniform float uTime;uniform vec2 uRes;float band(vec2 p,float y,float amp,float freq,float width,float phase){float yy=y+sin(p.x*freq+uTime*.11+phase)*amp+sin(p.x*(freq*1.9)-uTime*.07+phase*2.)*amp*.35;float d=abs(p.y-yy);return exp(-d*width);}void main(){vec2 uv=vUv,p=uv-.5;p.x*=uRes.x/uRes.y;float a=0.;a+=band(p,.12,.085,1.7,22.,.3);a+=band(p,.18,.06,2.5,30.,2.2);a+=band(p,.27,.09,1.25,26.,4.0);a+=band(p,.36,.055,3.1,34.,1.4);a+=band(p,.45,.08,1.55,25.,5.1);a+=band(p,.57,.065,2.35,28.,.7);a+=band(p,.67,.09,1.35,24.,3.1);a*=smoothstep(.92,.18,abs(p.x));float glow=pow(max(0.,1.-length(p*vec2(.7,1.0))),3.0);vec3 c1=vec3(.05,.33,.68),c2=vec3(.14,.76,.82),c3=vec3(.46,.85,1.);vec3 col=mix(c1,c2,smoothstep(0.,.55,uv.y));col=mix(col,c3,smoothstep(.5,1.,uv.y));col*=a*(.24+.26*glow);float grain=sin(dot(uv*vec2(145.,97.),vec2(12.9898,78.233))+uTime*1.7)*.035;col+=grain*vec3(.25,.45,.55);gl_FragColor=vec4(col,1.0);}`});
-bgScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),bgMat));
-const ringGroup=new THREE.Group();world.add(ringGroup);function torus(r,t,op){const m=new THREE.MeshBasicMaterial({color:0x5fb6ff,transparent:true,opacity:op,blending:THREE.AdditiveBlending,depthWrite:false}),o=new THREE.Mesh(new THREE.TorusGeometry(r,t,10,180),m);o.rotation.x=Math.PI*.18;return o}for(let i=0;i<7;i++){const o=torus(2.7+i*.42,.008+i*.002,.18-i*.018);o.rotation.z=i*.22;ringGroup.add(o)}
-const core=new THREE.Group();world.add(core);const cage=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(3.45,0)),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.78,blending:THREE.AdditiveBlending}));core.add(cage);
-const verts=new THREE.IcosahedronGeometry(3.45,0),vg=new THREE.SphereGeometry(.055,10,10),vm=new THREE.MeshBasicMaterial({color:0xffffff}),seen=new Set();for(let i=0;i<verts.attributes.position.count;i++){const x=verts.attributes.position.getX(i),y=verts.attributes.position.getY(i),z=verts.attributes.position.getZ(i),k=`${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;if(seen.has(k))continue;seen.add(k);const d=new THREE.Mesh(vg,vm);d.position.set(x,y,z);core.add(d)}
-const sphere=new THREE.Mesh(new THREE.SphereGeometry(.78,40,40),new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{uTime:{value:0}},vertexShader:'varying vec3 vN;varying vec3 vP;void main(){vN=normalMatrix*normal;vP=(modelViewMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',fragmentShader:'uniform float uTime;varying vec3 vN;varying vec3 vP;void main(){vec3 n=normalize(vN);float rim=pow(1.-max(dot(n,vec3(0.,0.,1.)),0.),2.7);float grain=.92+.08*sin(vP.x*9.+uTime*2.)*sin(vP.y*13.-uTime);vec3 col=vec3(1.,.97,.82)*(0.55+1.9*rim)*grain;float a=.08+.92*rim;gl_FragColor=vec4(col*a,a);}'}));core.add(sphere);
-function sprite(rad,color,opacity){const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d'),g=x.createRadialGradient(64,64,0,64,64,64);g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(.18,'rgba(255,255,255,.95)');g.addColorStop(.45,'rgba(190,225,255,.3)');g.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=g;x.fillRect(0,0,128,128);const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),color,transparent:true,opacity,blending:THREE.AdditiveBlending,depthWrite:false}));s.scale.set(rad,rad,1);return s}core.add(sprite(2.7,0xaad8ff,.28));core.add(sprite(1.65,0xffffff,.62));
-const streaks=new THREE.Group();world.add(streaks);for(let i=0;i<26;i++){const a=i/26*Math.PI*2+Math.random()*.16,len=5.2+Math.random()*4.5,b=.16+Math.random()*.34,pts=[];for(let j=0;j<=18;j++){const f=j/18,r=.6+len*f;pts.push(new THREE.Vector3(Math.cos(a)*r+Math.sin(f*6+a)*b*f,Math.sin(a)*r+Math.cos(f*5-a)*b*f,0))}const geo=new THREE.BufferGeometry().setFromPoints(pts),mat=new THREE.LineBasicMaterial({color:0xeef9ff,transparent:true,opacity:.25+Math.random()*.42,blending:THREE.AdditiveBlending,depthWrite:false});streaks.add(new THREE.Line(geo,mat))}
-const cubes=new THREE.Group();world.add(cubes);for(let i=0;i<26;i++){const a=i/26*Math.PI*2,s=.16+.1*Math.random(),q=new THREE.Mesh(new THREE.BoxGeometry(s,s,s),new THREE.MeshBasicMaterial({color:0xdbeeff,transparent:true,opacity:.35,blending:THREE.AdditiveBlending,depthWrite:false}));q.position.set(Math.cos(a)*4.6,Math.sin(a)*4.6,Math.sin(a*2)*.8);q.userData={a,base:4.6,phase:Math.random()*6.28};cubes.add(q)}
-const shards=new THREE.Group();world.add(shards);for(let i=0;i<110;i++){const g=new THREE.PlaneGeometry(.05+Math.random()*.18,.02+Math.random()*.15),m=new THREE.MeshBasicMaterial({color:0xbad6ee,transparent:true,opacity:.2+Math.random()*.45,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,depthWrite:false}),s=new THREE.Mesh(g,m),r=7+Math.random()*10,a=Math.random()*Math.PI*2;s.position.set(Math.cos(a)*r,Math.sin(a)*r,-3+Math.random()*8);s.rotation.z=Math.random()*6.28;s.userData={a,r,speed:(Math.random()-.5)*.25,drift:Math.random()*6.28};shards.add(s)}
-const starGeo=new THREE.BufferGeometry(),sp=[];for(let i=0;i<420;i++){const r=8+Math.random()*16,a=Math.random()*Math.PI*2;sp.push(Math.cos(a)*r,Math.sin(a)*r,(Math.random()-.5)*8)}starGeo.setAttribute('position',new THREE.Float32BufferAttribute(sp,3));const stars=new THREE.Points(starGeo,new THREE.PointsMaterial({color:0x9cc8ef,size:.035,transparent:true,opacity:.6}));world.add(stars);
-const pole=document.createElement('div');pole.style.cssText='position:fixed;left:50%;top:50%;width:1px;height:60vh;transform:translateX(-50%);background:linear-gradient(180deg,rgba(220,240,255,.35),rgba(120,190,255,.12),transparent);box-shadow:0 0 5px rgba(150,215,255,.22);pointer-events:none;opacity:.28';document.body.appendChild(pole);
-const state={tx:0,ty:0,ts:1,x:0,y:0,s:1};function toWorld(nx,ny){const ndc=new THREE.Vector3(nx*2-1,1-ny*2,.5).unproject(camera),dir=ndc.sub(camera.position).normalize(),d=-camera.position.z/dir.z,w=camera.position.clone().add(dir.multiplyScalar(d));return w}
-window.addEventListener('message',e=>{const d=e.data;if(!d||d.type!=='raphael-stage')return;if(d.action==='move'){const w=toWorld(Math.max(0,Math.min(1,Number(d.x)||.5)),Math.max(0,Math.min(1,Number(d.y)||.5)));state.tx=w.x;state.ty=w.y;state.ts=Math.max(.42,Math.min(1.1,Number(d.scale)||1))}if(d.action==='center'){state.tx=0;state.ty=0;state.ts=1}});
-let t=0,last=performance.now();function animate(now){requestAnimationFrame(animate);const dt=Math.min(.05,(now-last)/1000);last=now;t+=dt;bgUniforms.uTime.value=t;bgUniforms.uRes.value.set(innerWidth,innerHeight);const ease=1-Math.pow(.001,dt);state.x+=(state.tx-state.x)*ease;state.y+=(state.ty-state.y)*ease;state.s+=(state.ts-state.s)*ease;[core,ringGroup,streaks,cubes].forEach(g=>{g.position.x=state.x;g.position.y=state.y;g.scale.setScalar(state.s)});core.rotation.y=t*.22;core.rotation.z=Math.sin(t*.45)*.08;ringGroup.rotation.z=t*.055;streaks.rotation.z=-t*.12;cubes.rotation.z=t*.14;shards.children.forEach(s=>{s.userData.a+=s.userData.speed*dt;s.position.x=Math.cos(s.userData.a)*s.userData.r;s.position.y=Math.sin(s.userData.a)*s.userData.r;s.rotation.z+=dt*(.15+s.userData.drift*.01)});stars.rotation.z=t*.008;sphere.material.uniforms.uTime.value=t*1.8;const wp=new THREE.Vector3();sphere.getWorldPosition(wp);const p=wp.project(camera);pole.style.left=((p.x*.5+.5)*innerWidth)+'px';pole.style.top=((-.5*p.y+.5)*innerHeight)+'px';renderer.render(bgScene,bgCam);renderer.render(scene,camera)}requestAnimationFrame(animate);
-function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.8));bgUniforms.uRes.value.set(innerWidth,innerHeight)}addEventListener('resize',resize);setTimeout(()=>document.body.classList.add('ready'),120);parent.postMessage({type:'raphael-stage',action:'ready'},'*');
-})();
-</script></body></html>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Great Sage HUD Prototype</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #030b08; overflow: hidden; height: 100%; }
+  #canvas-wrap {
+    position: fixed; inset: 0;
+    transition: filter 380ms ease, transform 380ms ease;
+  }
+  /* Idle "blink" only blurs the 3D visual/background (this element),
+     not body - unlike the core-click/panel-open lens-focus, which is
+     deliberately page-wide to mask a UI transition under the blur. */
+  #canvas-wrap.idle-blur {
+    filter: blur(8px);
+    transform: scale(1.045);
+  }
+  #canvas-wrap canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body class="startup-snap startup-active startup-intro">
+<div id="canvas-wrap"></div>
+<div id="win-drag" title="Drag to move"></div>
+<div id="win-controls"><button id="win-min" title="Minimise">−</button><button id="win-max" title="Maximise">□</button><button id="win-close" title="Close">×</button></div>
+<div id="mini-drag-handle" class="mini-keep" title="Drag to move"></div>
+<div id="mini-exit" class="mini-keep" title="Back to full size">×</div>
+<div id="mini-chat" class="mini-keep"><span id="mini-chat-text"></span></div>
+<div id="core-pole"></div>
+<div id="caption-box"><button class="caption-close-btn" title="Dismiss">✕</button><div id="caption-text"></div></div>
+<div id="cinematic-caption"><button class="caption-close-btn" title="Dismiss">✕</button><div id="cinematic-caption-text"></div></div>
+<div id="bar-caption"><div id="bar-caption-frame"><button class="caption-close-btn" title="Dismiss">✕</button><div id="bar-caption-text"></div></div></div>
+<div id="meter">AMPLITUDE: <span id="meter-val">0.00</span></div>
+<!-- Full Great Sage prototype source is intentionally kept as the visual source of truth. -->
+</body>
+</html>
