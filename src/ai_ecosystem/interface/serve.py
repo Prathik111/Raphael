@@ -28,7 +28,6 @@ from ai_ecosystem.core.persistence import (
     SqliteVerificationRepository,
 )
 from ai_ecosystem.core.runtime import AgentRuntime
-from ai_ecosystem.core.secrets import EnvSecretsProvider
 from ai_ecosystem.intelligence import (
     HttpChatModelProvider,
     MockModelProvider,
