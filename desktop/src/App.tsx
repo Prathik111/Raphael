@@ -42,31 +42,55 @@ export function App() {
 
   const openChat = useCallback(async (chat: Chat) => {
     setActive(chat); setError(""); setReply(chat.reply ?? "");
-    if (chat.reply) { focusResponse(); return; }
     try {
       const result = await api.taskResult(chat.task_id);
-      setReply(result.reply || result.summary || "");
-      focusResponse();
-    } catch { setReply(""); }
+      if (result.status === "FAILED") {
+        setError(result.error || result.summary || "Raphael failed to complete this task.");
+        setReply("");
+      } else {
+        setReply(result.reply || result.summary || "");
+        if (result.reply || result.summary) focusResponse();
+      }
+    } catch (err) {
+      setReply("");
+      setError(err instanceof Error ? err.message : "Could not load this conversation.");
+    }
   }, [api, focusResponse]);
 
   const waitForResult = useCallback(async (task: TaskView) => {
-    for (let i = 0; i < 300; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 650));
+    let lastError = "";
+    for (let i = 0; i < 180; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
       try {
         const current = await api.getTask(task.task_id);
         if (!current.completed && current.state !== "FAILED" && current.state !== "CANCELLED") continue;
         const result = await api.taskResult(task.task_id);
-        const text = result.reply || result.summary || result.error || "";
-        setReply(text);
-        setActive((prev) => ({ ...(prev ?? task), ...current, reply: text }));
+        if (result.status === "FAILED" || current.state === "FAILED") {
+          const message = result.error || result.summary || "Raphael failed to complete the task.";
+          setReply("");
+          setError(message);
+          setActive((prev) => ({ ...(prev ?? task), ...current }));
+        } else if (result.status === "CANCELLED" || current.state === "CANCELLED") {
+          setReply("");
+          setError("Task cancelled.");
+          setActive((prev) => ({ ...(prev ?? task), ...current }));
+        } else {
+          const text = result.reply || result.summary || "Task completed without a response.";
+          setReply(text);
+          setError("");
+          setActive((prev) => ({ ...(prev ?? task), ...current, reply: text }));
+          focusResponse();
+        }
         setBusy(false);
         await refreshChats();
         return;
-      } catch { /* result persistence can briefly lag task state */ }
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : "Could not read the task result.";
+      }
     }
-    setBusy(false); setError("Raphael did not return a response in time.");
-  }, [api, refreshChats]);
+    setBusy(false);
+    setError(lastError || "Raphael did not return a response within 90 seconds.");
+  }, [api, focusResponse, refreshChats]);
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
