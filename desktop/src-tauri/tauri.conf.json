@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AI Ecosystem",
+  "productName": "Raphael",
   "version": "0.1.0",
   "identifier": "com.aiecosystem.desktop",
   "build": {
@@ -13,16 +13,19 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "AI Ecosystem",
-        "width": 1200,
-        "height": 800
+        "title": "Raphael",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1040,
+        "minHeight": 720,
+        "resizable": true
       }
     ],
     "security": {
       "csp": "default-src 'self'; connect-src http://127.0.0.1:*"
     }
   },
-"bundle": {
+  "bundle": {
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.ico"]
