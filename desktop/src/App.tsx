@@ -27,7 +27,7 @@ export function App() {
   }, []);
 
   const focusResponse = useCallback(() => {
-    sendStage({ type: "raphael-stage", action: "move", x: 0.73, y: 0.43, scale: 0.62 });
+    sendStage({ type: "raphael-stage", action: "move", x: 0.73, y: 0.25, scale: 0.62 });
   }, [sendStage]);
 
   useEffect(() => {
