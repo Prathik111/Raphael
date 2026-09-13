@@ -1,8 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ai_ecosystem.agent.planner.backend import ModelReasoningBackend
 from ai_ecosystem.intelligence.models.providers import (
     MockModelProvider,
+    ModelRequest,
     ModelResponse,
     request_structured,
 )
@@ -10,7 +11,7 @@ from ai_ecosystem.intelligence.models.providers import (
 
 class TaskSpec(BaseModel):
     title: str = ""
-    constraints: list[str] = []
+    constraints: list[str] = Field(default_factory=list)
     desired_outcome: str = ""
     needs_research: bool = False
 
@@ -20,9 +21,7 @@ def test_structured_understanding_falls_back_to_goal_for_non_json_reply() -> Non
 
     result = request_structured(
         provider,
-        __import__("ai_ecosystem.intelligence.models.providers", fromlist=["ModelRequest"]).ModelRequest(
-            prompt="UNDERSTAND: say hello"
-        ),
+        ModelRequest(prompt="UNDERSTAND: say hello"),
         TaskSpec,
     )
 
