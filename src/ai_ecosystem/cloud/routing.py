@@ -214,7 +214,8 @@ class ComputeRouter:
             )
             if not local_ok:
                 raise PolicyRejectionError(
-                    "high-privacy work requires local execution, which is unavailable or incapable"
+                    "high-privacy work requires local execution, "
+                    "which is unavailable or incapable"
                 )
         if requirements.max_cost >= 0:
             affordable = any(

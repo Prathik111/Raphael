@@ -9,8 +9,8 @@ without knowing whether the bytes arrived over HTTP, USB, or MQTT.
 
 from __future__ import annotations
 
-from typing import Any
 from collections.abc import Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -62,8 +62,6 @@ class ProtocolValidator:
     ) -> None:
         import time as _time
 
-        # Default-deny: without an explicit authorizer, no sender is
-        # authorized. Connectivity never implies authorization.
         self._authorize = authorize if authorize is not None else _deny_all
         self._clock = clock or _time.time
         self._seen: dict[str, float] = {}
@@ -105,7 +103,7 @@ class ProtocolValidator:
             raise ProtocolError("sender not authorized for this message")
         self._seen[envelope.id] = now
         while len(self._seen) > SEEN_CACHE_SIZE:
-            oldest_key = min(self._seen, key=self._seen.get)
+            oldest_key = min(self._seen.items(), key=lambda item: item[1])[0]
             del self._seen[oldest_key]
         return envelope
 

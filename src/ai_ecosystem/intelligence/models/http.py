@@ -7,6 +7,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import (
     ModelMalformedError,
@@ -222,7 +223,10 @@ def _parse_response(decoded: object, provider_id: str, default_model: str) -> Mo
             )
         )
 
-    usage = decoded.get("usage") if isinstance(decoded.get("usage"), dict) else {}
+    usage: dict[str, Any] = {}
+    usage_raw = decoded.get("usage")
+    if isinstance(usage_raw, dict):
+        usage = {str(key): value for key, value in usage_raw.items()}
     finish_reason = first.get("finish_reason") or ""
     if not text.strip() and not tool_calls:
         raise ModelMalformedError(

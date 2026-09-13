@@ -8,10 +8,11 @@ because every state change is committed before the caller proceeds, and
 
 from __future__ import annotations
 
+import builtins
 import sqlite3
 import threading
-from contextlib import contextmanager, suppress
-from typing import TYPE_CHECKING, Any, TypeVar
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 if TYPE_CHECKING:  # cycle-safe: cloud imports persistence at runtime
     from ai_ecosystem.cloud.availability import DevicePresence
@@ -132,8 +133,6 @@ class Database:
         """Apply pending numbered migrations in order; return version."""
         try:
             with self._lock:
-                # The journal itself is bootstrap, not a version: it must
-                # exist before v1 can record into it.
                 self._conn.execute(
                     "CREATE TABLE IF NOT EXISTS schema_migrations "
                     "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
@@ -159,7 +158,7 @@ class Database:
             rows = self._conn.execute("SELECT version FROM schema_migrations").fetchall()
             return {int(r[0]) for r in rows}
         except sqlite3.Error:
-            pass  # pre-v2 database: no journal yet
+            pass
         try:
             rows = self._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_version'"
@@ -204,12 +203,7 @@ class Database:
                     self._conn.execute("COMMIT")
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        """Run SQL under the lock; autocommits unless in transaction().
-
-        Prefer query()/write(): cursors must not escape the lock, since
-        concurrent threads sharing this connection would otherwise
-        interleave fetches and read each other's rows.
-        """
+        """Run SQL under the lock; autocommits unless in transaction()."""
         with self._lock:
             try:
                 return self._conn.execute(sql, params)
@@ -239,32 +233,26 @@ class Database:
             try:
                 self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             except sqlite3.Error:
-                pass  # non-WAL databases have nothing to checkpoint
-            with suppress(sqlite3.Error):
+                pass
+            try:
                 self._conn.close()
+            except sqlite3.Error:
+                pass
 
-    def __del__(self) -> None:  # noqa: D105 -- deterministic resource release
-        """Final safety net: never leave a connection open implicitly.
-
-        Fire-and-forget uses (``Database(path).migrate()``) rely on
-        refcounting to drop the temporary; without this, the raw
-        sqlite3 handle can outlive its owner (cached references keep
-        the Connection object alive), leaving WAL sidecars locked on
-        Windows and breaking restore/replace flows. Explicit close()
-        remains the primary contract; this only covers abandonment.
-        """
+    def __del__(self) -> None:
+        """Final safety net: never leave a connection open implicitly."""
         try:
             conn = getattr(self, "_conn", None)
             if conn is not None:
                 try:
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                except Exception:  # noqa: BLE001 -- best effort at GC time
+                except Exception:
                     pass
                 try:
                     conn.close()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
-        except Exception:  # noqa: BLE001 -- __del__ must never raise
+        except Exception:
             pass
 
     def backup_to(self, path: str) -> str:
@@ -283,7 +271,7 @@ class Database:
         return path
 
 
-class _SnapshotTable:
+class _SnapshotTable(Generic[T]):
     """Generic id/snapshot store shared by the entity repositories."""
 
     def __init__(self, db: Database, table: str, model_cls: type[T]) -> None:
@@ -317,7 +305,7 @@ class _SnapshotTable:
         rowcount, _ = self._db.write(f"DELETE FROM {self._table} WHERE id = ?", (item_id,))
         return rowcount > 0
 
-    def list(self) -> list[T]:
+    def list(self) -> builtins.list[T]:
         rows = self._db.query(f"SELECT snapshot FROM {self._table} ORDER BY updated_at")
         return [self._model_cls.model_validate_json(r[0]) for r in rows]
 
@@ -442,23 +430,18 @@ class SqlitePresenceRepository:
         self._t = _SnapshotTable(db, "device_presence", DevicePresence)
 
     def create(self, item: DevicePresence) -> DevicePresence:
-        """Persist a presence row."""
         return self._t.create(item)
 
     def get(self, item_id: str) -> DevicePresence | None:
-        """Fetch by record id."""
         return self._t.get(item_id)
 
     def update(self, item: DevicePresence) -> DevicePresence:
-        """Replace the stored row."""
         return self._t.update(item)
 
     def delete(self, item_id: str) -> bool:
-        """Remove a row."""
         return self._t.delete(item_id)
 
     def list(self) -> list[DevicePresence]:
-        """All rows."""
         return self._t.list()
 
 
@@ -550,7 +533,6 @@ class SqliteSnapshotRepository(SnapshotRepository):
         return self._t.list()
 
     def latest(self) -> SystemSnapshot | None:
-        """Most recently collected snapshot (None when none stored)."""
         snapshots = self._t.list()
         if not snapshots:
             return None
@@ -633,23 +615,18 @@ class SqliteMessageRepository(MessageRepository):
         self._t = _SnapshotTable(db, "agent_messages", AgentMessage)
 
     def create(self, item: Any) -> Any:
-        """Persist a sent message."""
         return self._t.create(item)
 
     def get(self, item_id: str) -> Any | None:
-        """Fetch by message id."""
         return self._t.get(item_id)
 
     def update(self, item: Any) -> Any:
-        """Replace the stored message."""
         return self._t.update(item)
 
     def delete(self, item_id: str) -> bool:
-        """Remove a message."""
         return self._t.delete(item_id)
 
     def list(self) -> list[Any]:
-        """All messages in creation order."""
         return self._t.list()
 
 
@@ -693,7 +670,6 @@ class SqliteEventRepository(EventRepository):
         return [r[0] for r in rows]
 
     def list_snapshots_since(self, seq: int) -> list[tuple[int, str]]:
-        """(seq, snapshot) rows newer than ``seq`` (durable cursor)."""
         rows = self._db.query("SELECT seq, snapshot FROM events WHERE seq > ? ORDER BY seq", (seq,))
         return [(int(r[0]), r[1]) for r in rows]
 
@@ -707,10 +683,10 @@ class DbEventStore(EventStore):
     def append(self, event: Event) -> int:
         return self._repo.append_snapshot(event.model_dump_json())
 
-    def list(self) -> list[Event]:
+    def list(self) -> builtins.list[Event]:
         return [Event.model_validate_json(s) for s in self._repo.list_snapshots()]
 
-    def events_since(self, seq: int) -> list[tuple[int, Event]]:
+    def events_since(self, seq: int) -> builtins.list[tuple[int, Event]]:
         rows = self._repo.list_snapshots_since(seq)
         return [(row_seq, Event.model_validate_json(snapshot)) for row_seq, snapshot in rows]
 
@@ -722,11 +698,9 @@ class DbEventStore(EventStore):
         return count
 
     def attach(self, bus: Any) -> None:
-        """Persist everything published on ``bus`` (bus.subscribe_all)."""
         bus.subscribe_all(self.append_and_ignore)
 
     def append_and_ignore(self, event: Event) -> None:
-        """``subscribe``-compatible wrapper discarding the sequence number."""
         self.append(event)
 
 

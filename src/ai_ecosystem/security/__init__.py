@@ -1,6 +1,7 @@
-"""Public security API (policy, envelope, sandbox, audit)."""
+"""Public security API (policy, envelope, sandbox, audit, data policy)."""
 
 from ai_ecosystem.security.audit import AuditLog, AuditRecord
+from ai_ecosystem.security.data_policy import DataClass, DataPolicy, EgressDecision, require_egress
 from ai_ecosystem.security.envelope import (
     CAPABILITY_RISK,
     DANGEROUS_CAPABILITIES,
@@ -34,7 +35,10 @@ __all__ = [
     "AuthorizationManager",
     "CAPABILITY_RISK",
     "ComponentTrust",
+    "DataClass",
+    "DataPolicy",
     "DANGEROUS_CAPABILITIES",
+    "EgressDecision",
     "LocalSandboxProvider",
     "PermissionEngine",
     "Policy",
@@ -49,4 +53,5 @@ __all__ = [
     "capability_risk",
     "is_dangerous",
     "meets",
+    "require_egress",
 ]

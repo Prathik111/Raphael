@@ -115,7 +115,9 @@ class DriftDetector:
         if self._proposed_total >= 4 and (
             self._proposed_risky / self._proposed_total >= self._risky_rate_threshold
         ):
-            findings.append(f"risky proposal rate {self._proposed_risky}/{self._proposed_total}")
+            findings.append(
+                f"risky proposal rate " f"{self._proposed_risky}/{self._proposed_total}"
+            )
         kinds = Counter(p.kind.value for p in self._adopted)
         model_switches = kinds.get(ProposalKind.MODEL_HINT.value, 0)
         if model_switches >= 3:

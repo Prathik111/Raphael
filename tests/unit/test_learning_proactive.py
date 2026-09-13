@@ -1,5 +1,6 @@
 """Gates 32-34: learning pipeline, safety governor, proactive engine."""
 
+
 import pytest
 
 from ai_ecosystem.agent import (
@@ -28,7 +29,6 @@ from ai_ecosystem.learning import (
 from ai_ecosystem.learning.safety import LearningPolicyState
 from ai_ecosystem.personalization.memory import MemoryStore
 from ai_ecosystem.personalization.personality import PreferenceStore
-import contextlib
 
 
 @pytest.fixture()
@@ -198,10 +198,12 @@ def test_policy_immutability(db):
     pipeline = _pipeline(db, governor=governor)
     for _ in range(3):
         for proposal in pipeline.generate(_events()):
-            with contextlib.suppress(DomainValidationError):
+            try:
                 pipeline.approve(
                     proposal.id, "memory", {"memories": MemoryStore(SqliteMemoryRepository(db))}
                 )
+            except DomainValidationError:
+                pass
     after = AuthorizationManager(registry).policy.model_dump()
     assert before == after
 

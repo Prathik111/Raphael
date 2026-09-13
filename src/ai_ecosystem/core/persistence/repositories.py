@@ -20,7 +20,13 @@ from ai_ecosystem.core.models.domain import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from ai_ecosystem.agent.multi.messages import AgentMessage  # noqa: F401
+    from ai_ecosystem.learning.models import (  # noqa: F401
+        LearningProposal,
+        UsageEvent,
+        UsagePattern,
+    )
+    from ai_ecosystem.system.monitor.models import SystemSnapshot  # noqa: F401
 
 T = TypeVar("T")
 

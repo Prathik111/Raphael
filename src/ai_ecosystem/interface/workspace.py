@@ -9,6 +9,7 @@ URLs, eval(), framework escape hatches, prototype pollution keys).
 
 from __future__ import annotations
 
+import builtins
 import json
 from enum import Enum
 from typing import Any
@@ -76,11 +77,11 @@ class NodeType(str, Enum):
 class NodeState(str, Enum):
     """Lifecycle with real behavior behind each state."""
 
-    LIVE = "LIVE"  # updates apply
-    FROZEN = "FROZEN"  # updates rejected until thawed
-    COLLAPSED = "COLLAPSED"  # children hidden (containers)
-    DORMANT = "DORMANT"  # no auto-refresh; explicit refresh allowed
-    GHOST = "GHOST"  # tombstone left by a removed reference
+    LIVE = "LIVE"
+    FROZEN = "FROZEN"
+    COLLAPSED = "COLLAPSED"
+    DORMANT = "DORMANT"
+    GHOST = "GHOST"
 
 
 _ALLOWED_AFFORDANCES = {
@@ -165,7 +166,7 @@ def _scan_value(value: Any) -> None:
             if lowered in _FORBIDDEN_KEYS or _is_handler_key(str(key)):
                 raise DomainValidationError(f"forbidden nested key {key!r}")
             _scan_value(item)
-    elif isinstance(value, (list, tuple, set, frozenset)):
+    elif isinstance(value, list | tuple | set | frozenset):
         for item in value:
             _scan_value(item)
 
@@ -187,13 +188,11 @@ class WorkspaceManager:
         self._bus = bus
 
     def create(self, project_scope: str = "") -> Workspace:
-        """Create an empty workspace for a project scope."""
         workspace = self._repo.create(Workspace(project_scope=project_scope))
         self._emit(workspace.id, {"created": True})
         return workspace
 
     def get(self, workspace_id: str) -> Workspace:
-        """Fetch (raises when unknown)."""
         from ai_ecosystem.core.errors.exceptions import ResourceNotFoundError
 
         workspace = self._repo.get(workspace_id)
@@ -201,8 +200,7 @@ class WorkspaceManager:
             raise ResourceNotFoundError("Workspace", workspace_id)
         return workspace
 
-    def list(self, project_scope: str = "") -> list[Workspace]:
-        """Workspaces, optionally filtered by project (coexistence)."""
+    def list(self, project_scope: str = "") -> builtins.list[Workspace]:
         all_workspaces = self._repo.list()
         if project_scope:
             return [w for w in all_workspaces if w.project_scope == project_scope]
@@ -215,9 +213,8 @@ class WorkspaceManager:
         props: dict | None = None,
         data_ref: DataRef | None = None,
         salience: float = 0.5,
-        affordances: list[str] | None = None,
+        affordances: builtins.list[str] | None = None,
     ) -> WorkspaceNode:
-        """Validate and append a node (layout defaults assigned)."""
         workspace = self.get(workspace_id)
         node = WorkspaceNode(
             node_type=node_type,
@@ -240,7 +237,6 @@ class WorkspaceManager:
         props: dict | None = None,
         state: NodeState | None = None,
     ) -> WorkspaceNode:
-        """Apply validated changes (FROZEN nodes refuse updates)."""
         workspace = self.get(workspace_id)
         node = self._need(workspace, node_id)
         if node.state is NodeState.FROZEN:
@@ -256,7 +252,6 @@ class WorkspaceManager:
         return node
 
     def remove_node(self, workspace_id: str, node_id: str) -> bool:
-        """Delete a node and its layout entry."""
         workspace = self.get(workspace_id)
         if node_id not in workspace.nodes:
             return False
@@ -272,7 +267,6 @@ class WorkspaceManager:
     def move_node(
         self, workspace_id: str, node_id: str, x: int, y: int, width: int = 0, height: int = 0
     ) -> NodeLayout:
-        """Reposition (and optionally resize) a node."""
         for label, value in (("x", x), ("y", y), ("width", width), ("height", height)):
             if not isinstance(value, int) or isinstance(value, bool):
                 raise DomainValidationError(f"layout {label} must be an integer")
@@ -291,8 +285,7 @@ class WorkspaceManager:
         self._repo.update(workspace)
         return layout
 
-    def group_nodes(self, workspace_id: str, group: str, node_ids: list[str]) -> None:
-        """Assign nodes to a named group."""
+    def group_nodes(self, workspace_id: str, group: str, node_ids: builtins.list[str]) -> None:
         workspace = self.get(workspace_id)
         for node_id in node_ids:
             self._need(workspace, node_id)
@@ -303,7 +296,6 @@ class WorkspaceManager:
         self._repo.update(workspace)
 
     def set_collapsed(self, workspace_id: str, node_id: str, collapsed: bool) -> WorkspaceNode:
-        """Collapse/expand a node (containers hide children when collapsed)."""
         node = self.get(workspace_id).nodes.get(node_id)
         if node is None:
             from ai_ecosystem.core.errors.exceptions import ResourceNotFoundError
@@ -314,19 +306,13 @@ class WorkspaceManager:
         )
 
     def focus(self, workspace_id: str, node_id: str) -> None:
-        """Focus a node (must exist)."""
         workspace = self.get(workspace_id)
         self._need(workspace, node_id)
         workspace.focused_node = node_id
         workspace.touch()
         self._repo.update(workspace)
 
-    def visible_nodes(self, workspace_id: str) -> list[WorkspaceNode]:
-        """Nodes not hidden inside a collapsed container.
-
-        Rule: a node is hidden when its layout group names a node id
-        whose state is COLLAPSED.
-        """
+    def visible_nodes(self, workspace_id: str) -> builtins.list[WorkspaceNode]:
         workspace = self.get(workspace_id)
         collapsed_ids = {
             nid for nid, node in workspace.nodes.items() if node.state is NodeState.COLLAPSED
@@ -338,7 +324,6 @@ class WorkspaceManager:
         ]
 
     def apply_update(self, workspace_id: str, update: dict) -> WorkspaceNode:
-        """Agent/model-shaped update through the same validation gate."""
         if not isinstance(update, dict):
             raise DomainValidationError("workspace update must be a mapping")
         try:
@@ -359,7 +344,7 @@ class WorkspaceManager:
         if not 0.0 <= salience <= 1.0:
             raise DomainValidationError("salience must be within [0, 1]")
         raw_affordances = update.get("affordances", [])
-        if not isinstance(raw_affordances, (list, tuple)):
+        if not isinstance(raw_affordances, list | tuple):
             raise DomainValidationError("affordances must be a list")
         if any(not isinstance(name, str) for name in raw_affordances):
             raise DomainValidationError("affordances must be strings")
@@ -401,21 +386,16 @@ class SqliteWorkspaceRepository:
         self._t = _SnapshotTable(db, "workspaces", Workspace)
 
     def create(self, item: Workspace) -> Workspace:
-        """Persist a workspace."""
         return self._t.create(item)
 
     def get(self, item_id: str) -> Workspace | None:
-        """Fetch by id (None when unknown)."""
         return self._t.get(item_id)
 
     def update(self, item: Workspace) -> Workspace:
-        """Replace the stored workspace."""
         return self._t.update(item)
 
     def delete(self, item_id: str) -> bool:
-        """Remove a workspace."""
         return self._t.delete(item_id)
 
     def list(self) -> list[Workspace]:
-        """All workspaces."""
         return self._t.list()

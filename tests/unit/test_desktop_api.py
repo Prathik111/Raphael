@@ -246,5 +246,5 @@ def test_15_api_perf_smoke(served):
     started = time.monotonic()
     served.get("/tasks")
     list_s = time.monotonic() - started
-    print(f"\napi smoke: submit={submit_s:.3f}s events={event_s:.3f}s list={list_s:.3f}s")
+    print(f"\napi smoke: submit={submit_s:.3f}s events={event_s:.3f}s " f"list={list_s:.3f}s")
     assert events and submit_s < 5 and event_s < 5 and list_s < 5

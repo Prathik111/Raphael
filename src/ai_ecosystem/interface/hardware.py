@@ -93,7 +93,6 @@ class HardwareGateway:
         self._seen_nonces: dict[str, float] = {}
 
     def handle(self, packet: dict) -> dict[str, Any]:
-        """Validate fully, then execute the mapped safe effect."""
         message = self._parse(packet)
         self._authenticate(message)
         handler = {
@@ -106,8 +105,6 @@ class HardwareGateway:
             "project-note": self._note,
         }[message.command]
         return handler(message)
-
-    # -- validation ---------------------------------------------------------
 
     def _parse(self, packet: dict) -> DevicePacket:
         if not isinstance(packet, dict):
@@ -126,9 +123,7 @@ class HardwareGateway:
             raise DomainValidationError(f"malformed packet: {exc}") from exc
         major = str(message.protocol_version).split(".")[0]
         if major != SUPPORTED_MAJOR:
-            raise DomainValidationError(
-                f"protocol version {message.protocol_version!r} unsupported"
-            )
+            raise DomainValidationError(f"protocol version {message.protocol_version!r} unsupported")
         if message.command not in HARDWARE_COMMANDS:
             raise DomainValidationError(f"unknown command {message.command!r}")
         return message
@@ -157,40 +152,23 @@ class HardwareGateway:
             raise DomainValidationError("replayed packet rejected")
         self._seen_nonces[message.nonce] = now
         while len(self._seen_nonces) > 10_000:
-            oldest_key = min(self._seen_nonces, key=self._seen_nonces.get)
+            oldest_key = min(self._seen_nonces.items(), key=lambda item: item[1])[0]
             del self._seen_nonces[oldest_key]
-
-    # -- command effects -------------------------------------------------------
 
     def _status(self, message: DevicePacket) -> dict[str, Any]:
         return {"tasks": self._api.list_tasks(), "agents": self._api.get_agent_status()}
 
     def _approve(self, message: DevicePacket) -> dict[str, Any]:
-        self._emit(
-            EventType.PHONE_DECISION,
-            str(message.payload.get("task_id", "")),
-            {
-                "device_id": message.device_id,
-                "decision": "approve",
-                "note": "hardware acknowledgment only; grants nothing",
-            },
-        )
+        self._emit(EventType.PHONE_DECISION, str(message.payload.get("task_id", "")), {"device_id": message.device_id, "decision": "approve", "note": "hardware acknowledgment only; grants nothing"})
         return {"acknowledged": True, "grants": "nothing"}
 
     def _deny(self, message: DevicePacket) -> dict[str, Any]:
-        task_id = str(message.payload.get("task_id", ""))
-        return self._cancel(task_id, message.device_id, "deny")
+        return self._cancel(str(message.payload.get("task_id", "")), message.device_id, "deny")
 
     def _stop(self, message: DevicePacket) -> dict[str, Any]:
-        task_id = str(message.payload.get("task_id", ""))
-        return self._cancel(task_id, message.device_id, "stop")
+        return self._cancel(str(message.payload.get("task_id", "")), message.device_id, "stop")
 
     def _kill(self, message: DevicePacket) -> dict[str, Any]:
-        """Emergency stop: cancel cancellable tasks matching an explicit scope.
-
-        Scope is required and must be at least 3 characters: an empty or
-        trivially short scope would mass-cancel unrelated work.
-        """
         scope = str(message.payload.get("scope", ""))
         if len(scope) < 3:
             raise DomainValidationError("kill requires an explicit scope (>= 3 characters)")
@@ -202,36 +180,21 @@ class HardwareGateway:
                 try:
                     self._api.cancel_task(task["task_id"])
                     cancelled.append(task["task_id"])
-                except Exception:  # noqa: BLE001 -- best effort per task
+                except Exception:
                     continue
-        self._emit(
-            EventType.PHONE_DECISION,
-            "",
-            {"device_id": message.device_id, "decision": "kill", "cancelled": cancelled},
-        )
+        self._emit(EventType.PHONE_DECISION, "", {"device_id": message.device_id, "decision": "kill", "cancelled": cancelled})
         return {"cancelled": cancelled}
 
     def _note(self, message: DevicePacket) -> dict[str, Any]:
-        # Untrusted payload: emit only its shape, never its content.
         keys = sorted(message.payload) if isinstance(message.payload, dict) else []
-        self._emit(
-            EventType.PHONE_DECISION,
-            "",
-            {
-                "device_id": message.device_id,
-                "decision": f"{message.command}-recorded",
-                "payload_keys": keys,
-            },
-        )
+        self._emit(EventType.PHONE_DECISION, "", {"device_id": message.device_id, "decision": f"{message.command}-recorded", "payload_keys": keys})
         return {"recorded": True, "applied": False}
 
     def _cancel(self, task_id: str, device_id: str, decision: str) -> dict[str, Any]:
         if not task_id:
             raise DomainValidationError("command needs a task_id")
         cancelled = self._api.cancel_task(task_id)
-        self._emit(
-            EventType.PHONE_DECISION, task_id, {"device_id": device_id, "decision": decision}
-        )
+        self._emit(EventType.PHONE_DECISION, task_id, {"device_id": device_id, "decision": decision})
         return cancelled
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:

@@ -271,6 +271,7 @@ def test_usage_perf_smoke(db):
     patterns = PatternDetector().detect(observer.session_events())
     detect = time.monotonic() - started
     print(
-        f"\nusage smoke: 2000 ingested in {ingest:.2f}s, {len(patterns)} patterns in {detect:.2f}s"
+        f"\nusage smoke: 2000 ingested in {ingest:.2f}s, "
+        f"{len(patterns)} patterns in {detect:.2f}s"
     )
     assert ingest < 5 and detect < 5

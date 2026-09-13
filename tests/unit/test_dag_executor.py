@@ -192,7 +192,7 @@ def test_cancellation_stops_unstarted_work():
     runner = ToolRunner(registry, GrantAllAuthorizer(), bus)
     executor = ParallelExecutor(runner, registry, bus, max_concurrency=1)
     graph = TaskGraph.from_plan(
-        _plan(*[(f"s{i}", [f"s{i - 1}"] if i else [], ["slow"]) for i in range(4)])
+        _plan(*[(f"s{i}", [f"s{i-1}"] if i else [], ["slow"]) for i in range(4)])
     )
     token = CancellationToken()
     outcome = {}

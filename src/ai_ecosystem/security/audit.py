@@ -189,7 +189,9 @@ class AuditLog:
         )
         return count
 
-    def purge_older_than(self, days: float, archive_path: str, now: datetime | None = None) -> int:
+    def purge_older_than(
+        self, days: float, archive_path: str, now: datetime | None = None
+    ) -> int:
         """Retention by archival rotation: export olds, then clear all.
 
         Physical deletion without export would break the chain, so

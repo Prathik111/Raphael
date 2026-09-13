@@ -17,6 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ai_ecosystem.cloud.jobs import ComputeJob
 from ai_ecosystem.core.errors.exceptions import AiEcosystemError
 from ai_ecosystem.core.secrets import CredentialError, SecretsProvider, redact
 
@@ -70,17 +71,14 @@ class OCITransport(ABC):
 
     @abstractmethod
     def handshake(self, tenancy: str) -> dict[str, Any]:
-        """Authenticate + return endpoint facts (no secrets echoed)."""
         raise NotImplementedError
 
     @abstractmethod
     def complete(self, model: str, prompt: str) -> str:
-        """Run one remote completion."""
         raise NotImplementedError
 
     @abstractmethod
     def close(self) -> None:
-        """Release the connection."""
         raise NotImplementedError
 
 
@@ -109,7 +107,6 @@ class MockOCITransport(OCITransport):
             raise CloudUnavailableError(f"mock OCI {operation} unavailable")
 
     def handshake(self, tenancy: str) -> dict[str, Any]:
-        """Pretend to authenticate (tenancy acknowledged, never echoed)."""
         self.calls["handshake"] += 1
         self._maybe_fail("handshake")
         if self.latency_s:
@@ -117,7 +114,6 @@ class MockOCITransport(OCITransport):
         return {"region": "mock-region", "authenticated": True}
 
     def complete(self, model: str, prompt: str) -> str:
-        """Return the canned output for a model (default echo)."""
         self.calls["complete"] += 1
         self._maybe_fail("complete")
         self.prompts.append(prompt)
@@ -126,7 +122,6 @@ class MockOCITransport(OCITransport):
         return self._outputs.get(model, f"mock result for {model}")
 
     def close(self) -> None:
-        """Record the close."""
         self.calls["close"] += 1
 
 
@@ -137,35 +132,28 @@ class CloudProvider(ABC):
 
     @abstractmethod
     def connect(self) -> ProviderInfo:
-        """Authenticate and open the session."""
         raise NotImplementedError
 
     @abstractmethod
     def disconnect(self) -> None:
-        """Close the session (idempotent)."""
         raise NotImplementedError
 
     @abstractmethod
     def status(self) -> ProviderInfo:
-        """Current status without side effects."""
         raise NotImplementedError
 
     @abstractmethod
     def capabilities(self) -> CloudCapabilities:
-        """What this endpoint offers."""
         raise NotImplementedError
 
     @abstractmethod
     def health(self) -> dict[str, Any]:
-        """Reachability/auth/availability determination (bounded)."""
         raise NotImplementedError
 
-    def job_logs(self, job_id: str) -> str:
-        """Fetch remote logs (providers without jobs refuse explicitly)."""
+    def job_logs(self, job: ComputeJob) -> str:
         raise CloudError(f"{self.name} does not support remote jobs")
 
-    def job_result(self, job_id: str) -> str:
-        """Fetch a remote result reference (providers without jobs refuse)."""
+    def job_result(self, job: ComputeJob) -> str:
         raise CloudError(f"{self.name} does not support remote jobs")
 
 
@@ -187,7 +175,6 @@ class OCIProvider(CloudProvider):
         self._latency_ms: float | None = None
 
     def connect(self) -> ProviderInfo:
-        """Authenticate via the secrets provider (values never logged)."""
         self._status = CloudStatus.CONNECTING
         try:
             tenancy = self._secrets.require("OCI_TENANCY")
@@ -200,7 +187,7 @@ class OCIProvider(CloudProvider):
         except CredentialError as exc:
             self._status = CloudStatus.ERROR
             raise CloudAuthError(str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 -- normalize transport errors
+        except Exception as exc:
             self._status = CloudStatus.ERROR
             raise CloudAuthError("OCI authentication failed") from exc
         self._region = str(facts.get("region", self._region))
@@ -208,14 +195,12 @@ class OCIProvider(CloudProvider):
         return self.status()
 
     def disconnect(self) -> None:
-        """Close quietly (safe to call twice)."""
         try:
             self._transport.close()
         finally:
             self._status = CloudStatus.DISCONNECTED
 
     def status(self) -> ProviderInfo:
-        """Describe without secrets (region + capabilities only)."""
         return ProviderInfo(
             provider=self.name,
             status=self._status,
@@ -227,21 +212,19 @@ class OCIProvider(CloudProvider):
         )
 
     def capabilities(self) -> CloudCapabilities:
-        """Endpoint capabilities (mock transport carries its own)."""
         transport = self._transport
         if isinstance(transport, MockOCITransport):
             return transport.capabilities
         return CloudCapabilities()
 
     def health(self) -> dict[str, Any]:
-        """Bounded health determination (no background polling here)."""
         started = time.monotonic()
         try:
             self._transport.handshake("health-check")
             reachable, authenticated = True, True
         except CloudUnavailableError:
             reachable, authenticated = False, False
-        except Exception:  # noqa: BLE001
+        except Exception:
             reachable, authenticated = True, False
         elapsed_ms = round((time.monotonic() - started) * 1000.0, 2)
         available = reachable and authenticated and self._status is CloudStatus.CONNECTED
@@ -261,7 +244,6 @@ class OCIProvider(CloudProvider):
         }
 
     def complete_remote(self, model: str, prompt: str) -> str:
-        """Run one remote completion (connected only)."""
         if self._status is not CloudStatus.CONNECTED:
             raise CloudUnavailableError("OCI is not connected")
         if len(prompt) > 500_000:
@@ -269,7 +251,6 @@ class OCIProvider(CloudProvider):
         return self._transport.complete(model, prompt)
 
     def describe_redacted(self) -> dict[str, Any]:
-        """Status safe for logs and events (no credential material)."""
         info = self.status()
         return {
             "provider": info.provider,
@@ -280,5 +261,4 @@ class OCIProvider(CloudProvider):
 
 
 def redact_event(payload: dict[str, Any]) -> dict[str, Any]:
-    """Strip secret-looking keys from event payloads."""
     return redact(payload)

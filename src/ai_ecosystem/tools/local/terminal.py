@@ -2,26 +2,63 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import ToolExecutionError, ToolTimeoutError
 from ai_ecosystem.core.models.domain import Tool, ToolResult
 from ai_ecosystem.core.models.enums import RiskLevel
-from ai_ecosystem.core.secrets import redact
 from ai_ecosystem.tools.registry.registry import ToolHandler
-import contextlib
 
 OUTPUT_CAP = 100_000
 CONTRACT_TIMEOUT_S = 120.0
 
+SAFE_ENV = frozenset(
+    {
+        "PATH",
+        "SystemRoot",
+        "SYSTEMROOT",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "PATHEXT",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+    }
+)
+
+_SECRET_ENV_MARKERS = (
+    "API_KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "PRIVATE_KEY",
+    "ACCESS_KEY",
+    "CLIENT_SECRET",
+)
+
+
+def _is_secret_env(key: str) -> bool:
+    upper = key.upper()
+    return any(marker in upper for marker in _SECRET_ENV_MARKERS)
+
 
 def _scrubbed_env(allowlist: frozenset[str] | None = None) -> dict[str, str]:
-    if allowlist is not None:
-        return {key: os.environ[key] for key in allowlist if key in os.environ}
-    redacted = redact(dict(os.environ))
-    return {key: value for key, value in redacted.items() if value != "***"}
+    """Keep ordinary process configuration while excluding credential-like values."""
+    allowed = allowlist or frozenset()
+    result: dict[str, str] = {}
+    for key, value in os.environ.items():
+        if key in allowed or key in SAFE_ENV or not _is_secret_env(key):
+            result[key] = value
+    return result
 
 
 def _resolve_cwd(raw: object, root: object) -> str | None:
@@ -31,9 +68,10 @@ def _resolve_cwd(raw: object, root: object) -> str | None:
         raise ToolExecutionError("terminal.execute", "'cwd' must be an existing directory")
     candidate = Path(raw)
     if root is not None:
-        resolved = (Path(root) / candidate).resolve()
+        base = Path(str(root)).resolve()
+        resolved = (base / candidate).resolve()
         try:
-            resolved.relative_to(Path(root).resolve())
+            resolved.relative_to(base)
         except ValueError:
             raise ToolExecutionError("terminal.execute", "'cwd' escapes the allowed root") from None
         if not resolved.is_dir():
@@ -82,7 +120,7 @@ def _run(arguments: dict, root: object, env_allowlist: frozenset[str] | None = N
         raise ToolExecutionError("terminal.execute", "'timeout_s' must be positive")
     timeout_s = min(timeout_s, CONTRACT_TIMEOUT_S)
     cwd = _resolve_cwd(arguments.get("cwd"), root)
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         args=command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -106,8 +144,10 @@ def _run(arguments: dict, root: object, env_allowlist: frozenset[str] | None = N
         stdout, stderr = proc.communicate(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         _kill_process_tree(proc)
-        with contextlib.suppress(subprocess.TimeoutExpired):
+        try:
             proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            raise ToolTimeoutError("terminal.execute", timeout_s) from None
         raise ToolTimeoutError("terminal.execute", timeout_s) from None
     output = stdout + stderr
     if len(output) > OUTPUT_CAP:
@@ -127,7 +167,7 @@ def _run(arguments: dict, root: object, env_allowlist: frozenset[str] | None = N
 def terminal_tools(
     root: object = None, env_allowlist: frozenset[str] | None = None
 ) -> list[tuple[Tool, ToolHandler]]:
-    resolved = str(Path(root).resolve()) if root is not None else None
+    resolved = str(Path(str(root)).resolve()) if root is not None else None
     return [
         (
             Tool(
@@ -143,10 +183,8 @@ def terminal_tools(
                 requires_approval=True,
                 requires_sandbox=True,
                 sandbox_profile="terminal",
-                network_access=True,
+                network_access=False,
             ),
-            lambda arguments, workspace=resolved, allowlist=env_allowlist: _run(
-                arguments, workspace, allowlist
-            ),
+            partial(_run, root=resolved, env_allowlist=env_allowlist),
         )
     ]

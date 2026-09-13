@@ -1,39 +1,15 @@
-"""Deterministic parallel DAG executor (Gate 8).
-
-Flow::
-
-    validated Plan -> TaskGraph -> DependencyScheduler -> ParallelExecutor
-        -> ToolRunner -> authorization -> tool handler -> ToolResult
-        -> graph state update -> aggregated ExecutionResult
-
-The executor is deterministic infrastructure: no LLM, no replanning, no
-verification. It NEVER calls tool handlers directly -- every tool call
-goes through :class:`ToolRunner`, so authorization cannot be bypassed.
-
-Honesty notes (enforced, not just documented):
-
-* Python threads cannot be killed. Step timeouts mark the node TIMED_OUT
-  and ignore the late result; ``execute_graph`` still waits for stray
-  workers on shutdown instead of pretending they vanished.
-* Cancellation is cooperative: unstarted work is CANCELLED, in-flight
-  work runs to its natural outcome but the overall status is CANCELLED.
-"""
+"""Deterministic parallel DAG executor with real step cancellation."""
 
 from __future__ import annotations
 
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from enum import Enum
-
 from pydantic import BaseModel, Field
-
 from ai_ecosystem.agent.executor.cancellation import CancellationToken
 from ai_ecosystem.agent.executor.graph import GraphNode, TaskGraph
 from ai_ecosystem.agent.planner.validator import PlanValidator
-from ai_ecosystem.core.errors.exceptions import (
-    DomainValidationError,
-    PlanValidationError,
-)
+from ai_ecosystem.core.errors.exceptions import DomainValidationError, PlanValidationError
 from ai_ecosystem.core.events.bus import Event, EventBus
 from ai_ecosystem.core.models.base import utcnow
 from ai_ecosystem.core.models.domain import ExecutionContext, Plan, ToolResult
@@ -44,23 +20,17 @@ from ai_ecosystem.tools.registry.runner import ToolRunner
 
 
 class FailurePolicy(str, Enum):
-    """What to do with independent work after a step fails."""
-
     FAIL_FAST = "FAIL_FAST"
     CONTINUE_INDEPENDENT = "CONTINUE_INDEPENDENT"
 
 
 class OverallStatus(str, Enum):
-    """Aggregated outcome of a graph execution."""
-
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
 
 
 class ExecutionResult(BaseModel):
-    """Structured outcome for Gate 9 verification (no verdicts here)."""
-
     task_id: str = ""
     status: OverallStatus = OverallStatus.FAILED
     states: dict[str, StepState] = Field(default_factory=dict)
@@ -74,7 +44,6 @@ class ExecutionResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
     def all_tool_results(self) -> list[ToolResult]:
-        """Every observed tool result, in plan-step order."""
         ordered: list[ToolResult] = []
         for step_id in list(self.states):
             ordered.extend(self.results.get(step_id, []))
@@ -82,7 +51,7 @@ class ExecutionResult(BaseModel):
 
 
 class ParallelExecutor:
-    """Dependency-aware parallel executor over a TaskGraph."""
+    """Dependency-aware executor; deadlines request cancellation and state changes occur after completion."""
 
     def __init__(
         self,
@@ -108,6 +77,7 @@ class ParallelExecutor:
         self._default_step_timeout_s = default_step_timeout_s
         self._step_timeouts = dict(step_timeouts or {})
         self._poll_interval_s = poll_interval_s
+        self._step_tokens: dict[Future, CancellationToken] = {}
 
     def execute(
         self,
@@ -119,7 +89,6 @@ class ParallelExecutor:
         contexts_repo: SqliteExecutionContextRepository | None = None,
         cancel: CancellationToken | None = None,
     ) -> ExecutionResult:
-        """Validate the plan, then execute it as a DAG."""
         known = {tool.name for tool in self._registry.list_tools()}
         validated = PlanValidator(known).validate(plan)
         return self.execute_graph(
@@ -141,13 +110,6 @@ class ParallelExecutor:
         contexts_repo: SqliteExecutionContextRepository | None = None,
         cancel: CancellationToken | None = None,
     ) -> ExecutionResult:
-        """Execute a pre-built (possibly restored) graph.
-
-        Step tools are validated against the registry up front: an
-        unknown tool fails fast here instead of mid-graph. Full plan
-        validation (criteria, risk) remains the planner's job via
-        execute(); this preserves the restored-graph path.
-        """
         known = {tool.name for tool in self._registry.list_tools()}
         for node in graph.nodes:
             for tool_name in node.step.tools:
@@ -160,13 +122,12 @@ class ParallelExecutor:
         started = time.monotonic()
         self._emit(EventType.GRAPH_STARTED, task_id, {"steps": len(graph.nodes)})
         self._persist(graph, context, contexts_repo)
-
         halting = False
         in_flight: dict[Future, GraphNode] = {}
         pool = ThreadPoolExecutor(max_workers=self._max_concurrency)
         try:
             while not graph.done():
-                if (token.cancelled or halting) and in_flight is not None:
+                if token.cancelled or halting:
                     self._stop_unstarted(graph, task_id, token, halting)
                 if not token.cancelled and not halting:
                     self._submit_ready(graph, task_id, args, pool, in_flight, token)
@@ -183,18 +144,14 @@ class ParallelExecutor:
                         task_id,
                         {"step_id": node.step.id, "error": node.error},
                     )
-                if self._first_failure(graph) and (self._failure_policy is FailurePolicy.FAIL_FAST):
+                if self._first_failure(graph) and self._failure_policy is FailurePolicy.FAIL_FAST:
                     halting = True
                 self._persist(graph, context, contexts_repo)
         finally:
-            # Never wait for stray workers: a timed-out step's thread may
-            # run indefinitely, and waiting would hang graph completion.
-            # Queued (never-started) futures are cancelled; running strays
-            # are ignored by node-state checks when they finish late.
-            # ToolRunner-level calls already bound each step, so strays
-            # here are bounded by tool timeouts, not infinite.
+            for child in self._step_tokens.values():
+                child.cancel()
             pool.shutdown(wait=False, cancel_futures=True)
-
+            self._step_tokens.clear()
         for node in graph.nodes:
             if node.completed_at is None:
                 node.completed_at = utcnow()
@@ -209,8 +166,6 @@ class ParallelExecutor:
         self._persist(graph, context, contexts_repo)
         return result
 
-    # -- scheduling ----------------------------------------------------
-
     def _submit_ready(
         self,
         graph: TaskGraph,
@@ -218,7 +173,7 @@ class ParallelExecutor:
         args: dict[str, dict],
         pool: ThreadPoolExecutor,
         in_flight: dict[Future, GraphNode],
-        token: CancellationToken | None = None,
+        token: CancellationToken,
     ) -> None:
         for node in graph.ready():
             if len(in_flight) >= self._max_concurrency:
@@ -230,31 +185,33 @@ class ParallelExecutor:
             node.started_at = utcnow()
             node.timeout_s = self._step_timeouts.get(node.step.id, self._default_step_timeout_s)
             self._emit(EventType.STEP_STARTED, task_id, {"step_id": node.step.id})
-            # Model-proposed step arguments apply first; operator-pinned
-            # config arguments override per key (operator is trusted,
-            # model output is not). Both still pass authorization.
             merged = {**(node.step.arguments or {}), **args.get(node.step.id, {})}
-            future = pool.submit(self._run_node, task_id, node, merged, token)
+            child = token.child(node.timeout_s)
+            future = pool.submit(self._run_node, task_id, node, merged, child)
             in_flight[future] = node
+            self._step_tokens[future] = child
 
     def _run_node(
-        self,
-        task_id: str,
-        node: GraphNode,
-        arguments: dict,
-        token: CancellationToken | None = None,
+        self, task_id: str, node: GraphNode, arguments: dict, token: CancellationToken
     ) -> tuple[bool, list[ToolResult], str]:
-        """Run one step's tools sequentially via ToolRunner (never direct)."""
         try:
             results: list[ToolResult] = []
             for tool_name in node.step.tools:
+                if token.cancelled:
+                    return (
+                        False,
+                        results,
+                        "step deadline/cancellation reached before tool execution",
+                    )
                 call = self._registry.build_call(task_id, tool_name, arguments)
                 result = self._runner.run(call, cancel_token=token)
                 results.append(result)
                 if not result.success:
                     return False, results, result.error or f"{tool_name} failed"
+            if token.cancelled:
+                return False, results, "step deadline/cancellation reached after tool execution"
             return True, results, ""
-        except Exception as exc:  # noqa: BLE001 -- worker must not raise
+        except Exception as exc:
             return False, [], f"executor error: {exc}"
 
     def _collect_completed(
@@ -269,53 +226,50 @@ class ParallelExecutor:
         done, _ = wait(set(in_flight), timeout=self._poll_interval_s, return_when=FIRST_COMPLETED)
         for future in done:
             node = in_flight.pop(future)
+            child = self._step_tokens.pop(future, None)
             if node.state is not StepState.RUNNING:
-                continue  # timed out already; late result ignored honestly
+                continue
             try:
                 ok, results, error = future.result()
-            except Exception as exc:  # noqa: BLE001 -- defensive; _run_node swallows
+            except Exception as exc:
                 ok, results, error = False, [], f"executor error: {exc}"
             node.tool_results = results
             node.result = results[-1] if results else None
             node.completed_at = utcnow()
-            if ok:
+            timed_out = child is not None and child.deadline_reached
+            if timed_out and not ok:
+                node.transition(StepState.TIMED_OUT)
+                node.error = error or "step deadline exceeded"
+                self._emit(
+                    EventType.STEP_TIMED_OUT,
+                    task_id,
+                    {"step_id": node.step.id, "timeout_s": node.timeout_s},
+                )
+            elif ok:
                 node.transition(StepState.SUCCEEDED)
                 self._emit(EventType.STEP_COMPLETED, task_id, {"step_id": node.step.id})
             else:
                 node.transition(StepState.FAILED)
                 node.error = error
                 self._emit(
-                    EventType.STEP_FAILED,
-                    task_id,
-                    {"step_id": node.step.id, "error": error},
+                    EventType.STEP_FAILED, task_id, {"step_id": node.step.id, "error": error}
                 )
             if context is not None:
                 context.tool_results.extend(results)
 
     def _enforce_deadlines(
-        self,
-        graph: TaskGraph,
-        task_id: str,
-        in_flight: dict[Future, GraphNode],
+        self, graph: TaskGraph, task_id: str, in_flight: dict[Future, GraphNode]
     ) -> None:
-        now = utcnow()
-        for _future, node in list(in_flight.items()):
-            if node.state is not StepState.RUNNING or node.started_at is None:
-                continue
-            elapsed = (now - node.started_at).total_seconds()
-            timeout = node.timeout_s or self._default_step_timeout_s
-            if elapsed > timeout:
-                node.transition(StepState.TIMED_OUT)
-                node.completed_at = now
-                node.error = (
-                    f"step exceeded {timeout}s deadline; worker thread left "
-                    f"running and its late result will be ignored"
-                )
-                self._emit(
-                    EventType.STEP_TIMED_OUT,
-                    task_id,
-                    {"step_id": node.step.id, "timeout_s": timeout},
-                )
+        now = time.monotonic()
+        for future, node in list(in_flight.items()):
+            child = self._step_tokens.get(future)
+            if (
+                node.state is StepState.RUNNING
+                and child is not None
+                and child.deadline is not None
+                and now >= child.deadline
+            ):
+                child.cancel()
 
     def _stop_unstarted(
         self, graph: TaskGraph, task_id: str, token: CancellationToken, halting: bool
@@ -326,13 +280,10 @@ class ParallelExecutor:
                 node.transition(StepState.CANCELLED)
                 node.error = f"never started: {reason}"
                 self._emit(
-                    EventType.STEP_CANCELLED,
-                    task_id,
-                    {"step_id": node.step.id, "reason": reason},
+                    EventType.STEP_CANCELLED, task_id, {"step_id": node.step.id, "reason": reason}
                 )
 
     def _drain_stuck(self, graph: TaskGraph, task_id: str) -> bool:
-        """Defensive: skip anything no wave can ever unblock. Returns True if it acted."""
         stuck = [node for node in graph.nodes if node.state in (StepState.PENDING, StepState.READY)]
         if not stuck or graph.done():
             return False
@@ -344,8 +295,6 @@ class ParallelExecutor:
             node.error = "unsatisfiable dependencies; skipped defensively"
             self._emit(EventType.STEP_SKIPPED, task_id, {"step_id": node.step.id})
         return True
-
-    # -- aggregation / persistence -------------------------------------
 
     @staticmethod
     def _first_failure(graph: TaskGraph) -> bool:

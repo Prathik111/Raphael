@@ -1,8 +1,8 @@
 """Scoped, persistent, auditable memory store (Gate 12).
 
-Memory is DATA and never grants authority. Retrieval is deterministic,
-local keyword scoring with relevance, confidence, importance, freshness,
-and explicit trust/provenance metadata.
+Memory is DATA and never grants authority. Verification is an explicit
+second step: candidates cannot self-assert verification metadata. A
+MemoryVerifier receipt is required before a record can become verified.
 """
 
 from __future__ import annotations
@@ -18,65 +18,12 @@ from ai_ecosystem.core.models.enums import EventType, MemoryScope, MemoryStatus,
 from ai_ecosystem.core.persistence.repositories import MemoryRepository
 from ai_ecosystem.core.persistence.sqlite import Database
 from ai_ecosystem.personalization.memory.models import ConsolidationProposal, MemoryCandidate
+from ai_ecosystem.personalization.memory.verifier import MemoryVerifier, VerificationReceipt
 
 _STOPWORDS = frozenset(
-    [
-        "a",
-        "an",
-        "the",
-        "and",
-        "or",
-        "but",
-        "of",
-        "to",
-        "in",
-        "on",
-        "for",
-        "with",
-        "is",
-        "are",
-        "was",
-        "were",
-        "be",
-        "been",
-        "it",
-        "its",
-        "this",
-        "that",
-        "these",
-        "those",
-        "as",
-        "at",
-        "by",
-        "from",
-        "into",
-        "over",
-        "after",
-        "such",
-        "no",
-        "not",
-        "only",
-        "also",
-        "than",
-        "then",
-        "there",
-        "their",
-        "what",
-        "when",
-        "where",
-        "which",
-        "who",
-        "will",
-        "can",
-        "has",
-        "have",
-        "had",
-        "do",
-        "does",
-        "did",
-        "how",
-        "why",
-    ]
+    "a an the and or but of to in on for with is are was were be been it its this that "
+    "these those as at by from into over after such no not only also than then there "
+    "their what when where which who will can has have had do does did how why".split()
 )
 
 
@@ -138,6 +85,16 @@ class MemoryStore:
         return True, "meets importance and confidence bars"
 
     def store(self, candidate: MemoryCandidate) -> Memory:
+        """Store an unverified memory; candidate metadata can never elevate trust."""
+        return self._store(candidate, receipt=None)
+
+    def store_verified(self, candidate: MemoryCandidate, receipt: VerificationReceipt) -> Memory:
+        """Store a verified memory only when an authoritative receipt matches it."""
+        if not MemoryVerifier.valid(candidate, receipt):
+            raise DomainValidationError("verification receipt does not match candidate content")
+        return self._store(candidate, receipt=receipt)
+
+    def _store(self, candidate: MemoryCandidate, receipt: VerificationReceipt | None) -> Memory:
         self.propose(candidate)
         accepted, reason = self.evaluate(candidate)
         if not accepted:
@@ -145,6 +102,14 @@ class MemoryStore:
         related = [m.id for m in self.find_conflicts(candidate)]
         metadata = dict(candidate.metadata)
         metadata.update({"reason": candidate.reason, "related": related, "history": []})
+        # Security boundary: these input fields are deliberately ignored:
+        # metadata["verified"], metadata["verifier"], etc.  Only a receipt
+        # produced by MemoryVerifier can establish verified=True.
+        verified = receipt is not None
+        if receipt is not None:
+            metadata["verification_receipt"] = receipt.model_dump(mode="json")
+        else:
+            metadata.pop("verification_receipt", None)
         memory = Memory(
             type=candidate.type,
             content=candidate.content,
@@ -158,7 +123,7 @@ class MemoryStore:
             cloud_eligible=bool(candidate.metadata.get("cloud_eligible", False)),
             provenance=str(candidate.metadata.get("provenance", candidate.source or "unknown")),
             created_by=str(candidate.metadata.get("created_by", "unknown")),
-            verified=bool(candidate.metadata.get("verified", False)),
+            verified=verified,
             expires_at=candidate.metadata.get("expires_at"),
             metadata=metadata,
         )
@@ -227,9 +192,7 @@ class MemoryStore:
             return True
         if memory.scope is scope and memory.scope_id == scope_id:
             return True
-        return bool(
-            project_id and memory.scope is MemoryScope.PROJECT and memory.scope_id == project_id
-        )
+        return bool(project_id and memory.scope is MemoryScope.PROJECT and memory.scope_id == project_id)
 
     @staticmethod
     def _relevance(query_words: set[str], memory: Memory) -> float:
@@ -288,12 +251,11 @@ class MemoryStore:
                 raise DomainValidationError(f"importance {importance} outside [0, 1]")
             memory.importance = importance
         if changed:
-            # Verification is a statement about the current content. Any mutation
-            # invalidates that statement and preserves an explicit provenance trail.
             memory.verified = False
             memory.provenance = f"modified:{memory.provenance or 'unknown'}"
             memory.metadata["verification_invalidated"] = True
             memory.metadata["verification_invalidated_at"] = utcnow().isoformat()
+            memory.metadata.pop("verification_receipt", None)
         memory.metadata["history"] = history
         memory.touch()
         updated = self._repo.update(memory)

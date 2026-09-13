@@ -113,9 +113,9 @@ def sanitize(value: Any) -> Any:
 
     if isinstance(value, dict):
         return {key: _redact_value(key, item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_sanitize_item(item) for item in value]
-    if isinstance(value, (set, frozenset)):
+    if isinstance(value, set | frozenset):
         return {_sanitize_item(item) for item in value}
     if isinstance(value, BaseException):
         return sanitize_exception(value)
@@ -136,7 +136,7 @@ def sanitize(value: Any) -> Any:
 def _sanitize_item(item: Any) -> Any:
     if isinstance(item, dict):
         return redact(item)
-    if isinstance(item, (list, tuple, set, frozenset)):
+    if isinstance(item, list | tuple | set | frozenset):
         return sanitize(item)
     return "***" if looks_like_secret_value(item) else item
 
@@ -154,8 +154,8 @@ def _redact_value(key: str, value: Any) -> Any:
         return "***"
     if isinstance(value, dict):
         return redact(value)
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_sanitize_item(item) for item in value]
-    if isinstance(value, (set, frozenset)):
+    if isinstance(value, set | frozenset):
         return {_sanitize_item(item) for item in value}
     return value

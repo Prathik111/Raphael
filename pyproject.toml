@@ -12,7 +12,7 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
-    "ruff>=0.6",
+    "ruff==0.6.9",
     "mypy>=1.11",
 ]
 
@@ -50,7 +50,7 @@ ignore = ["E501"]
 "src/ai_ecosystem/scheduler/scheduler.py" = ["SIM105"]
 # These benchmark/test constructs intentionally capture loop values or inspect source text.
 "src/ai_ecosystem/bench/benchmarks.py" = ["B023"]
-"tests/**/*.py" = ["B017", "SIM105", "SIM115"]
+"tests/**/*.py" = ["B017", "SIM105", "SIM115", "B023"]
 # Packaging tests deliberately import after isolated bootstrap setup.
 "tests/unit/test_packaging.py" = ["E402"]
 

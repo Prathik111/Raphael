@@ -54,7 +54,7 @@ class DatasetPolicy:
             raise DatasetPolicyError(f"dataset {name!r} has a negative size")
         if size_bytes > self.max_bytes:
             raise DatasetPolicyError(
-                f"dataset {name!r} ({size_bytes} bytes) exceeds {self.max_bytes} limit"
+                f"dataset {name!r} ({size_bytes} bytes) exceeds " f"{self.max_bytes} limit"
             )
         if payload is not None and _contains_secrets(payload):
             raise DatasetPolicyError(f"dataset {name!r} appears to contain credentials")
@@ -67,7 +67,7 @@ def _contains_secrets(payload: Any) -> bool:
         return any(
             looks_secret(str(key)) or _contains_secrets(value) for key, value in payload.items()
         )
-    if isinstance(payload, (list, tuple)):
+    if isinstance(payload, list | tuple):
         return any(_contains_secrets(item) for item in payload)
     return looks_like_secret_value(payload)
 

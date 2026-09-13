@@ -110,7 +110,7 @@ class PlanValidator:
         blob = _json.dumps(step.arguments or {}, default=str)
         if len(blob.encode("utf-8")) > self._max_arguments_bytes:
             raise PlanValidationError(
-                f"step {step.id!r} arguments exceed {self._max_arguments_bytes} bytes"
+                f"step {step.id!r} arguments exceed " f"{self._max_arguments_bytes} bytes"
             )
         provided = set(step.arguments or {})
         for name in step.tools:
@@ -138,7 +138,7 @@ class PlanValidator:
             type_problems = [p for p in problems if not p.startswith("missing required")]
             if type_problems:
                 raise PlanValidationError(
-                    f"step {step.id!r} tool {name!r}: {'; '.join(type_problems)}"
+                    f"step {step.id!r} tool {name!r}: " f"{'; '.join(type_problems)}"
                 )
         if step.risk is RiskLevel.CRITICAL:
             raise PlanValidationError(

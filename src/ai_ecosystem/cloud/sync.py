@@ -310,7 +310,7 @@ class SyncManager:
                     object_id=object_id,
                     object_type=local.object_type,
                     state=SyncState.SKIPPED,
-                    detail=f"policy {self._policy.classify(local).value}: upload not permitted",
+                    detail=f"policy {self._policy.classify(local).value}: " "upload not permitted",
                 )
             try:
                 version = self._transport.push(local)

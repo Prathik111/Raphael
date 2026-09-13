@@ -15,16 +15,34 @@ import sqlite3
 from pathlib import Path
 
 
-USER_TABLES = ["tasks", "contexts", "events", "memories", "skills", "agents",
-               "devices", "verifications", "personalities", "preferences",
-               "system_snapshots", "usage_events", "usage_patterns",
-               "learning_proposals", "agent_definitions", "agent_tasks",
-               "agent_messages", "workspaces", "compute_jobs", "device_presence",
-               "audit_log", "learning_policy", "scheduler_jobs"]
+USER_TABLES = [
+    "tasks",
+    "contexts",
+    "events",
+    "memories",
+    "skills",
+    "agents",
+    "devices",
+    "verifications",
+    "personalities",
+    "preferences",
+    "system_snapshots",
+    "usage_events",
+    "usage_patterns",
+    "learning_proposals",
+    "agent_definitions",
+    "agent_tasks",
+    "agent_messages",
+    "workspaces",
+    "compute_jobs",
+    "device_presence",
+    "audit_log",
+    "learning_policy",
+    "scheduler_jobs",
+]
 
 
-def backup_user_data(db_path: str, out_path: str,
-                     extra_dirs: list[str] | None = None) -> str:
+def backup_user_data(db_path: str, out_path: str, extra_dirs: list[str] | None = None) -> str:
     """Copy the database file + metadata manifest into a backup path.
 
     Uses the SQLite online-backup API into a temp file first, so the
@@ -60,8 +78,7 @@ def backup_user_data(db_path: str, out_path: str,
     return str(out)
 
 
-def restore_user_data(backup_path: str, db_path: str,
-                      tables: list[str] | None = None) -> str:
+def restore_user_data(backup_path: str, db_path: str, tables: list[str] | None = None) -> str:
     """Restore the database file (full) or selected tables only."""
     import zipfile
 
@@ -94,7 +111,8 @@ def restore_user_data(backup_path: str, db_path: str,
                 else:
                     raise RuntimeError(
                         f"restore blocked: {sidecar.name} is locked by a "
-                        "live database connection; close it and retry")
+                        "live database connection; close it and retry"
+                    )
             return db_path
         # Selective restore: copy table rows from a temp extraction.
         tmp = Path(db_path).parent / "_restore_tmp.db"
@@ -108,11 +126,14 @@ def restore_user_data(backup_path: str, db_path: str,
                     if table not in USER_TABLES:
                         raise ValueError(f"unknown table {table!r}")
                     rows = origin.execute(
-                        f"SELECT id, snapshot, updated_at FROM {table}").fetchall()
+                        f"SELECT id, snapshot, updated_at FROM {table}"
+                    ).fetchall()
                     for row in rows:
                         target.execute(
                             f"INSERT OR REPLACE INTO {table} "
-                            "(id, snapshot, updated_at) VALUES (?, ?, ?)", row)
+                            "(id, snapshot, updated_at) VALUES (?, ?, ?)",
+                            row,
+                        )
                 target.commit()
             finally:
                 target.close()
@@ -127,6 +148,7 @@ def restore_user_data(backup_path: str, db_path: str,
 
 def compare_versions(left: str, right: str) -> int:
     """Semantic comparison: -1 / 0 / +1 (unknown chunks compare as text)."""
+
     def parts(version: str) -> list:
         return [int(c) if c.isdigit() else c for c in version.split(".")]
 
@@ -140,5 +162,4 @@ def plan_upgrade(installed: str, incoming: str) -> dict:
         return {"action": "same", "migrate": False, "preserve_data": True}
     if comparison < 0:
         return {"action": "upgrade", "migrate": True, "preserve_data": True}
-    return {"action": "downgrade", "migrate": False, "preserve_data": True,
-            "requires_force": True}
+    return {"action": "downgrade", "migrate": False, "preserve_data": True, "requires_force": True}

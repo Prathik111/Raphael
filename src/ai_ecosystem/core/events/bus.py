@@ -10,6 +10,7 @@ transport, but they must preserve these semantics:
 
 from __future__ import annotations
 
+import builtins
 import threading
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -114,7 +115,7 @@ class EventStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def list(self) -> list[Event]:
+    def list(self) -> builtins.list[Event]:
         """All stored events in insertion order."""
         raise NotImplementedError
 
@@ -124,7 +125,7 @@ class EventStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def events_since(self, seq: int) -> list[tuple[int, Event]]:
+    def events_since(self, seq: int) -> builtins.list[tuple[int, Event]]:
         """(sequence, event) pairs with sequence strictly greater than ``seq``.
 
         Sequences come from append() and are stable: a consumer can poll
@@ -145,7 +146,7 @@ class InMemoryEventStore(EventStore):
             self._events.append(event)
             return len(self._events) - 1
 
-    def list(self) -> list[Event]:
+    def list(self) -> builtins.list[Event]:
         with self._lock:
             return list(self._events)
 
@@ -158,7 +159,7 @@ class InMemoryEventStore(EventStore):
             count += 1
         return count
 
-    def events_since(self, seq: int) -> list[tuple[int, Event]]:
+    def events_since(self, seq: int) -> builtins.list[tuple[int, Event]]:
         with self._lock:
             return [(index, event) for index, event in enumerate(self._events) if index > seq]
 

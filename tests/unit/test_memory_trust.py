@@ -2,10 +2,12 @@
 
 from datetime import timedelta
 
+import pytest
+
+from ai_ecosystem.core.models.base import utcnow
 from ai_ecosystem.core.models.enums import MemoryScope, MemoryType
 from ai_ecosystem.core.persistence import Database, SqliteMemoryRepository
-from ai_ecosystem.personalization.memory import MemoryCandidate, MemoryStore
-from ai_ecosystem.core.models.base import utcnow
+from ai_ecosystem.personalization.memory import MemoryCandidate, MemoryStore, MemoryVerifier
 
 
 def _store():
@@ -25,12 +27,27 @@ def test_memory_preserves_provenance_and_defaults_to_unverified():
                 confidence=0.9,
                 importance=0.9,
                 scope=MemoryScope.GLOBAL,
-                metadata={"provenance": "task_result", "created_by": "agent"},
+                metadata={"provenance": "task_result", "created_by": "agent", "verified": True},
             )
         )
         assert memory.provenance == "task_result"
         assert memory.created_by == "agent"
         assert memory.verified is False
+    finally:
+        db.close()
+
+
+def test_only_matching_verification_receipt_can_promote_trust():
+    db, store = _store()
+    try:
+        candidate = MemoryCandidate(content="Observed result", confidence=0.9, importance=0.9)
+        receipt = MemoryVerifier().verify(
+            candidate, evidence_ids=["event:1"], verifier="system-verifier", method="observed-state"
+        )
+        assert store.store_verified(candidate, receipt).verified is True
+        changed = candidate.model_copy(update={"content": "Tampered result"})
+        with pytest.raises(Exception):
+            store.store_verified(changed, receipt)
     finally:
         db.close()
 

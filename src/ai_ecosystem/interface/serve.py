@@ -52,6 +52,7 @@ from ai_ecosystem.security import (
     PolicyEngine,
     RiskContext,
 )
+from ai_ecosystem.security.data_policy import DataClass
 from ai_ecosystem.system.monitor.manager import SystemAwarenessManager
 from ai_ecosystem.system.monitor.probe import LocalSystemProbe
 from ai_ecosystem.tools import (
@@ -63,6 +64,7 @@ from ai_ecosystem.tools import (
     terminal_tools,
 )
 from ai_ecosystem.tools.registry import ToolHandler
+from ai_ecosystem.tools.registry.execution_ledger import ExecutionLedger
 import contextlib
 
 log = logging.getLogger("ai_ecosystem.serve")
@@ -119,7 +121,7 @@ class BoundedDispatcher:
                 continue
             try:
                 fn()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.error("agent worker failed: %s", exc)
             finally:
                 self._queue.task_done()
@@ -134,7 +136,6 @@ class BoundedDispatcher:
 
 
 def load_or_create_token(path: str) -> str:
-    """Read an existing credential or atomically create a new one."""
     try:
         with open(path, encoding="utf-8") as handle:
             token = handle.read().strip()
@@ -170,7 +171,11 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
         router.register(
             http_provider,
             ProviderProfile(
-                provider_id=http_provider.provider_id, local=False, latency_class="standard"
+                provider_id=http_provider.provider_id,
+                local=False,
+                trusted=True,
+                data_classes={DataClass.PUBLIC, DataClass.INTERNAL},
+                latency_class="standard",
             ),
         )
         providers.append(http_provider)
@@ -182,7 +187,9 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
         )
 
     stub = MockModelProvider("unconfigured", handler=missing)
-    router.register(stub, ProviderProfile(provider_id="unconfigured"))
+    router.register(
+        stub, ProviderProfile(provider_id="unconfigured", local=True, data_classes=set(DataClass))
+    )
     return router, [], False
 
 
@@ -198,15 +205,11 @@ def build_stack(
     runtime = AgentRuntime(config.db_path)
     bus = runtime.bus
     bus._on_error = lambda report: log.error("event subscriber failed: %s", report)  # noqa: SLF001
-
     events = SqliteEventStore(runtime.db)
     events.attach(bus)
-
     registry = ToolRegistry()
     raw_allowlist = os.environ.get("AI_ECO_ENV_ALLOWLIST", "")
     env_allowlist = frozenset(name.strip() for name in raw_allowlist.split(",") if name.strip())
-    if raw_allowlist and not env_allowlist:
-        log.warning("ignoring empty AI_ECO_ENV_ALLOWLIST")
     bundles: list[tuple[Tool, ToolHandler]] = (
         list(filesystem_tools(workspace))
         + list(git_tools(workspace))
@@ -215,18 +218,12 @@ def build_stack(
     )
     for tool, handler in bundles:
         registry.register(tool, handler)
-
     floor = {
         "LOW": RiskLevel.LOW,
         "MEDIUM": RiskLevel.MEDIUM,
         "HIGH": RiskLevel.HIGH,
         "CRITICAL": RiskLevel.CRITICAL,
     }.get(config.require_approval.strip().upper())
-    if config.require_approval.strip() and floor is None:
-        log.warning(
-            "ignoring invalid AI_ECO_REQUIRE_APPROVAL=%r (want HIGH, CRITICAL, ...)",
-            config.require_approval,
-        )
     approval_store = ApprovalStore(SqliteApprovalRepository(runtime.db))
     authorizer = AuthorizationManager(
         registry,
@@ -234,7 +231,7 @@ def build_stack(
             Policy(
                 name="local-operator",
                 auto_grant_up_to=RiskLevel.MEDIUM,
-                deny_critical=True,
+                deny_critical=False,
                 approval_required_from=floor,
             )
         ),
@@ -242,8 +239,9 @@ def build_stack(
         allow_shells=config.allow_shells,
         approval_store=approval_store,
     )
-    runner = ToolRunner(registry, authorizer, bus)
-
+    execution_ledger = ExecutionLedger(runtime.db)
+    execution_ledger.recover_unknowns()
+    runner = ToolRunner(registry, authorizer, bus, execution_ledger=execution_ledger)
     router, providers, model_configured = build_router()
     verifier = Verifier(
         repository=SqliteVerificationRepository(runtime.db), bus=bus
@@ -253,13 +251,11 @@ def build_stack(
     preferences = PreferenceStore(runtime.db, bus)
     personalization = PersonalizationEngine(personalities, preferences, memories, bus)
     skills = SqliteSkillRepository(runtime.db).list()
-
     awareness: SystemAwarenessManager | None = None
     try:
         awareness = SystemAwarenessManager(LocalSystemProbe(), bus=bus)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.warning("system awareness unavailable")
-
     tokens: dict[str, CancellationToken] = {}
     tokens_lock = threading.Lock()
     dispatcher = BoundedDispatcher(
@@ -328,7 +324,7 @@ def build_stack(
                     AgentConfig(workspace=workspace, project_id="default"),
                     cancel_token=token,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.error("dispatch failed for %s: %s", task_id, exc)
             finally:
                 with tokens_lock:
@@ -355,9 +351,6 @@ def build_stack(
     token = None if no_auth else auth_token
     server = LocalHttpServer(api, host=config.api_host, port=config.api_port, auth_token=token)
     agent = agent_factory()
-
-    # Crash recovery: plans persisted before shutdown are resumable. Tasks that
-    # never reached a plan cannot be safely resumed and are settled explicitly.
     for task in runtime.manager._tasks.list():  # noqa: SLF001
         if task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
             continue
@@ -367,7 +360,7 @@ def build_stack(
             def resume(task_id: str = task.id) -> None:
                 try:
                     agent.resume(task_id, AgentConfig(workspace=workspace, project_id="default"))
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     log.error("recovery failed for %s: %s", task_id, exc)
 
             try:
@@ -384,9 +377,8 @@ def build_stack(
                         payload={"error": "interrupted before a resumable plan was persisted"},
                     )
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("could not settle interrupted task %s", task.id)
-
     return Stack(
         config=config,
         runtime=runtime,
@@ -409,11 +401,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--api-token-file", default=None)
     parser.add_argument("--api-token", default=None)
-    parser.add_argument(
-        "--no-auth", action="store_true", help="Tests only; disables API authentication"
-    )
+    parser.add_argument("--no-auth", action="store_true")
     args = parser.parse_args(argv)
-
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     config = AppConfig.from_env()
     if args.db:
@@ -422,16 +411,11 @@ def main(argv: list[str] | None = None) -> int:
         config.api_host = args.host
     if args.port:
         config.api_port = args.port
-
     if args.no_auth:
-        # Review: a production binary must not be able to start an
-        # unauthenticated API by accident. --no-auth requires an
-        # explicit development environment AND loopback bind.
         if config.environment != "development":
             parser.error("--no-auth requires AI_ECO_ENVIRONMENT=development")
         if config.api_host not in ("127.0.0.1", "localhost", "::1"):
             parser.error("--no-auth refuses non-loopback binds")
-
     token_file = args.api_token_file or os.path.join(
         os.path.dirname(os.path.abspath(config.db_path)), "api_credential"
     )

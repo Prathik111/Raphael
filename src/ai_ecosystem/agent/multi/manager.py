@@ -206,7 +206,9 @@ class AgentManager:
         )
         return ToolRunner(self._tools, authorizer, self._bus), authorizer
 
-    def run_task(self, record_id: str, cancel: CancellationToken | None = None) -> ExecutionResult:
+    def run_task(
+        self, record_id: str, cancel: CancellationToken | None = None
+    ) -> ExecutionResult:
         """Execute one submitted task with the owner's scoped runner."""
         record = self._tasks.get(record_id)
         if record is None:
@@ -306,7 +308,9 @@ DecomposeFn = Callable[[str, list[AgentDefinition]], list["SubtaskSpec"]]
 class SubtaskSpec:
     """One delegated unit: who does what with which plan."""
 
-    def __init__(self, agent_id: str, goal: str, plan: Any, arguments: dict | None = None) -> None:
+    def __init__(
+        self, agent_id: str, goal: str, plan: Any, arguments: dict | None = None
+    ) -> None:
         self.agent_id = agent_id
         self.goal = goal
         self.plan = plan

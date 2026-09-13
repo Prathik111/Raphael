@@ -1,4 +1,4 @@
-"""Permission, risk, policy and human-approval authorization boundary."""
+"""Permission, capability risk, policy and human-approval boundary."""
 
 from __future__ import annotations
 
@@ -8,10 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ai_ecosystem.core.errors.exceptions import (
-    AuthorizationDeniedError,
-    DomainValidationError,
-)
+from ai_ecosystem.core.errors.exceptions import AuthorizationDeniedError, DomainValidationError
 from ai_ecosystem.core.models.domain import Permission, RiskAssessment, Tool, ToolCall
 from ai_ecosystem.core.models.enums import ApprovalStatus, PermissionDecision, RiskLevel
 from ai_ecosystem.tools.registry.registry import ToolRegistry
@@ -56,7 +53,7 @@ DESTRUCTIVE_PATTERNS = (
     "rm -rf $home",
     "mkfs",
     "dd if=",
-    ":(){:|:&};:",
+    ":(){:|:&};",
     "powershell -enc",
     "powershell -encodedcommand",
     "pwsh -enc",
@@ -90,6 +87,8 @@ class RiskContext(BaseModel):
 
 
 class RiskEngine:
+    """Risk is derived from declared capabilities first; string scanning is defense in depth."""
+
     def __init__(self, allow_shells: bool = False) -> None:
         self._allow_shells = allow_shells
 
@@ -108,12 +107,27 @@ class RiskEngine:
         def note(factor: str) -> None:
             factors.append(factor)
 
-        name = tool.name.lower()
-        if any(word in name for word in ("delete", "remove", "destroy", "rm ")):
+        # Capability baseline. A tool name is descriptive; capabilities are
+        # security-relevant declarations and cannot lower the contract's base risk.
+        caps = {str(c).lower() for c in (tool.capabilities or [])}
+        if "arbitrary-code-execution" in caps:
+            escalate(RiskLevel.CRITICAL, "arbitrary code execution capability")
+        if "subprocess" in caps:
+            escalate(RiskLevel.HIGH, "subprocess capability")
+        if any(
+            c.startswith("filesystem.write") or c in {"filesystem.write", "system.modify"}
+            for c in caps
+        ):
+            escalate(RiskLevel.HIGH, "filesystem/system mutation capability")
+        if "network.internet" in caps or tool.network_access:
+            escalate(RiskLevel.HIGH, "network capability")
+        if "credential.read" in caps or tool.secrets_access:
+            escalate(RiskLevel.CRITICAL, "credential access capability")
+        if any(word in tool.name.lower() for word in ("delete", "remove", "destroy", "rm ")):
             escalate(RiskLevel.CRITICAL, f"destructive tool name: {tool.name}")
-        elif any(word in name for word in ("write", "modify", "install", "overwrite")):
+        elif any(word in tool.name.lower() for word in ("write", "modify", "install", "overwrite")):
             escalate(RiskLevel.HIGH, f"mutating tool name: {tool.name}")
-        if "subprocess" in (tool.capabilities or []):
+        if "subprocess" in caps:
             self._assess_executable(call, escalate, note)
             self._assess_command(call, escalate)
         for key, value in call.arguments.items():
@@ -123,7 +137,7 @@ class RiskEngine:
             tool_call_id=call.id,
             level=level,
             factors=factors or [f"base level for {tool.name}"],
-            rationale=f"assessed {tool.name} for agent {context.agent_id or 'default'}",
+            rationale=f"capability-aware assessment for agent {context.agent_id or 'default'}",
         )
 
     def _assess_executable(self, call: ToolCall, escalate, note) -> None:
@@ -164,7 +178,7 @@ class RiskEngine:
                 note,
                 literal_argv=(tool.name == "terminal.execute" and key == "command"),
             )
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, list | tuple):
             for index, item in enumerate(value):
                 if isinstance(item, str):
                     self._scan_string(
@@ -211,7 +225,9 @@ class RiskEngine:
 class Policy(BaseModel):
     name: str = "default"
     auto_grant_up_to: RiskLevel = RiskLevel.MEDIUM
-    deny_critical: bool = True
+    # CRITICAL is approval-gated, not silently hard-denied. The explicit
+    # denied_tools list remains the hard-deny mechanism for forbidden actions.
+    deny_critical: bool = False
     denied_tools: set[str] = Field(default_factory=set)
     agent_scopes: dict[str, set[str]] = Field(default_factory=dict)
     strict_agent_scopes: bool = False
@@ -229,19 +245,19 @@ class PolicyEngine:
         policy = self.policy
         if tool_name in policy.denied_tools:
             return False, f"tool {tool_name!r} is denied by policy {policy.name!r}"
-        if agent_id and agent_id in policy.agent_scopes:
-            if tool_name not in policy.agent_scopes[agent_id]:
-                return False, f"tool {tool_name!r} is outside agent {agent_id!r} scope"
-        elif policy.strict_agent_scopes and policy.agent_scopes:
+        if agent_id in policy.agent_scopes and tool_name not in policy.agent_scopes[agent_id]:
+            return False, f"tool {tool_name!r} is outside agent {agent_id!r} scope"
+        if (
+            policy.strict_agent_scopes
+            and policy.agent_scopes
+            and agent_id not in policy.agent_scopes
+        ):
             return False, f"agent {agent_id!r} has no scope under strict policy {policy.name!r}"
         if policy.deny_critical and assessment.level is RiskLevel.CRITICAL:
             return False, f"CRITICAL risk denied: {'; '.join(assessment.factors)}"
         if _LEVEL_ORDER[assessment.level] <= _LEVEL_ORDER[policy.auto_grant_up_to]:
             return True, f"risk {assessment.level.value} within {policy.name!r} grant band"
-        return (
-            False,
-            f"risk {assessment.level.value} exceeds {policy.name!r} grant band ({policy.auto_grant_up_to.value})",
-        )
+        return False, f"risk {assessment.level.value} requires approval under {policy.name!r}"
 
 
 class PermissionEngine:
@@ -282,7 +298,7 @@ class AuthorizationManager:
         return self._policy.policy.approval_required_from
 
     def _needs_approval(self, tool: Tool, level: RiskLevel) -> bool:
-        if tool.requires_approval:
+        if tool.requires_approval or level is RiskLevel.CRITICAL:
             return True
         floor = self._approval_floor()
         return floor is not None and _LEVEL_ORDER[level] >= _LEVEL_ORDER[floor]
@@ -302,41 +318,32 @@ class AuthorizationManager:
         problems = check_arguments(known, dict(call.arguments))
         if problems:
             raise DomainValidationError("; ".join(problems))
+        effective_agent = agent_id or self._context.agent_id
         context = RiskContext(
-            agent_id=agent_id or self._context.agent_id,
-            environment=self._context.environment,
-            root=self._context.root,
+            agent_id=effective_agent, environment=self._context.environment, root=self._context.root
         )
         assessment = self._risk.assess(task_id, known, call, context)
-        effective_agent = agent_id or self._context.agent_id
-
-        # HARD policy checks always happen before human approval. Approval
-        # can satisfy a review requirement, never override an explicit deny.
         granted, reason = self._policy.evaluate(assessment, known.name, effective_agent)
-        if not granted:
-            # A non-critical high-risk action can be held for approval when
-            # the policy's grant band rejects it. Explicit hard denies remain denies.
-            hard_denied = (
-                known.name in self._policy.policy.denied_tools
-                or (
-                    self._policy.policy.strict_agent_scopes
-                    and self._policy.policy.agent_scopes
-                    and effective_agent not in self._policy.policy.agent_scopes
-                )
-                or (
-                    effective_agent in self._policy.policy.agent_scopes
-                    and known.name not in self._policy.policy.agent_scopes[effective_agent]
-                )
-                or (self._policy.policy.deny_critical and assessment.level is RiskLevel.CRITICAL)
+        hard_denied = (
+            known.name in self._policy.policy.denied_tools
+            or (
+                self._policy.policy.strict_agent_scopes
+                and self._policy.policy.agent_scopes
+                and effective_agent not in self._policy.policy.agent_scopes
             )
-            if hard_denied:
-                return known, self._permissions.decide(task_id, call, False, reason)
-            if not self._needs_approval(known, assessment.level):
-                return known, self._permissions.decide(task_id, call, False, reason)
-            return known, self._approval_gate(task_id, known, call, assessment)
+            or (
+                effective_agent in self._policy.policy.agent_scopes
+                and known.name not in self._policy.policy.agent_scopes[effective_agent]
+            )
+            or (self._policy.policy.deny_critical and assessment.level is RiskLevel.CRITICAL)
+        )
+        if hard_denied:
+            return known, self._permissions.decide(task_id, call, False, reason)
         if self._needs_approval(known, assessment.level):
             return known, self._approval_gate(task_id, known, call, assessment)
-        return known, self._permissions.decide(task_id, call, True, reason)
+        if granted:
+            return known, self._permissions.decide(task_id, call, True, reason)
+        return known, self._permissions.decide(task_id, call, False, reason)
 
     def _approval_gate(
         self, task_id: str, tool: Tool, call: ToolCall, assessment: RiskAssessment

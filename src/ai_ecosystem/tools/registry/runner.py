@@ -1,10 +1,10 @@
-"""Policy-checked tool invocation and execution lifecycle."""
+"""Policy-checked tool invocation with durable execution identity."""
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from collections.abc import Callable
 from typing import Any, Protocol
 
 from ai_ecosystem.core.errors.exceptions import (
@@ -18,6 +18,11 @@ from ai_ecosystem.core.models.domain import Permission, Tool, ToolCall, ToolResu
 from ai_ecosystem.core.models.enums import EventType, PermissionDecision, ToolCallStatus
 from ai_ecosystem.core.secrets import looks_like_secret_value, redact
 from ai_ecosystem.security.sandbox import LocalSandboxProvider, SandboxProfile
+from ai_ecosystem.tools.registry.execution_ledger import (
+    ExecutionLedger,
+    ExecutionState,
+    action_hash,
+)
 from ai_ecosystem.tools.registry.registry import ToolRegistry
 from ai_ecosystem.tools.registry.validation import check_arguments
 
@@ -45,17 +50,18 @@ def _safe_output_snippet(output: Any, limit: int = 500) -> str:
 
 
 def _run_with_deadline(handler: Any, arguments: dict, timeout_s: float) -> Any:
-    """Deadline for non-sandboxed trusted handlers.
+    """Deadline for trusted non-sandboxed handlers.
 
-    Dangerous OS/process tools must set ``requires_sandbox`` and therefore use
-    the killable process supervisor in ``LocalSandboxProvider``.
+    Untrusted OS/process tools must be sandboxed; a Python thread cannot be
+    force-killed safely, so the timeout here is only a deadline for trusted
+    handlers and never claims to terminate them.
     """
     box: dict[str, Any] = {}
 
     def target() -> None:
         try:
             box["result"] = handler(arguments)
-        except BaseException as exc:  # noqa: BLE001 - re-raised below
+        except BaseException as exc:
             box["error"] = exc
 
     thread = threading.Thread(target=target, daemon=True, name="tool-runner")
@@ -95,7 +101,7 @@ class DenyAllAuthorizer:
 
 
 class ToolRunner:
-    """Runs validation -> authorization -> approval -> execution."""
+    """Runs validation -> authorization -> durable identity -> execution."""
 
     def __init__(
         self,
@@ -104,7 +110,8 @@ class ToolRunner:
         bus: EventBus | None = None,
         sandbox: Any = None,
         sandbox_profiles: dict[str, Any] | None = None,
-        auditor: Callable[[dict], None] | None = None,
+        auditor: Any = None,
+        execution_ledger: ExecutionLedger | None = None,
     ) -> None:
         self._registry = registry
         self._authorizer = authorizer
@@ -112,10 +119,9 @@ class ToolRunner:
         self._sandbox = sandbox if sandbox is not None else LocalSandboxProvider()
         self._sandbox_profiles = dict(sandbox_profiles or {})
         self._auditor = auditor
-        # Never evict IDs: a replayed ToolCall ID must remain rejected for the
-        # lifetime of this runner. Durable task persistence should additionally
-        # prevent replay across process restarts.
+        self._ledger = execution_ledger
         self._seen_ids: set[str] = set()
+        self._seen_lock = threading.Lock()
 
     def _emit(self, event_type: EventType, task_id: str, payload: dict) -> None:
         if self._bus is not None:
@@ -132,16 +138,11 @@ class ToolRunner:
         safe_error = _safe_error(error)
         call.status = ToolCallStatus.FAILED
         self._emit(
-            event_type,
-            call.task_id,
-            {"tool": call.tool, "call_id": call.id, "error": safe_error},
+            event_type, call.task_id, {"tool": call.tool, "call_id": call.id, "error": safe_error}
         )
         self._audit(call, tool or call.tool, permission, False, safe_error)
         return ToolResult(
-            task_id=call.task_id,
-            tool_call_id=call.id,
-            success=False,
-            error=safe_error,
+            task_id=call.task_id, tool_call_id=call.id, success=False, error=safe_error
         )
 
     def _validate(self, tool: Tool, call: ToolCall) -> str | None:
@@ -158,18 +159,11 @@ class ToolRunner:
         )
         self._audit(call, tool, None, False, safe_reason)
         return ToolResult(
-            task_id=call.task_id,
-            tool_call_id=call.id,
-            success=False,
-            error=safe_reason,
+            task_id=call.task_id, tool_call_id=call.id, success=False, error=safe_reason
         )
 
     def _await_human(
-        self,
-        call: ToolCall,
-        tool: Tool,
-        permission: Permission,
-        cancel_token: Any = None,
+        self, call: ToolCall, tool: Tool, permission: Permission, cancel_token: Any = None
     ) -> Permission:
         approval_id = getattr(permission, "approval_id", "") or ""
         self._emit(
@@ -208,6 +202,23 @@ class ToolRunner:
                 permission.reason = "approval does not match this exact action"
         return permission
 
+    def _reserve_action(self, call: ToolCall) -> tuple[bool, str]:
+        """Reserve exact semantic action; model-generated call IDs are not identity."""
+        digest = action_hash(call.task_id, call.tool, dict(call.arguments))
+        if self._ledger is not None:
+            record = self._ledger.get(digest)
+            if record is not None:
+                return (
+                    False,
+                    f"action already has durable state {record.state.value}; reconcile before replay",
+                )
+            self._ledger.begin(call.task_id, call.tool, dict(call.arguments))
+        with self._seen_lock:
+            if call.id in self._seen_ids:
+                return False, f"duplicate call id {call.id!r}: already executed"
+            self._seen_ids.add(call.id)
+        return True, digest
+
     def run(self, call: ToolCall, cancel_token: Any = None) -> ToolResult:
         if cancel_token is not None and getattr(cancel_token, "cancelled", False):
             call.status = ToolCallStatus.FAILED
@@ -217,18 +228,9 @@ class ToolRunner:
                 success=False,
                 error="cancelled before execution",
             )
-        if call.id in self._seen_ids:
-            call.status = ToolCallStatus.FAILED
-            return ToolResult(
-                task_id=call.task_id,
-                tool_call_id=call.id,
-                success=False,
-                error=f"duplicate call id {call.id!r}: already executed",
-            )
         tool = self._registry.get(call.tool)
         if tool is None:
             return self._fail(call, EventType.TOOL_FAILED, f"unknown tool {call.tool!r}")
-
         self._emit(
             EventType.TOOL_REQUESTED,
             call.task_id,
@@ -246,9 +248,8 @@ class ToolRunner:
             permission = self._authorizer.authorize(call.task_id, tool, call)
         except (AuthorizationDeniedError, DomainValidationError) as exc:
             return self._deny(call, tool, str(exc))
-        except Exception as exc:  # defensive fail-closed boundary
+        except Exception as exc:
             return self._deny(call, tool, f"authorizer error: {exc}")
-
         if permission.decision is PermissionDecision.PENDING:
             try:
                 permission = self._await_human(call, tool, permission, cancel_token)
@@ -264,7 +265,9 @@ class ToolRunner:
                 success=False,
                 error="cancelled before execution",
             )
-
+        ok, identity = self._reserve_action(call)
+        if not ok:
+            return self._deny(call, tool, identity)
         self._emit(
             EventType.PERMISSION_GRANTED,
             call.task_id,
@@ -272,21 +275,19 @@ class ToolRunner:
                 "tool": call.tool,
                 "call_id": call.id,
                 "approval_id": getattr(permission, "approval_id", "") or "",
+                "action_hash": identity,
             },
         )
         call.status = ToolCallStatus.EXECUTE
-        self._seen_ids.add(call.id)
         self._emit(
             EventType.TOOL_STARTED,
             call.task_id,
-            {"tool": call.tool, "call_id": call.id},
+            {"tool": call.tool, "call_id": call.id, "action_hash": identity},
         )
         handler = self._registry.handler(call.tool)
         assert handler is not None
-
         if tool.requires_sandbox:
-            return self._run_sandboxed(call, tool, handler, permission, cancel_token)
-
+            return self._run_sandboxed(call, tool, handler, permission, cancel_token, identity)
         try:
             result = _run_with_deadline(handler, dict(call.arguments), tool.timeout_s)
         except FuturesTimeoutError:
@@ -303,7 +304,7 @@ class ToolRunner:
             return self._fail(
                 call, EventType.TOOL_FAILED, f"handler crashed: {exc}", tool, permission
             )
-        return self._finish(call, tool, permission, result)
+        return self._finish(call, tool, permission, result, identity)
 
     def _run_sandboxed(
         self,
@@ -312,6 +313,7 @@ class ToolRunner:
         handler: Any,
         permission: Permission,
         cancel_token: Any = None,
+        identity: str = "",
     ) -> ToolResult:
         profile = self._sandbox_profiles.get(tool.sandbox_profile)
         if profile is None:
@@ -319,7 +321,7 @@ class ToolRunner:
                 profile = SandboxProfile(
                     name="terminal",
                     fs_root="",
-                    allow_network=tool.network_access,
+                    allow_network=False,
                     timeout_s=tool.timeout_s,
                     max_processes=1,
                 )
@@ -346,7 +348,7 @@ class ToolRunner:
             return self._fail(
                 call, EventType.TOOL_FAILED, f"sandbox crashed: {exc}", tool, permission
             )
-        return self._finish(call, tool, permission, result, sandboxed=True)
+        return self._finish(call, tool, permission, result, sandboxed=True, identity=identity)
 
     def _finish(
         self,
@@ -354,6 +356,7 @@ class ToolRunner:
         tool: Tool,
         permission: Permission,
         result: Any,
+        identity: str = "",
         sandboxed: bool = False,
     ) -> ToolResult:
         if not isinstance(result, ToolResult):
@@ -374,11 +377,27 @@ class ToolRunner:
             {
                 "tool": call.tool,
                 "call_id": call.id,
+                "action_hash": identity,
                 "output_snippet": _safe_output_snippet(result.output),
                 "error": _safe_error(result.error or ""),
             },
         )
-        self._audit(call, tool, permission, result.success, result.error or "", sandboxed=sandboxed)
+        if self._ledger is not None and identity:
+            digest = hashlib.sha256(repr(result.output).encode("utf-8", "replace")).hexdigest()
+            self._ledger.transition(
+                identity,
+                ExecutionState.COMPLETED if result.success else ExecutionState.FAILED,
+                digest,
+            )
+        self._audit(
+            call,
+            tool,
+            permission,
+            result.success,
+            result.error or "",
+            sandboxed=sandboxed,
+            action_hash=identity,
+        )
         return result
 
     def _audit(
@@ -389,6 +408,7 @@ class ToolRunner:
         success: bool,
         error: str,
         sandboxed: bool = False,
+        action_hash: str = "",
     ) -> None:
         if self._auditor is None:
             return
@@ -403,6 +423,7 @@ class ToolRunner:
                     "task_id": call.task_id,
                     "tool": name,
                     "call_id": call.id,
+                    "action_hash": action_hash,
                     "decision": "GRANTED" if granted else "DENIED",
                     "risk": risk,
                     "reason": permission.reason if permission is not None else error,
