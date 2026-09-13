@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
 import secrets
@@ -19,6 +20,7 @@ from ai_ecosystem.core.config import AppConfig
 from ai_ecosystem.core.events.bus import Event
 from ai_ecosystem.core.events.sqlite import SqliteEventStore
 from ai_ecosystem.core.models.enums import EventType, RiskLevel, TaskState
+from ai_ecosystem.core.models import Tool
 from ai_ecosystem.core.persistence import (
     SqliteApprovalRepository,
     SqliteMemoryRepository,
@@ -27,7 +29,6 @@ from ai_ecosystem.core.persistence import (
 )
 from ai_ecosystem.core.runtime import AgentRuntime
 from ai_ecosystem.core.secrets import EnvSecretsProvider
-from ai_ecosystem.core.models import Tool
 from ai_ecosystem.intelligence import (
     HttpChatModelProvider,
     MockModelProvider,
@@ -36,7 +37,9 @@ from ai_ecosystem.intelligence import (
     ProviderProfile,
     RoutingRequirements,
 )
+from ai_ecosystem.intelligence.models.discovery import discover_local_provider
 from ai_ecosystem.intelligence.models.providers import ModelResponse
+from ai_ecosystem.intelligence.research.manager import ResearchManager
 from ai_ecosystem.interface.api import ApiError, RuntimeAPI
 from ai_ecosystem.interface.server import LocalHttpServer
 from ai_ecosystem.personalization.memory import MemoryStore
@@ -65,7 +68,6 @@ from ai_ecosystem.tools import (
 )
 from ai_ecosystem.tools.registry import ToolHandler
 from ai_ecosystem.tools.registry.execution_ledger import ExecutionLedger
-import contextlib
 
 log = logging.getLogger("ai_ecosystem.serve")
 
@@ -161,35 +163,54 @@ def load_or_create_token(path: str) -> str:
     return token
 
 
-def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
-    from ai_ecosystem.core.errors.exceptions import ModelUnavailableError
+def _explicit_provider() -> HttpChatModelProvider | None:
+    """Build an explicitly configured provider using either env naming scheme."""
+    endpoint = os.environ.get("AI_ECO_MODEL_ENDPOINT") or os.environ.get("MODEL_ENDPOINT")
+    if not endpoint:
+        return None
+    key = os.environ.get("AI_ECO_MODEL_API_KEY") or os.environ.get("MODEL_API_KEY") or ""
+    model = os.environ.get("AI_ECO_MODEL_NAME") or os.environ.get("MODEL_NAME") or ""
+    return HttpChatModelProvider(
+        provider_id=os.environ.get("AI_ECO_MODEL_PROVIDER", "http-chat"),
+        endpoint=endpoint,
+        api_key=key,
+        model=model or "default",
+    )
 
+
+def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
     router = ModelRouter()
     providers: list[ModelProvider] = []
-    http_provider = HttpChatModelProvider.from_secrets(EnvSecretsProvider())
-    if http_provider is not None:
+
+    provider = _explicit_provider()
+    if provider is None:
+        provider = discover_local_provider()
+    if provider is not None:
         router.register(
-            http_provider,
+            provider,
             ProviderProfile(
-                provider_id=http_provider.provider_id,
-                local=False,
-                trusted=True,
+                provider_id=provider.provider_id,
+                local=provider.provider_id.startswith("local-") or provider._api_key == "",  # noqa: SLF001
+                trusted=not provider.provider_id.startswith("local-"),
                 data_classes={DataClass.PUBLIC, DataClass.INTERNAL},
                 latency_class="standard",
+                retains_data=not provider.provider_id.startswith("local-"),
+                trains_on_data=not provider.provider_id.startswith("local-"),
             ),
         )
-        providers.append(http_provider)
+        providers.append(provider)
         return router, providers, True
+
+    from ai_ecosystem.core.errors.exceptions import ModelUnavailableError
 
     def missing(_: Any) -> ModelResponse:
         raise ModelUnavailableError(
-            "no model configured: set AI_ECO_MODEL_ENDPOINT (plus AI_ECO_MODEL_API_KEY for cloud providers, AI_ECO_MODEL_NAME for the model)"
+            "no model available: configure AI_ECO_MODEL_ENDPOINT/AI_ECO_MODEL_NAME or start "
+            "Ollama, LM Studio, or llama.cpp on the local machine"
         )
 
     stub = MockModelProvider("unconfigured", handler=missing)
-    router.register(
-        stub, ProviderProfile(provider_id="unconfigured", local=True, data_classes=set(DataClass))
-    )
+    router.register(stub, ProviderProfile(provider_id="unconfigured", local=True, data_classes=set(DataClass)))
     return router, [], False
 
 
@@ -243,9 +264,9 @@ def build_stack(
     execution_ledger.recover_unknowns()
     runner = ToolRunner(registry, authorizer, bus, execution_ledger=execution_ledger)
     router, providers, model_configured = build_router()
-    verifier = Verifier(
-        repository=SqliteVerificationRepository(runtime.db), bus=bus
-    ).with_test_command(runner, registry)
+    verifier = Verifier(repository=SqliteVerificationRepository(runtime.db), bus=bus).with_test_command(
+        runner, registry
+    )
     memories = MemoryStore(SqliteMemoryRepository(runtime.db), bus=bus)
     personalities = PersonalityStore(runtime.db, bus)
     preferences = PreferenceStore(runtime.db, bus)
@@ -256,11 +277,12 @@ def build_stack(
         awareness = SystemAwarenessManager(LocalSystemProbe(), bus=bus)
     except Exception:
         log.warning("system awareness unavailable")
+    research: ResearchManager | None = None
+    if registry.has("web.search"):
+        research = ResearchManager(runner, registry, bus=bus)
     tokens: dict[str, CancellationToken] = {}
     tokens_lock = threading.Lock()
-    dispatcher = BoundedDispatcher(
-        max_workers=config.max_workers, max_queued=config.max_queued_tasks
-    )
+    dispatcher = BoundedDispatcher(max_workers=config.max_workers, max_queued=config.max_queued_tasks)
 
     def agent_factory() -> SingleAgent:
         import platform
@@ -306,6 +328,7 @@ def build_stack(
             runner=runner,
             planner=planner,
             verifier=verifier,
+            research=research,
             memories=memories,
             personalization=personalization,
             executor_factory=lambda: ParallelExecutor(runner, registry, bus),
@@ -350,16 +373,16 @@ def build_stack(
     )
     token = None if no_auth else auth_token
     server = LocalHttpServer(api, host=config.api_host, port=config.api_port, auth_token=token)
-    agent = agent_factory()
+    agent = agent_factory() if model_configured else None
     for task in runtime.manager._tasks.list():  # noqa: SLF001
         if task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
             continue
         ctx = runtime.manager.get_context(task.id)
-        if ctx is not None and ctx.plan is not None:
+        if ctx is not None and ctx.plan is not None and model_configured:
 
             def resume(task_id: str = task.id) -> None:
                 try:
-                    agent.resume(task_id, AgentConfig(workspace=workspace, project_id="default"))
+                    agent_factory().resume(task_id, AgentConfig(workspace=workspace, project_id="default"))
                 except Exception as exc:
                     log.error("recovery failed for %s: %s", task_id, exc)
 
@@ -374,7 +397,13 @@ def build_stack(
                     Event(
                         event_type=EventType.TASK_FAILED,
                         task_id=task.id,
-                        payload={"error": "interrupted before a resumable plan was persisted"},
+                        payload={
+                            "error": (
+                                "no model is configured or available; configure a model and retry"
+                                if not model_configured
+                                else "interrupted before a resumable plan was persisted"
+                            )
+                        },
                     )
                 )
             except Exception:
