@@ -81,8 +81,8 @@ class HttpChatModelProvider(ModelProvider):
             or ModelCapabilities(
                 tool_calling=True,
                 structured_output=True,
-                reasoning=True,
-                parallel_tool_calls=True,
+                reasoning=False,
+                parallel_tool_calls=False,
             ),
         )
         if not endpoint:
@@ -143,9 +143,7 @@ class HttpChatModelProvider(ModelProvider):
         headers = {"Content-Type": "application/json", "User-Agent": "ai-ecosystem/0.1"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        http_request = urllib.request.Request(
-            self._endpoint, data=body, method="POST", headers=headers
-        )
+        http_request = urllib.request.Request(self._endpoint, data=body, method="POST", headers=headers)
         timeout = min(self._timeout, max(1.0, request.timeout_s))
         try:
             with urllib.request.urlopen(http_request, timeout=timeout) as response:
@@ -163,9 +161,7 @@ class HttpChatModelProvider(ModelProvider):
         try:
             decoded = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
-            raise ModelMalformedError(
-                f"provider {self.provider_id!r} returned invalid JSON"
-            ) from exc
+            raise ModelMalformedError(f"provider {self.provider_id!r} returned invalid JSON") from exc
         return _parse_response(decoded, self.provider_id, self._model)
 
 
