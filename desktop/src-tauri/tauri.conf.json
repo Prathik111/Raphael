@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:* https://unpkg.com"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:* https://unpkg.com"
     }
   },
   "bundle": {
