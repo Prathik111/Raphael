@@ -3,14 +3,6 @@ import { makeApi, TaskView, loadBase } from "./api";
 
 type Chat = TaskView & { reply?: string };
 
-type StageCommand = {
-  type: "raphael-stage";
-  action: "move" | "center";
-  x?: number;
-  y?: number;
-  scale?: number;
-};
-
 function titleFor(goal: string) {
   const clean = goal.trim().replace(/\s+/g, " ");
   return clean.length > 56 ? `${clean.slice(0, 56)}…` : clean || "New conversation";
@@ -24,16 +16,9 @@ export function App() {
   const [prompt, setPrompt] = useState("");
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
-  const [introDone, setIntroDone] = useState(false);
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [backendUrl, setBackendUrl] = useState(api.base);
-
-  // The visual core is intentionally a passive background. It no longer receives
-  // commands from the chat layer and therefore never moves/focuses when a task runs.
-  const sendStage = useCallback((cmd: StageCommand) => {
-    stageRef.current?.contentWindow?.postMessage(cmd, "*");
-  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -110,14 +95,13 @@ export function App() {
   };
 
   return (
-    <div className={`raphael-app ${introDone ? "is-ready" : ""}`}>
+    <div className="raphael-app">
       <iframe
         ref={stageRef}
         className="raphael-stage"
         title="Raphael visual background"
         src="/raphael-stage.html"
-        onLoad={() => window.setTimeout(() => setIntroDone(true), 120)}
-        style={{ pointerEvents: "none" }}
+        aria-hidden="true"
       />
       <aside className="raphael-sidebar">
         <div className="brand-lockup"><div className="brand-mark">R</div><div><strong>Raphael</strong><span>AI operating layer</span></div></div>
@@ -128,7 +112,6 @@ export function App() {
       <main className="raphael-main"><div className="top-fade" /><section className={`response-shell ${active || busy || reply || error ? "visible" : ""}`}><div className="response-card"><div className="response-avatar"><span>R</span></div><div className="response-content"><div className="response-head"><span>Raphael</span>{busy && <i className="thinking-dot" aria-label="Thinking" />}</div>{busy && !reply && !error && <div className="response-loading"><span /><span /><span /></div>}{error && <div className="response-error">{error}</div>}{!busy && !error && reply && <div className="response-text">{reply}</div>}</div></div></section>
         <form className="floating-composer" onSubmit={submit}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Raphael anything…" rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); } }} /><button className="send-button" type="submit" disabled={!prompt.trim() || busy} aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4.8 16-3.3-6.7L4 12Zm7.9 1.3 3.2 6.5L20 4l-8.1 9.3Z" /></svg></button></form>
       </main>
-      {!introDone && <div className="intro-curtain" />}
       {settingsOpen && <div className="settings-backdrop" onMouseDown={(e) => e.currentTarget === e.target && setSettingsOpen(false)}><form className="settings-panel" onSubmit={saveSettings}><div className="settings-head"><span>Settings</span><button type="button" onClick={() => setSettingsOpen(false)}>×</button></div><label>Backend</label><input value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} spellCheck={false} /><div className="settings-foot"><button type="button" className="ghost" onClick={() => setSettingsOpen(false)}>Cancel</button><button className="save">Save</button></div></form></div>}
     </div>
   );
