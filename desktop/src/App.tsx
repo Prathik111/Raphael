@@ -2,7 +2,14 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { makeApi, TaskView, loadBase } from "./api";
 
 type Chat = TaskView & { reply?: string };
-type StageCommand = { type: "raphael-stage"; action: "move" | "center"; x?: number; y?: number; scale?: number };
+
+type StageCommand = {
+  type: "raphael-stage";
+  action: "move" | "center";
+  x?: number;
+  y?: number;
+  scale?: number;
+};
 
 function titleFor(goal: string) {
   const clean = goal.trim().replace(/\s+/g, " ");
@@ -22,13 +29,11 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [backendUrl, setBackendUrl] = useState(api.base);
 
+  // The visual core is intentionally a passive background. It no longer receives
+  // commands from the chat layer and therefore never moves/focuses when a task runs.
   const sendStage = useCallback((cmd: StageCommand) => {
     stageRef.current?.contentWindow?.postMessage(cmd, "*");
   }, []);
-
-  const focusResponse = useCallback(() => {
-    sendStage({ type: "raphael-stage", action: "move", x: 0.73, y: 0.25, scale: 0.62 });
-  }, [sendStage]);
 
   useEffect(() => {
     let mounted = true;
@@ -49,13 +54,12 @@ export function App() {
         setReply("");
       } else {
         setReply(result.reply || result.summary || "");
-        if (result.reply || result.summary) focusResponse();
       }
     } catch (err) {
       setReply("");
       setError(err instanceof Error ? err.message : "Could not load this conversation.");
     }
-  }, [api, focusResponse]);
+  }, [api]);
 
   const waitForResult = useCallback(async (task: TaskView) => {
     let lastError = "";
@@ -72,35 +76,49 @@ export function App() {
           setReply(""); setError("Task cancelled."); setActive((prev) => ({ ...(prev ?? task), ...current }));
         } else {
           const text = result.reply || result.summary || "Task completed without a response.";
-          setReply(text); setError(""); setActive((prev) => ({ ...(prev ?? task), ...current, reply: text })); focusResponse();
+          setReply(text); setError(""); setActive((prev) => ({ ...(prev ?? task), ...current, reply: text }));
         }
         setBusy(false); await refreshChats(); return;
       } catch (err) { lastError = err instanceof Error ? err.message : "Could not read the task result."; }
     }
     setBusy(false); setError(lastError || "Raphael did not return a response within 90 seconds.");
-  }, [api, focusResponse, refreshChats]);
+  }, [api, refreshChats]);
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const goal = prompt.trim();
     if (!goal || busy) return;
-    setError(""); setReply(""); setBusy(true); setActive(null); focusResponse();
+    setError(""); setReply(""); setBusy(true); setActive(null);
     try {
       const task = await api.submitGoal(goal);
       setActive({ ...task, title: titleFor(goal) }); setPrompt(""); void waitForResult(task);
     } catch (err) { setBusy(false); setError(err instanceof Error ? err.message : "Could not send the prompt."); }
   };
 
-  const newChat = () => { setActive(null); setReply(""); setPrompt(""); setError(""); setBusy(false); sendStage({ type: "raphael-stage", action: "center" }); };
+  const newChat = () => {
+    setActive(null); setReply(""); setPrompt(""); setError(""); setBusy(false);
+  };
+
   const saveSettings = (event: FormEvent) => {
     event.preventDefault();
-    try { const next = makeApi(backendUrl); setApi(next); window.localStorage.setItem("ai-eco-backend-url", next.base); setSettingsOpen(false); }
-    catch (err) { setError(err instanceof Error ? err.message : "Invalid backend URL."); }
+    try {
+      const next = makeApi(backendUrl);
+      setApi(next);
+      window.localStorage.setItem("ai-eco-backend-url", next.base);
+      setSettingsOpen(false);
+    } catch (err) { setError(err instanceof Error ? err.message : "Invalid backend URL."); }
   };
 
   return (
     <div className={`raphael-app ${introDone ? "is-ready" : ""}`}>
-      <iframe ref={stageRef} className="raphael-stage" title="Raphael visual core" src="/raphael-stage.html" onLoad={() => window.setTimeout(() => setIntroDone(true), 120)} />
+      <iframe
+        ref={stageRef}
+        className="raphael-stage"
+        title="Raphael visual background"
+        src="/raphael-stage.html"
+        onLoad={() => window.setTimeout(() => setIntroDone(true), 120)}
+        style={{ pointerEvents: "none" }}
+      />
       <aside className="raphael-sidebar">
         <div className="brand-lockup"><div className="brand-mark">R</div><div><strong>Raphael</strong><span>AI operating layer</span></div></div>
         <button className="new-chat" onClick={newChat}>＋&nbsp; New chat</button><div className="sidebar-label">Recent</div>
