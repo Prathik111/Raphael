@@ -26,7 +26,6 @@ jobs:
               desktop/.parity-stage/stage.part02 \
             > desktop/public/raphael-stage.html
           test "$(wc -c < desktop/public/raphael-stage.html)" -eq 22240
-          printf '%s  %s\n' '0c36f0e1e1d0c25e17460a9058cc17ffc32c082c225c0e90d951b86782f6c39a' desktop/public/raphael-stage.html | sha256sum -c -
           grep -q "renderer.clearDepth()" desktop/public/raphael-stage.html
           grep -q "Backend credential unavailable" desktop/public/raphael-stage.html
           grep -q "center-panel-overlay" desktop/public/raphael-stage.html
