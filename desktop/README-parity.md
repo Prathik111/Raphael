@@ -1,0 +1,1 @@
+Prototype-parity frontend branch. The React shell uses the prototype-style HUD, while the Python REST runtime remains authoritative. Center-click radial menu/panel UI is intentionally not part of this desktop shell.
