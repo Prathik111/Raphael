@@ -1,50 +1,56 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { makeApi, TaskView, loadBase } from "./api";
 
-type Chat = TaskView & { reply?: string };
-
-function titleFor(goal: string) {
-  const clean = goal.trim().replace(/\s+/g, " ");
-  return clean.length > 56 ? `${clean.slice(0, 56)}…` : clean || "New conversation";
-}
+type StagePayload =
+  | { type: "state"; thinking: boolean }
+  | { type: "caption"; text: string }
+  | { type: "clear-caption" };
 
 export function App() {
-  const stageRef = useRef<HTMLIFrameElement>(null);
-  const [api, setApi] = useState(() => makeApi(loadBase()));
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [active, setActive] = useState<Chat | null>(null);
+  const stageRef = useRef<HTMLIFrameElement | null>(null);
+  const [api] = useState(() => makeApi(loadBase()));
   const [prompt, setPrompt] = useState("");
-  const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("AI: connecting...");
   const [error, setError] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [backendUrl, setBackendUrl] = useState(api.base);
+
+  const postStage = useCallback((message: StagePayload) => {
+    const frame = stageRef.current?.contentWindow;
+    if (!frame) return;
+    frame.postMessage({ source: "raphael-react", ...message }, "*");
+  }, []);
+
+  const syncStage = useCallback(() => {
+    postStage({ type: "state", thinking: busy });
+  }, [busy, postStage]);
 
   useEffect(() => {
-    let mounted = true;
-    api.listTasks().then((items) => mounted && setChats(items.slice(0, 24))).catch(() => void 0);
-    return () => { mounted = false; };
-  }, [api]);
+    syncStage();
+  }, [syncStage]);
 
-  const refreshChats = useCallback(async () => {
-    try { setChats((await api.listTasks()).slice(0, 24)); } catch { /* keep the shell usable */ }
-  }, [api]);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (!event.data || event.data.source !== "raphael-stage") return;
+      if (event.data.type === "ready") syncStage();
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [syncStage]);
 
-  const openChat = useCallback(async (chat: Chat) => {
-    setActive(chat); setError(""); setReply(chat.reply ?? "");
+  const refreshStatus = useCallback(async () => {
     try {
-      const result = await api.taskResult(chat.task_id);
-      if (result.status === "FAILED") {
-        setError(result.error || result.summary || "Raphael failed to complete this task.");
-        setReply("");
-      } else {
-        setReply(result.reply || result.summary || "");
-      }
-    } catch (err) {
-      setReply("");
-      setError(err instanceof Error ? err.message : "Could not load this conversation.");
+      await api.health();
+      setStatus(busy ? "AI: thinking" : "AI: ready");
+    } catch {
+      setStatus("AI: disconnected");
     }
-  }, [api]);
+  }, [api, busy]);
+
+  useEffect(() => {
+    void refreshStatus();
+    const timer = window.setInterval(() => void refreshStatus(), 3000);
+    return () => window.clearInterval(timer);
+  }, [refreshStatus]);
 
   const waitForResult = useCallback(async (task: TaskView) => {
     let lastError = "";
@@ -53,45 +59,74 @@ export function App() {
       try {
         const current = await api.getTask(task.task_id);
         if (!current.completed && current.state !== "FAILED" && current.state !== "CANCELLED") continue;
+
         const result = await api.taskResult(task.task_id);
+        setBusy(false);
+
         if (result.status === "FAILED" || current.state === "FAILED") {
           const message = result.error || result.summary || "Raphael failed to complete the task.";
-          setReply(""); setError(message); setActive((prev) => ({ ...(prev ?? task), ...current }));
+          setError(message);
+          postStage({ type: "state", thinking: false });
+          postStage({ type: "caption", text: `[Error] ${message}` });
+          setStatus("AI: error");
         } else if (result.status === "CANCELLED" || current.state === "CANCELLED") {
-          setReply(""); setError("Task cancelled."); setActive((prev) => ({ ...(prev ?? task), ...current }));
+          setError("Task cancelled.");
+          postStage({ type: "state", thinking: false });
+          postStage({ type: "caption", text: "[Cancelled]" });
+          setStatus("AI: ready");
         } else {
           const text = result.reply || result.summary || "Task completed without a response.";
-          setReply(text); setError(""); setActive((prev) => ({ ...(prev ?? task), ...current, reply: text }));
+          setError("");
+          postStage({ type: "state", thinking: false });
+          postStage({ type: "caption", text });
+          setStatus("AI: ready");
         }
-        setBusy(false); await refreshChats(); return;
-      } catch (err) { lastError = err instanceof Error ? err.message : "Could not read the task result."; }
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : "Could not read the task result.";
+      }
     }
-    setBusy(false); setError(lastError || "Raphael did not return a response within 90 seconds.");
-  }, [api, refreshChats]);
+
+    setBusy(false);
+    const message = lastError || "Raphael did not return a response within 90 seconds.";
+    setError(message);
+    postStage({ type: "state", thinking: false });
+    postStage({ type: "caption", text: `[Error] ${message}` });
+    setStatus("AI: timeout");
+  }, [api, postStage]);
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const goal = prompt.trim();
     if (!goal || busy) return;
-    setError(""); setReply(""); setBusy(true); setActive(null);
+
+    setError("");
+    setBusy(true);
+    setStatus("AI: thinking");
+    postStage({ type: "clear-caption" });
+    postStage({ type: "state", thinking: true });
+
     try {
       const task = await api.submitGoal(goal);
-      setActive({ ...task, title: titleFor(goal) }); setPrompt(""); void waitForResult(task);
-    } catch (err) { setBusy(false); setError(err instanceof Error ? err.message : "Could not send the prompt."); }
+      setPrompt("");
+      void waitForResult(task);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not send the prompt.";
+      setBusy(false);
+      setError(message);
+      setStatus("AI: disconnected");
+      postStage({ type: "state", thinking: false });
+      postStage({ type: "caption", text: `[Error] ${message}` });
+    }
   };
 
   const newChat = () => {
-    setActive(null); setReply(""); setPrompt(""); setError(""); setBusy(false);
-  };
-
-  const saveSettings = (event: FormEvent) => {
-    event.preventDefault();
-    try {
-      const next = makeApi(backendUrl);
-      setApi(next);
-      window.localStorage.setItem("ai-eco-backend-url", next.base);
-      setSettingsOpen(false);
-    } catch (err) { setError(err instanceof Error ? err.message : "Invalid backend URL."); }
+    setBusy(false);
+    setError("");
+    setPrompt("");
+    setStatus("AI: ready");
+    postStage({ type: "state", thinking: false });
+    postStage({ type: "clear-caption" });
   };
 
   return (
@@ -102,17 +137,40 @@ export function App() {
         title="Raphael visual background"
         src="/raphael-stage.html"
         aria-hidden="true"
+        onLoad={syncStage}
       />
-      <aside className="raphael-sidebar">
-        <div className="brand-lockup"><div className="brand-mark">R</div><div><strong>Raphael</strong><span>AI operating layer</span></div></div>
-        <button className="new-chat" onClick={newChat}>＋&nbsp; New chat</button><div className="sidebar-label">Recent</div>
-        <div className="recent-list">{chats.length === 0 && <div className="recent-empty">No recent conversations</div>}{chats.map((chat) => <button key={chat.task_id} className={`recent-item ${active?.task_id === chat.task_id ? "active" : ""}`} onClick={() => void openChat(chat)}><span className="recent-title">{chat.title || "Untitled conversation"}</span><span className="recent-date">{new Date(chat.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span></button>)}</div>
-        <div className="sidebar-bottom"><button className="side-action" onClick={() => setSettingsOpen(true)}>⚙&nbsp; Settings</button></div>
-      </aside>
-      <main className="raphael-main"><div className="top-fade" /><section className={`response-shell ${active || busy || reply || error ? "visible" : ""}`}><div className="response-card"><div className="response-avatar"><span>R</span></div><div className="response-content"><div className="response-head"><span>Raphael</span>{busy && <i className="thinking-dot" aria-label="Thinking" />}</div>{busy && !reply && !error && <div className="response-loading"><span /><span /><span /></div>}{error && <div className="response-error">{error}</div>}{!busy && !error && reply && <div className="response-text">{reply}</div>}</div></div></section>
-        <form className="floating-composer" onSubmit={submit}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Raphael anything…" rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); } }} /><button className="send-button" type="submit" disabled={!prompt.trim() || busy} aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4.8 16-3.3-6.7L4 12Zm7.9 1.3 3.2 6.5L20 4l-8.1 9.3Z" /></svg></button></form>
-      </main>
-      {settingsOpen && <div className="settings-backdrop" onMouseDown={(e) => e.currentTarget === e.target && setSettingsOpen(false)}><form className="settings-panel" onSubmit={saveSettings}><div className="settings-head"><span>Settings</span><button type="button" onClick={() => setSettingsOpen(false)}>×</button></div><label>Backend</label><input value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} spellCheck={false} /><div className="settings-foot"><button type="button" className="ghost" onClick={() => setSettingsOpen(false)}>Cancel</button><button className="save">Save</button></div></form></div>}
+
+      <header className="hud-brand" aria-label="Raphael">
+        <div className="hud-brand-mark">R</div>
+        <div>
+          <div className="hud-brand-title">RAPHAEL</div>
+          <div className="hud-brand-subtitle">AI OPERATING LAYER</div>
+        </div>
+      </header>
+
+      <button className="new-chat-button" type="button" onClick={newChat}>
+        NEW CHAT
+      </button>
+
+      <div className="hud-status" aria-live="polite">
+        <span>{status}</span>
+        {error ? <span className="hud-status-error"> // {error}</span> : null}
+      </div>
+
+      <form className="prototype-chat-bar" onSubmit={submit}>
+        <input
+          type="text"
+          value={prompt}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setPrompt(event.target.value)}
+          placeholder="Ask Raphael..."
+          autoComplete="off"
+          aria-label="Ask Raphael"
+          disabled={busy}
+        />
+        <button type="submit" disabled={!prompt.trim() || busy}>
+          SEND
+        </button>
+      </form>
     </div>
   );
 }
