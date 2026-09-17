@@ -1,0 +1,100 @@
+  @media (max-width:900px){#quick-dock{gap:3px}.quick-btn{padding:4px 6px;font-size:8px}#chat-layout{gap:10px}#chat-sidebar{flex-basis:140px}}
+</style>
+</head>
+<body class="startup-intro">
+<div id="canvas-wrap"></div>
+<div id="fallback-visual"><svg id="fallback-core" viewBox="0 0 100 100" aria-hidden="true"><g transform="translate(50 50)"><ellipse class="orbit" rx="38" ry="25" transform="rotate(18)"/><ellipse class="orbit orbit2" rx="30" ry="22" transform="rotate(73)"/><polygon class="core" points="0,-27 25,-8 16,21 -16,21 -25,-8"/><polygon class="core2" points="0,-35 31,-11 19,28 -19,28 -31,-11"/><circle class="glow" r="9"/><circle class="dot" cx="0" cy="-27" r=".9"/><circle class="dot" cx="25" cy="-8" r=".9"/><circle class="dot" cx="16" cy="21" r=".9"/><circle class="dot" cx="-16" cy="21" r=".9"/><circle class="dot" cx="-25" cy="-8" r=".9"/></g></svg></div>
+<div id="brand"><div id="brand-mark">R</div><div><div id="brand-text">RAPHAEL</div><span id="brand-sub">AI OPERATING LAYER</span></div></div>
+<div id="status">AI: waiting for backend</div>
+<button id="core-hit" aria-label="Open Raphael menu"></button>
+<div id="radial-menu"><button class="radial-item" data-action="chat">CHAT</button><button class="radial-item" data-action="history">HISTORY</button><button class="radial-item" data-action="memory">MEMORY</button><button class="radial-item" data-action="settings">SETTINGS</button></div>
+<div id="quick-dock"><button class="quick-btn" id="quick-pause">PAUSE</button><button class="quick-btn" id="quick-motion">MOTION</button><button class="quick-btn" id="quick-center">CENTER</button><span id="quick-perf">60 FPS</span></div>
+<div id="caption-box"><div id="caption-text"></div></div>
+<div id="error-toast"></div>
+<div id="center-panel-overlay">
+  <div id="center-panel-frame">
+    <button id="center-panel-close" aria-label="Close">✕</button>
+    <div id="center-panel">
+      <div id="panel-section-chat">
+        <div id="chat-identity-name">RAPHAEL // AI OPERATING LAYER</div>
+        <div id="chat-layout">
+          <aside id="chat-sidebar"><button id="new-chat-btn">+ New chat</button><div id="topic-list"></div></aside>
+          <section style="flex:1;min-width:0;display:flex;flex-direction:column"><div id="history-list"></div><div id="chat-bar"><div id="chat-input-row"><input id="chat-input" placeholder="Ask Raphael..." autocomplete="off"><button id="think-toggle" type="button" aria-pressed="false">THINK</button><button id="chat-send">SEND</button><span id="ws-status">AI: waiting for backend</span></div></div></section>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const wrap = $('canvas-wrap');
+  const status = $('status');
+  const wsStatus = $('ws-status');
+  const panel = $('center-panel-overlay');
+  const history = $('history-list');
+  const topics = $('topic-list');
+  const caption = $('caption-box');
+  const captionText = $('caption-text');
+  const toast = $('error-toast');
+  const radial = $('radial-menu');
+  const input = $('chat-input');
+  const send = $('chat-send');
+  const think = $('think-toggle');
+  let backend = { base:'http://127.0.0.1:8765', token:null };
+  let thinking = false, thinkHarder = false, paused = false, panelMode = 'chat';
+  const chats = [{id:Date.now(),title:'New chat',messages:[]}];
+  let active = chats[0];
+
+  function postReady(){ try { parent.postMessage({source:'raphael-stage',type:'ready'}, '*'); } catch {} }
+  window.addEventListener('message',(e)=>{
+    const m=e.data; if(!m || m.source!=='raphael-react') return;
+    if(m.type==='backend'){
+      backend={base:String(m.base||backend.base),token:m.token?String(m.token):null};
+      const ready=!!backend.token; status.textContent=ready?'AI: ready':'AI: waiting for backend'; wsStatus.textContent=ready?'AI: ready':'AI: waiting for backend';
+    }
+    if(m.type==='new-chat') newChat();
+  });
+
+  async function request(path, init={}){
+    const headers=Object.assign({'Content-Type':'application/json'},init.headers||{});
+    if(backend.token) headers.Authorization='Bearer '+backend.token;
+    const res=await fetch(backend.base+path,Object.assign({},init,{headers}));
+    if(!res.ok) throw new Error(res.status+': '+await res.text());
+    return res.json();
+  }
+
+  function renderTopics(){
+    topics.innerHTML='';
+    chats.forEach((c)=>{const b=document.createElement('div');b.className='topic-item'+(c===active?' active':'');b.textContent=c.title;b.onclick=()=>{active=c;renderHistory();renderTopics()};topics.appendChild(b)})
+  }
+  function renderHistory(){
+    history.innerHTML='';
+    active.messages.forEach((m)=>{const el=document.createElement('div');el.className='history-entry'+(m.role==='user'?' user':'');el.innerHTML='<span class="role-label">'+(m.role==='user'?'YOU':'RAPHAEL')+'</span>'+escapeHtml(m.text);history.appendChild(el)});
+    history.scrollTop=history.scrollHeight;
+  }
+  function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+  function newChat(){active={id:Date.now(),title:'New chat',messages:[]};chats.push(active);renderTopics();renderHistory();panel.classList.add('open');}
+  function openPanel(mode='chat'){panelMode=mode;panel.classList.add('open');radial.classList.remove('open');renderTopics();renderHistory();}
+  function closePanel(){panel.classList.remove('open')}
+  function showCaption(text){captionText.textContent=text;caption.classList.add('show');clearTimeout(showCaption.t);showCaption.t=setTimeout(()=>caption.classList.remove('show'),7500)}
+  function showError(text){toast.textContent=text;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),6000)}
+
+  async function sendChat(){
+    const text=input.value.trim(); if(!text) return;
+    if(!backend.token){showError('Backend credential unavailable.');return;}
+    active.messages.push({role:'user',text}); if(active.title==='New chat') active.title=text.slice(0,40); input.value=''; renderTopics();renderHistory(); thinking=true; think.classList.toggle('busy',true);
+    try{
+      const created=await request('/tasks',{method:'POST',body:JSON.stringify({goal:text})});
+      let current=created;
+      for(let i=0;i<180;i++){await new Promise(r=>setTimeout(r,500));current=await request('/tasks/'+created.task_id);if(current.completed||current.state==='FAILED'||current.state==='CANCELLED')break;}
+      const result=await request('/tasks/'+created.task_id+'/result');
+      const reply=result.reply||result.summary||result.error||'Task completed without a response.';
+      active.messages.push({role:'assistant',text:reply}); renderHistory(); renderTopics(); showCaption(reply);
+      status.textContent=result.status==='COMPLETED'?'AI: ready':'AI: '+String(result.status||current.state||'done').toLowerCase(); wsStatus.textContent=status.textContent;
+    }catch(err){status.textContent='AI: error';wsStatus.textContent='AI: error';showError(err&&err.message?err.message:String(err))}
+    finally{thinking=false;think.classList.remove('busy')}
+  }
+
+  send.onclick=sendChat; input.addEventListener('keydown',(e)=>{if(e.key==='Enter')sendChat()}); $('new-chat-btn').onclick=newChat; $('center-panel-close').onclick=closePanel; $('quick-center').onclick=()=>{worldGroup.position.x=0;worldGroup.position.y=1;};
