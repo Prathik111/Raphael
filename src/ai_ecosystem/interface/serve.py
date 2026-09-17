@@ -28,6 +28,7 @@ from ai_ecosystem.core.persistence import (
     SqliteVerificationRepository,
 )
 from ai_ecosystem.core.runtime import AgentRuntime
+from ai_ecosystem.core.secrets import EnvSecretsProvider
 from ai_ecosystem.intelligence import (
     HttpChatModelProvider,
     MockModelProvider,
@@ -183,6 +184,8 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
 
     provider = _explicit_provider()
     if provider is None:
+        provider = HttpChatModelProvider.from_secrets(EnvSecretsProvider())
+    if provider is None:
         provider = discover_local_provider()
     if provider is not None:
         is_local = provider.provider_id.startswith("local-")
@@ -337,15 +340,27 @@ def build_stack(
 
     def dispatch(task_id: str) -> None:
         if not model_configured:
+            error = (
+                "no model is configured or available; configure AI_ECO_MODEL_API_KEY and "
+                "AI_ECO_MODEL_ENDPOINT, or start a supported local model"
+            )
             try:
                 runtime.manager.transition(task_id, TaskState.FAILED)
+                ctx = runtime.manager.get_context(task_id)
+                if ctx is not None:
+                    ctx.metadata["agent_result"] = {
+                        "task_id": task_id,
+                        "status": "FAILED",
+                        "summary": "",
+                        "reply": "",
+                        "error": error,
+                    }
+                    runtime.contexts_repo.save(ctx)
                 bus.publish(
                     Event(
                         event_type=EventType.TASK_FAILED,
                         task_id=task_id,
-                        payload={
-                            "error": "no model is configured or available; start a local model or configure AI_ECO_MODEL_ENDPOINT"
-                        },
+                        payload={"error": error},
                     )
                 )
             except Exception:
@@ -388,7 +403,7 @@ def build_stack(
     )
     token = None if no_auth else auth_token
     server = LocalHttpServer(api, host=config.api_host, port=config.api_port, auth_token=token)
-    agent = agent_factory() if model_configured else None
+    agent = agent_factory()
     for task in runtime.manager._tasks.list():  # noqa: SLF001
         if task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
             continue
@@ -408,17 +423,27 @@ def build_stack(
         else:
             try:
                 runtime.manager.transition(task.id, TaskState.FAILED)
+                error = (
+                    "interrupted: no model is configured or available; configure "
+                    "AI_ECO_MODEL_API_KEY and AI_ECO_MODEL_ENDPOINT, then retry"
+                    if not model_configured
+                    else "interrupted before a resumable plan was persisted"
+                )
+                ctx = runtime.manager.get_context(task.id)
+                if ctx is not None:
+                    ctx.metadata["agent_result"] = {
+                        "task_id": task.id,
+                        "status": "FAILED",
+                        "summary": "",
+                        "reply": "",
+                        "error": error,
+                    }
+                    runtime.contexts_repo.save(ctx)
                 bus.publish(
                     Event(
                         event_type=EventType.TASK_FAILED,
                         task_id=task.id,
-                        payload={
-                            "error": (
-                                "no model is configured or available; configure a model and retry"
-                                if not model_configured
-                                else "interrupted before a resumable plan was persisted"
-                            )
-                        },
+                        payload={"error": error},
                     )
                 )
             except Exception:
