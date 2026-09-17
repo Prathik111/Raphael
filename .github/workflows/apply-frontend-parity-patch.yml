@@ -1,0 +1,36 @@
+name: Apply frontend parity patch
+
+on:
+  push:
+    branches:
+      - integration/prototype-parity
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, '[apply-parity-patch]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply patch
+        run: git apply --whitespace=nowarn desktop/frontend-parity.patch
+
+      - name: Remove patch and helper workflow
+        run: |
+          rm desktop/frontend-parity.patch
+          rm .github/workflows/apply-frontend-parity-patch.yml
+
+      - name: Commit parity implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop/src/App.tsx desktop/src/raphael.css desktop/public/raphael-stage.html
+          git add -u desktop/frontend-parity.patch .github/workflows/apply-frontend-parity-patch.yml
+          git commit -m "Frontend: restore Great Sage prototype parity"
+          git push origin HEAD:${GITHUB_REF_NAME}
