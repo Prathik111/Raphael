@@ -1,1 +1,37 @@
-:root{color-scheme:dark;font-family:Consolas,"Courier New",monospace;font-synthesis:none;text-rendering:optimizeLegibility}*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;overflow:hidden;background:#030b08;color:#fff}button,input{font:inherit}.raphael-app{position:relative;width:100%;height:100%;overflow:hidden;background:#030b08}.raphael-stage{position:absolute;inset:0;width:100%;height:100%;border:0;display:block;z-index:0;pointer-events:none;background:#030b08}.hud-brand{position:absolute;top:22px;left:28px;z-index:10;display:flex;align-items:center;gap:10px;pointer-events:none;user-select:none}.hud-brand-mark{width:32px;height:32px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.55);background:rgba(0,0,0,.72);color:#fff;font-size:14px;font-weight:700}.hud-brand-title{color:#fff;font-size:12px;line-height:1.1;letter-spacing:3px}.hud-brand-subtitle{margin-top:4px;color:rgba(255,255,255,.42);font-size:8px;letter-spacing:2px}.new-chat-button{position:absolute;top:22px;right:28px;z-index:10;padding:6px 9px;border:1px solid rgba(255,255,255,.38);background:rgba(0,0,0,.65);color:rgba(255,255,255,.72);font-size:9px;letter-spacing:1.6px;cursor:pointer;transition:background 140ms ease,color 140ms ease,border-color 140ms ease}.new-chat-button:hover{background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.75)}.hud-status{position:absolute;left:50%;bottom:86px;transform:translateX(-50%);z-index:10;color:rgba(255,255,255,.58);font-size:9px;letter-spacing:1.2px;pointer-events:none;white-space:nowrap;text-align:center}.hud-status-error{color:rgba(255,255,255,.78)}.prototype-chat-bar{position:absolute;left:50%;bottom:28px;transform:translateX(-50%);z-index:20;width:min(760px,72vw);display:flex;align-items:center;gap:8px;padding:7px 9px;border:2px solid rgba(255,255,255,.88);background:rgba(0,0,0,.82);box-shadow:0 0 12px rgba(255,255,255,.08),0 12px 36px rgba(0,0,0,.42)}.prototype-chat-bar input{flex:1;min-width:0;height:38px;border:0;outline:0;padding:7px 7px;color:#fff;background:transparent;font-family:Consolas,"Courier New",monospace;font-size:14px;letter-spacing:.04em}.prototype-chat-bar input::placeholder{color:rgba(255,255,255,.38)}.prototype-chat-bar input:focus{box-shadow:inset 0 -1px 0 rgba(255,255,255,.42)}.prototype-chat-bar button{flex:0 0 auto;min-width:72px;height:36px;padding:0 13px;border:1px solid #fff;background:#000;color:#fff;cursor:pointer;font-size:11px;letter-spacing:1px;transition:background 140ms ease,box-shadow 140ms ease,opacity 140ms ease}.prototype-chat-bar button:hover:not(:disabled){background:#1a1a1a;box-shadow:0 0 8px rgba(255,255,255,.45)}.prototype-chat-bar button:disabled{opacity:.35;cursor:default}@media (max-width:800px){.hud-brand{left:16px;top:16px}.new-chat-button{right:16px;top:16px}.prototype-chat-bar{width:calc(100vw - 28px);bottom:14px}.hud-status{bottom:70px}}
+:root {
+  color-scheme: dark;
+  font-family: Consolas, "Cascadia Mono", ui-monospace, monospace;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #030b08;
+}
+body { color: #edf5ff; }
+button, input, textarea { font: inherit; }
+
+.raphael-app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #030b08;
+}
+
+.raphael-stage {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: #030b08;
+}
