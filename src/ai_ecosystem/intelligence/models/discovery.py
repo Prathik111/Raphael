@@ -12,7 +12,6 @@ import os
 import urllib.error
 import urllib.request
 
-from ai_ecosystem.core.secrets import EnvSecretsProvider
 from ai_ecosystem.intelligence.models.http import HttpChatModelProvider
 
 _DEFAULTS = (
@@ -40,11 +39,7 @@ def _models(endpoint: str, timeout_s: float = 0.8) -> list[str]:
 
 
 def discover_local_provider() -> HttpChatModelProvider | None:
-    """Return the first explicitly configured or healthy local provider."""
-    configured = HttpChatModelProvider.from_secrets(EnvSecretsProvider())
-    if configured is not None:
-        return configured
-
+    """Return the first healthy local provider, without failing startup."""
     candidates = tuple(
         value.strip().rstrip("/")
         for value in os.environ.get("AI_ECO_LOCAL_MODEL_ENDPOINTS", "").split(",")
