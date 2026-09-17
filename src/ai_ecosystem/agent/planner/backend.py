@@ -128,10 +128,13 @@ class ModelReasoningBackend(ReasoningBackend):
             return self._structured_requester(request, model_cls)  # type: ignore[return-value]
         return request_structured(self._provider, request, model_cls)  # type: ignore[return-value]
 
-    def _direct_response_plan(self, goal: str) -> Plan:
-        response: ModelResponse = self._provider.complete(
-            ModelRequest(prompt=goal, system=self.DIRECT_SYSTEM, max_tokens=2048)
-        )
+    def _direct_response_plan(self, goal: str, response: ModelResponse | None = None) -> Plan:
+        if response is None:
+            response = self._provider.complete(
+                ModelRequest(prompt=goal, system=self.DIRECT_SYSTEM, max_tokens=2048)
+            )
+        if response.structured:
+            return Plan.model_validate(response.structured)
         text = response.text.strip()
         if not text:
             raise ValueError("model returned an empty direct response")
@@ -165,24 +168,22 @@ class ModelReasoningBackend(ReasoningBackend):
         from ai_ecosystem.core.errors.exceptions import AiEcosystemError, ModelError
 
         validator = PlanValidator(set(available_tools), *self._contracts())
+        if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
+            response = self._provider.complete(
+                ModelRequest(prompt=goal, system=self.DIRECT_SYSTEM, max_tokens=2048)
+            )
+            return validator.validate(self._direct_response_plan(goal, response))
+
         try:
-            candidate = validator.validate(self.draft(goal, available_tools, context=context))
-            if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
-                return validator.validate(self._direct_response_plan(goal))
-            return candidate
+            return validator.validate(self.draft(goal, available_tools, context=context))
         except (ModelError, AiEcosystemError, ValueError) as first_error:
             last_error = first_error
         for _ in range(self._max_repairs):
             try:
                 repaired = self._repair(goal, available_tools, last_error)
-                candidate = validator.validate(repaired)
-                if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
-                    return validator.validate(self._direct_response_plan(goal))
-                return candidate
+                return validator.validate(repaired)
             except (ModelError, AiEcosystemError, ValueError) as error:
                 last_error = error
-        if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
-            return validator.validate(self._direct_response_plan(goal))
         raise last_error
 
     def _repair(self, goal: str, available_tools: list[str], error: Exception) -> Plan:
