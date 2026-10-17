@@ -28,6 +28,7 @@ from ai_ecosystem.core.persistence import (
     SqliteVerificationRepository,
 )
 from ai_ecosystem.core.runtime import AgentRuntime
+from ai_ecosystem.core.secrets import EnvSecretsProvider
 from ai_ecosystem.intelligence import (
     HttpChatModelProvider,
     MockModelProvider,
@@ -163,19 +164,31 @@ def load_or_create_token(path: str) -> str:
 
 
 def _explicit_provider() -> HttpChatModelProvider | None:
-    """Build an explicitly configured provider using either env naming scheme."""
-    endpoint = os.environ.get("AI_ECO_MODEL_ENDPOINT") or os.environ.get("MODEL_ENDPOINT")
+    """Build a configured provider from the canonical secrets interface.
+
+    The legacy MODEL_* environment aliases remain supported for existing
+    installations, but the AI_ECO_* names are resolved through SecretsProvider.
+    """
+    provider_id = os.environ.get("AI_ECO_MODEL_PROVIDER", "http-chat")
+    provider = HttpChatModelProvider.from_secrets(
+        EnvSecretsProvider(),
+        provider_id=provider_id,
+    )
+    if provider is not None:
+        return provider
+
+    # Backward compatibility for the unprefixed environment-variable names.
+    endpoint = os.environ.get("MODEL_ENDPOINT")
     if not endpoint:
         return None
-    key = os.environ.get("AI_ECO_MODEL_API_KEY") or os.environ.get("MODEL_API_KEY") or ""
-    model = os.environ.get("AI_ECO_MODEL_NAME") or os.environ.get("MODEL_NAME") or ""
+    key = os.environ.get("MODEL_API_KEY", "")
+    model = os.environ.get("MODEL_NAME", "")
     return HttpChatModelProvider(
-        provider_id=os.environ.get("AI_ECO_MODEL_PROVIDER", "http-chat"),
+        provider_id=os.environ.get("MODEL_PROVIDER", provider_id),
         endpoint=endpoint,
         api_key=key,
         model=model or "default",
     )
-
 
 def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
     router = ModelRouter()
@@ -205,8 +218,8 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
 
     def missing(_: Any) -> ModelResponse:
         raise ModelUnavailableError(
-            "no model available: configure AI_ECO_MODEL_ENDPOINT/AI_ECO_MODEL_NAME or start "
-            "Ollama, LM Studio, or llama.cpp on the local machine"
+            "no model available: configure AI_ECO_MODEL_ENDPOINT, AI_ECO_MODEL_NAME, and "
+            "AI_ECO_MODEL_API_KEY, or start Ollama, LM Studio, or llama.cpp on the local machine"
         )
 
     stub = MockModelProvider("unconfigured", handler=missing)
@@ -284,6 +297,53 @@ def build_stack(
     tokens_lock = threading.Lock()
     dispatcher = BoundedDispatcher(max_workers=config.max_workers, max_queued=config.max_queued_tasks)
 
+    def settle_task_failure(task_id: str, error: str, summary: str = "Task could not be completed.") -> None:
+        """Persist a terminal result even when failure happens outside the agent loop."""
+        task = runtime.manager.get_task(task_id)
+        if task is None:
+            return
+
+        was_active = task.state not in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED)
+        if was_active:
+            try:
+                runtime.manager.transition(task_id, TaskState.FAILED)
+            except Exception:
+                # Re-read state below; cancellation or another worker may have won the race.
+                log.exception("could not transition task %s to FAILED", task_id)
+
+        current = runtime.manager.get_task(task_id)
+        if current is None or current.state == TaskState.COMPLETED:
+            return
+
+        status = current.state.value
+        ctx = runtime.manager.get_context(task_id)
+        if ctx is not None:
+            existing = (ctx.metadata or {}).get("agent_result")
+            if not isinstance(existing, dict) or existing.get("status") not in ("FAILED", "CANCELLED"):
+                ctx.metadata["agent_result"] = {
+                    "task_id": task_id,
+                    "status": status,
+                    "summary": summary,
+                    "reply": "",
+                    "step_states": {},
+                    "verification_status": "INCONCLUSIVE",
+                    "recovery": None,
+                    "memory_ids": [],
+                    "evidence": [],
+                    "timings": {},
+                    "error": error,
+                }
+                runtime.contexts_repo.save(ctx)
+
+        if current.state == TaskState.FAILED and was_active:
+            bus.publish(
+                Event(
+                    event_type=EventType.TASK_FAILED,
+                    task_id=task_id,
+                    payload={"error": error},
+                )
+            )
+
     def agent_factory() -> SingleAgent:
         import platform
 
@@ -337,20 +397,14 @@ def build_stack(
 
     def dispatch(task_id: str) -> None:
         if not model_configured:
-            try:
-                runtime.manager.transition(task_id, TaskState.FAILED)
-                bus.publish(
-                    Event(
-                        event_type=EventType.TASK_FAILED,
-                        task_id=task_id,
-                        payload={
-                            "error": "no model is configured or available; start a local model or configure AI_ECO_MODEL_ENDPOINT"
-                        },
-                    )
-                )
-            except Exception:
-                log.exception("could not fail task %s cleanly", task_id)
+            error = (
+                "Task failed because no model is configured. Configure "
+                "AI_ECO_MODEL_ENDPOINT, AI_ECO_MODEL_NAME, and AI_ECO_MODEL_API_KEY, "
+                "or start a local model such as Ollama, LM Studio, or llama.cpp."
+            )
+            settle_task_failure(task_id, error, "Model configuration is required.")
             return
+
         token = CancellationToken()
         with tokens_lock:
             tokens[task_id] = token
@@ -363,12 +417,19 @@ def build_stack(
                     cancel_token=token,
                 )
             except Exception as exc:
-                log.error("dispatch failed for %s: %s", task_id, exc)
+                safe_error = f"Agent worker failed: {type(exc).__name__}"
+                log.error("dispatch failed for %s: %s", task_id, safe_error)
+                settle_task_failure(task_id, safe_error)
             finally:
                 with tokens_lock:
                     tokens.pop(task_id, None)
 
-        dispatcher.submit(task_id, work)
+        try:
+            dispatcher.submit(task_id, work)
+        except ApiError:
+            with tokens_lock:
+                tokens.pop(task_id, None)
+            raise
 
     def on_cancel(task_id: str) -> None:
         with tokens_lock:
@@ -388,7 +449,9 @@ def build_stack(
     )
     token = None if no_auth else auth_token
     server = LocalHttpServer(api, host=config.api_host, port=config.api_port, auth_token=token)
-    agent = agent_factory() if model_configured else None
+    # Keep the runtime/registry-backed agent available even without a configured model.
+    # Dispatch still fails fast with a persisted, actionable result until a model exists.
+    agent = agent_factory()
     for task in runtime.manager._tasks.list():  # noqa: SLF001
         if task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
             continue
@@ -406,23 +469,19 @@ def build_stack(
             except ApiError:
                 log.error("could not enqueue recovery for %s", task.id)
         else:
-            try:
-                runtime.manager.transition(task.id, TaskState.FAILED)
-                bus.publish(
-                    Event(
-                        event_type=EventType.TASK_FAILED,
-                        task_id=task.id,
-                        payload={
-                            "error": (
-                                "no model is configured or available; configure a model and retry"
-                                if not model_configured
-                                else "interrupted before a resumable plan was persisted"
-                            )
-                        },
-                    )
+            if not model_configured:
+                error = (
+                    "Task was interrupted before restart because no model is configured. "
+                    "Configure AI_ECO_MODEL_ENDPOINT, AI_ECO_MODEL_NAME, and "
+                    "AI_ECO_MODEL_API_KEY, or start a local model, then retry."
                 )
-            except Exception:
-                log.exception("could not settle interrupted task %s", task.id)
+            else:
+                error = "Task was interrupted before a resumable plan was persisted."
+            settle_task_failure(
+                task.id,
+                error,
+                "Task was interrupted during application restart.",
+            )
     return Stack(
         config=config,
         runtime=runtime,
