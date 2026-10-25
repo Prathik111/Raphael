@@ -268,7 +268,8 @@ class RuntimeAPI:
         if self._ollama_checker is None:
             from ai_ecosystem.intelligence.models.ollama import check_ollama
 
-            checker: Callable[[str], dict[str, Any]] = lambda value: check_ollama(value)
+            def checker(value: str) -> dict[str, Any]:
+                return check_ollama(value)
         else:
             checker = self._ollama_checker
         try:
