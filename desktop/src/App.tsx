@@ -257,7 +257,7 @@ export function App() {
                 <div className="setting-field">
                   <label htmlFor="top-k">Top K</label>
                   <input id="top-k" type="number" min="0" max="1000" step="1" value={modelSettings.top_k} onChange={(e) => setModelSettings((current) => ({ ...current, top_k: Number(e.target.value) }))} />
-                  <small>Candidate tokens (0 disables).</small>
+                  <small>Candidate items (0 disables).</small>
                 </div>
                 <div className="setting-field">
                   <label htmlFor="repeat-penalty">Repeat penalty</label>
@@ -267,12 +267,12 @@ export function App() {
                 <div className="setting-field">
                   <label htmlFor="context-length">Context length</label>
                   <input id="context-length" type="number" min="256" max="262144" step="256" value={modelSettings.num_ctx} onChange={(e) => setModelSettings((current) => ({ ...current, num_ctx: Number(e.target.value) }))} />
-                  <small>Context window in tokens.</small>
+                  <small>Context window size.</small>
                 </div>
                 <div className="setting-field">
-                  <label htmlFor="max-output">Max output tokens</label>
+                  <label htmlFor="max-output">Max output length</label>
                   <input id="max-output" type="number" min="1" max="32768" step="128" value={modelSettings.num_predict} onChange={(e) => setModelSettings((current) => ({ ...current, num_predict: Number(e.target.value) }))} />
-                  <small>Maximum generated tokens.</small>
+                  <small>Maximum generated text length.</small>
                 </div>
               </div>
             </section>
