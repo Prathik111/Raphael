@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { makeApi, TaskView, loadBase, loadModelSettings, readStoredModelSettings, storeModelSettings, ModelSettings, saveBase } from "./api";
+import { makeApi, TaskView, loadBase, loadModelSettings, readStoredModelSettings, storeModelSettings, ModelSettings, saveBase, fetchBackendCredential } from "./api";
 
 type Chat = TaskView & { reply?: string };
 
@@ -26,14 +26,43 @@ export function App() {
   const [checkingOllama, setCheckingOllama] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState("");
+
+  // The Tauri shell exposes the backend credential over local IPC. Load it before
+  // issuing any HTTP request; otherwise the authenticated API correctly returns 401.
+  useEffect(() => {
+    let mounted = true;
+    void fetchBackendCredential().then((credential) => {
+      if (!mounted) return;
+      if (credential) {
+        setAuthError("");
+      } else {
+        setAuthError("Raphael could not load its backend credential. Restart the desktop app and make sure its managed backend is running.");
+      }
+      setAuthReady(true);
+    }).catch((err: unknown) => {
+      if (!mounted) return;
+      setAuthError(err instanceof Error ? err.message : "Could not load the backend credential.");
+      setAuthReady(true);
+    });
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
+    if (!authReady || authError) return;
     let mounted = true;
     api.listTasks().then((items) => mounted && setChats(items.slice(0, 24))).catch(() => void 0);
     return () => { mounted = false; };
-  }, [api]);
+  }, [api, authReady, authError]);
 
   useEffect(() => {
+    if (!authReady) return;
+    if (authError) {
+      setSettingsError(authError);
+      setProviderReady(true);
+      return;
+    }
     let mounted = true;
     const stored = readStoredModelSettings();
     const initial = stored ?? loadModelSettings();
@@ -64,11 +93,11 @@ export function App() {
       }
     })();
     return () => { mounted = false; };
-  }, [api]);
+  }, [api, authReady, authError]);
 
   // Discover installed models automatically on startup and whenever the Ollama endpoint changes.
   useEffect(() => {
-    if (!providerReady) return;
+    if (!providerReady || !authReady || authError) return;
     let cancelled = false;
     const endpoint = modelSettings.endpoint;
     const timer = window.setTimeout(() => {
@@ -104,7 +133,7 @@ export function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [api, providerReady, modelSettings.endpoint]);
+  }, [api, providerReady, authReady, authError, modelSettings.endpoint]);
 
   const refreshChats = useCallback(async () => {
     try { setChats((await api.listTasks()).slice(0, 24)); } catch { /* keep the shell usable */ }
@@ -152,7 +181,7 @@ export function App() {
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const goal = prompt.trim();
-    if (!goal || busy || !providerReady || !modelSettings.model.trim()) return;
+    if (!goal || busy || !authReady || authError || !providerReady || !modelSettings.model.trim()) return;
     setError(""); setReply(""); setBusy(true); setActive(null);
     try {
       const task = await api.submitGoal(goal);
@@ -165,6 +194,10 @@ export function App() {
   };
 
   const checkOllama = async () => {
+    if (!authReady || authError) {
+      setSettingsError(authError || "Backend authentication is not ready. Restart Raphael and try again.");
+      return;
+    }
     setCheckingOllama(true);
     setOllamaStatus("Refreshing installed Ollama models…");
     setSettingsError("");
@@ -192,6 +225,10 @@ export function App() {
 
   const saveSettings = async (event: FormEvent) => {
     event.preventDefault();
+    if (!authReady || authError) {
+      setSettingsError(authError || "Backend authentication is not ready. Restart Raphael and try again.");
+      return;
+    }
     setSavingSettings(true);
     setSettingsError("");
     try {
@@ -229,7 +266,7 @@ export function App() {
         <div className="sidebar-bottom"><button className="side-action" onClick={() => setSettingsOpen(true)}>⚙&nbsp; Settings</button></div>
       </aside>
       <main className="raphael-main"><div className="top-fade" /><section className={`response-shell ${active || busy || reply || error ? "visible" : ""}`}><div className="response-card"><div className="response-avatar"><span>R</span></div><div className="response-content"><div className="response-head"><span>Raphael</span>{busy && <i className="thinking-dot" aria-label="Thinking" />}</div>{busy && !reply && !error && <div className="response-loading"><span /><span /><span /></div>}{error && <div className="response-error">{error}</div>}{!busy && !error && reply && <div className="response-text">{reply}</div>}</div></div></section>
-        <form className="floating-composer" onSubmit={submit}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Raphael anything…" rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); } }} /><button className="send-button" type="submit" disabled={!prompt.trim() || busy || !providerReady || !modelSettings.model.trim()} aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4.8 16-3.3-6.7L4 12Zm7.9 1.3 3.2 6.5L20 4l-8.1 9.3Z" /></svg></button></form>
+        <form className="floating-composer" onSubmit={submit}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Raphael anything…" rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); } }} /><button className="send-button" type="submit" disabled={!prompt.trim() || busy || !authReady || !!authError || !providerReady || !modelSettings.model.trim()} aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4.8 16-3.3-6.7L4 12Zm7.9 1.3 3.2 6.5L20 4l-8.1 9.3Z" /></svg></button></form>
       </main>
       {settingsOpen && (
         <div className="settings-backdrop" onMouseDown={(e) => e.currentTarget === e.target && setSettingsOpen(false)}>
