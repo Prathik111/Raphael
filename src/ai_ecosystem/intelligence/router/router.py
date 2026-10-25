@@ -41,6 +41,11 @@ class ModelRouter:
         self._providers: dict[str, ModelProvider] = {}
         self._profiles: dict[str, ProviderProfile] = {}
 
+    def clear(self) -> None:
+        """Remove configured providers before an explicit provider switch."""
+        self._providers.clear()
+        self._profiles.clear()
+
     def register(self, provider: ModelProvider, profile: ProviderProfile) -> None:
         # The provider object is the authoritative identity. Normalize the
         # profile to it rather than rejecting stale metadata during a provider
