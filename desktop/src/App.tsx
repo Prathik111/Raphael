@@ -66,6 +66,45 @@ export function App() {
     return () => { mounted = false; };
   }, [api]);
 
+  // Discover installed models automatically on startup and whenever the Ollama endpoint changes.
+  useEffect(() => {
+    if (!providerReady) return;
+    let cancelled = false;
+    const endpoint = modelSettings.endpoint;
+    const timer = window.setTimeout(() => {
+      setCheckingOllama(true);
+      setOllamaStatus("Discovering installed Ollama models…");
+      setSettingsError("");
+      void api.ollamaModels(endpoint)
+        .then((result) => {
+          if (cancelled) return;
+          setOllamaModels(result.models);
+          if (result.models.length > 0) {
+            setOllamaStatus(`Connected. Found ${result.models.length} installed model${result.models.length === 1 ? "" : "s"}.`);
+            setModelSettings((current) => ({
+              ...current,
+              model: current.model && result.models.includes(current.model) ? current.model : "",
+            }));
+          } else {
+            setOllamaStatus("Connected, but no models are installed. Pull a model with Ollama first.");
+            setModelSettings((current) => ({ ...current, model: "" }));
+          }
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setOllamaModels([]);
+          setOllamaStatus("");
+          setSettingsError(err instanceof Error ? err.message : "Could not discover Ollama models.");
+        })
+        .finally(() => {
+          if (!cancelled) setCheckingOllama(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [api, providerReady, modelSettings.endpoint]);
 
   const refreshChats = useCallback(async () => {
     try { setChats((await api.listTasks()).slice(0, 24)); } catch { /* keep the shell usable */ }
@@ -127,7 +166,7 @@ export function App() {
 
   const checkOllama = async () => {
     setCheckingOllama(true);
-    setOllamaStatus("Checking Ollama endpoint…");
+    setOllamaStatus("Refreshing installed Ollama models…");
     setSettingsError("");
     try {
       const result = await makeApi(backendUrl).ollamaModels(modelSettings.endpoint);
@@ -136,10 +175,11 @@ export function App() {
         setOllamaStatus(`Connected. Found ${result.models.length} installed model${result.models.length === 1 ? "" : "s"}.`);
         setModelSettings((current) => ({
           ...current,
-          model: current.model || result.models[0],
+          model: current.model && result.models.includes(current.model) ? current.model : "",
         }));
       } else {
         setOllamaStatus("Connected, but no models are installed. Pull a model with Ollama first.");
+        setModelSettings((current) => ({ ...current, model: "" }));
       }
     } catch (err) {
       setOllamaModels([]);
@@ -226,15 +266,18 @@ export function App() {
                 <label htmlFor="ollama-endpoint">Ollama endpoint</label>
                 <div className="settings-inline">
                   <input id="ollama-endpoint" value={modelSettings.endpoint} onChange={(e) => setModelSettings((current) => ({ ...current, endpoint: e.target.value }))} spellCheck={false} autoComplete="url" />
-                  <button type="button" className="check-button" onClick={() => void checkOllama()} disabled={checkingOllama}>{checkingOllama ? "Checking…" : "Check"}</button>
+                  <button type="button" className="check-button" onClick={() => void checkOllama()} disabled={checkingOllama}>{checkingOllama ? "Refreshing…" : "Refresh"}</button>
                 </div>
-                <small>Use the Ollama server base URL, usually http://127.0.0.1:11434.</small>
+                <small>Raphael discovers installed models automatically. Use Refresh after pulling a new model.</small>
               </div>
               <div className="setting-field">
-                <label htmlFor="ollama-model">Model</label>
-                <input id="ollama-model" list="ollama-installed-models" value={modelSettings.model} onChange={(e) => setModelSettings((current) => ({ ...current, model: e.target.value }))} placeholder="Select a model or type its tag" spellCheck={false} />
-                <datalist id="ollama-installed-models">{ollamaModels.map((model) => <option value={model} key={model} />)}</datalist>
-                <small>Use Check to discover locally installed Ollama models.</small>
+                <label htmlFor="ollama-model">Installed model</label>
+                <select id="ollama-model" value={modelSettings.model} onChange={(e) => setModelSettings((current) => ({ ...current, model: e.target.value }))} disabled={checkingOllama || ollamaModels.length === 0}>
+                  <option value="">{checkingOllama ? "Discovering models…" : "Select an installed model"}</option>
+                  {modelSettings.model && !ollamaModels.includes(modelSettings.model) && <option value={modelSettings.model}>{modelSettings.model} (not found in discovery)</option>}
+                  {ollamaModels.map((model) => <option value={model} key={model}>{model}</option>)}
+                </select>
+                <small>{ollamaModels.length ? `${ollamaModels.length} installed model${ollamaModels.length === 1 ? "" : "s"} detected.` : "Start Ollama and install a model to populate this list."}</small>
               </div>
               {ollamaStatus && <div className="settings-status">{ollamaStatus}</div>}
             </section>
