@@ -125,13 +125,19 @@ fn backend_supports_model_settings() -> bool {
         Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
         _ => return false,
     };
-    backend_get_status("/settings/model", &token).as_deref() == Some("200")
-        && backend_get_status(
+    if backend_get_status("/settings/model", &token).as_deref() != Some("200") {
+        return false;
+    }
+    // The endpoint can return 500 when Ollama is offline, but that still proves
+    // the route exists. Only a 404 indicates the backend lacks this route.
+    !matches!(
+        backend_get_status(
             "/settings/ollama/models?endpoint=http%3A%2F%2F127.0.0.1%3A11434",
             &token,
         )
-        .as_deref()
-            == Some("200")
+        .as_deref(),
+        None | Some("404")
+    )
 }
 
 fn wait_for_port(deadline: Instant) -> bool {
