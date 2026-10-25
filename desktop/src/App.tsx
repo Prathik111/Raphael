@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { makeApi, TaskView, loadBase, loadModelSettings, readStoredModelSettings, storeModelSettings, ModelSettings, saveBase, fetchBackendCredential } from "./api";
+import { makeApi, TaskView, loadBase, loadModelSettings, readStoredModelSettings, storeModelSettings, ModelSettings, saveBase, fetchBackendCredential, backendStatus } from "./api";
 
 type Chat = TaskView & { reply?: string };
 
@@ -33,21 +33,34 @@ export function App() {
   // issuing any HTTP request; otherwise the authenticated API correctly returns 401.
   useEffect(() => {
     let mounted = true;
-    void fetchBackendCredential().then((credential) => {
+    void (async () => {
+      const status = await backendStatus();
       if (!mounted) return;
-      if (credential) {
-        setAuthError("");
-      } else {
-        const message = "Raphael could not load its backend credential. Restart the desktop app and make sure its managed backend is running.";
+      if (status?.state === "failed") {
+        setAuthError(status.detail);
+        setError(status.detail);
+        setAuthReady(true);
+        return;
+      }
+      try {
+        const credential = await fetchBackendCredential();
+        if (!mounted) return;
+        if (credential) {
+          setAuthError("");
+        } else {
+          const message = "Raphael could not load its backend credential. Restart the desktop app and make sure its managed backend is running.";
+          setAuthError(message);
+          setError(message);
+        }
+      } catch (err) {
+        if (!mounted) return;
+        const message = err instanceof Error ? err.message : "Could not load the backend credential.";
         setAuthError(message);
         setError(message);
+      } finally {
+        if (mounted) setAuthReady(true);
       }
-      setAuthReady(true);
-    }).catch((err: unknown) => {
-      if (!mounted) return;
-      setAuthError(err instanceof Error ? err.message : "Could not load the backend credential.");
-      setAuthReady(true);
-    });
+    })();
     return () => { mounted = false; };
   }, []);
 
