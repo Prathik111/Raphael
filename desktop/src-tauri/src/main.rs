@@ -113,7 +113,7 @@ fn backend_supports_model_settings() -> bool {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let request = format!(
-        "GET /settings/model HTTP/1.0\\r\\nHost: {}\\r\\nAuthorization: Bearer {}\\r\\nConnection: close\\r\\n\\r\\n",
+        "GET /settings/model HTTP/1.0\r\nHost: {}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
         BACKEND_HOST, token
     );
     if stream.write_all(request.as_bytes()).is_err() {
