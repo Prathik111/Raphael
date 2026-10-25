@@ -63,7 +63,7 @@ def test_unconfigured_model_fails_tasks_loudly(tmp_path):
         events = stack.api.get_task_events(created["task_id"])
         kinds = [e["type"] for e in events]
         assert "TaskCreated" in kinds and "TaskFailed" in kinds
-        assert "AI_ECO_MODEL_API_KEY" in str(events[-1]["payload"])
+        assert "Ollama" in str(events[-1]["payload"])
     finally:
         stack.runtime.shutdown()
 
@@ -107,7 +107,7 @@ def test_result_endpoint_serves_persisted_summary(tmp_path):
         result = stack.api.get_task_result(created["task_id"])
         assert result["task_id"] == created["task_id"]
         assert result["status"] == "FAILED"
-        assert "AI_ECO_MODEL_API_KEY" in result["error"]
+        assert "Ollama" in result["error"]
         assert result["reply"] == ""
     finally:
         stack.runtime.shutdown()
@@ -146,13 +146,10 @@ def test_cancel_stops_dispatch_and_marks_task(tmp_path, monkeypatch):
         time.sleep(5)
         raise ModelUnavailableError("slow model down")
 
-    monkeypatch.setattr(
-        serve_module.HttpChatModelProvider,
-        "from_secrets",
-        classmethod(
-            lambda cls, secrets, **kw: MockModelProvider("slow-mock", handler=slow_provider)
-        ),
-    )
+    provider = MockModelProvider("slow-mock", handler=slow_provider)
+    router = serve_module.ModelRouter()
+    router.register(provider, serve_module.ProviderProfile(provider_id="slow-mock", local=True))
+    monkeypatch.setattr(serve_module, "build_router", lambda: (router, [provider], True))
     config = AppConfig(db_path=str(tmp_path / "serve.db"), api_port=0)
     stack = build_stack(config, workspace=str(tmp_path / "ws"))
     assert stack.model_configured is True
@@ -194,13 +191,10 @@ def test_queue_overflow_rejected_with_429(tmp_path, monkeypatch):
         time.sleep(10)
         raise ModelUnavailableError("slow model down")
 
-    monkeypatch.setattr(
-        serve_module.HttpChatModelProvider,
-        "from_secrets",
-        classmethod(
-            lambda cls, secrets, **kw: MockModelProvider("slow-mock", handler=slow_provider)
-        ),
-    )
+    provider = MockModelProvider("slow-mock", handler=slow_provider)
+    router = serve_module.ModelRouter()
+    router.register(provider, serve_module.ProviderProfile(provider_id="slow-mock", local=True))
+    monkeypatch.setattr(serve_module, "build_router", lambda: (router, [provider], True))
     config = AppConfig(
         db_path=str(tmp_path / "queue.db"), api_port=0, max_workers=1, max_queued_tasks=1
     )
