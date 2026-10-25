@@ -29,15 +29,18 @@ from ai_ecosystem.core.persistence import (
 )
 from ai_ecosystem.core.runtime import AgentRuntime
 from ai_ecosystem.intelligence import (
-    HttpChatModelProvider,
-    MockModelProvider,
     ModelProvider,
     ModelRouter,
     ProviderProfile,
     RoutingRequirements,
 )
-from ai_ecosystem.intelligence.models.discovery import discover_local_provider
-from ai_ecosystem.intelligence.models.providers import ModelResponse
+from ai_ecosystem.intelligence.models.ollama import (
+    DEFAULT_ENDPOINT as OLLAMA_DEFAULT_ENDPOINT,
+    OllamaModelProvider,
+    OllamaSettings,
+    check_ollama,
+    list_ollama_models,
+)
 from ai_ecosystem.intelligence.research.manager import ResearchManager
 from ai_ecosystem.interface.api import ApiError, RuntimeAPI
 from ai_ecosystem.interface.server import LocalHttpServer
@@ -162,57 +165,38 @@ def load_or_create_token(path: str) -> str:
     return token
 
 
-def _explicit_provider() -> HttpChatModelProvider | None:
-    """Build an explicitly configured provider using either env naming scheme."""
-    endpoint = os.environ.get("AI_ECO_MODEL_ENDPOINT") or os.environ.get("MODEL_ENDPOINT")
-    if not endpoint:
-        return None
-    key = os.environ.get("AI_ECO_MODEL_API_KEY") or os.environ.get("MODEL_API_KEY") or ""
-    model = os.environ.get("AI_ECO_MODEL_NAME") or os.environ.get("MODEL_NAME") or ""
-    return HttpChatModelProvider(
-        provider_id=os.environ.get("AI_ECO_MODEL_PROVIDER", "http-chat"),
-        endpoint=endpoint,
-        api_key=key,
-        model=model or "default",
-    )
-
-
 def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
+    """Build an Ollama-only router; provider switching happens through RuntimeAPI."""
+    endpoint = (
+        os.environ.get("AI_ECO_MODEL_ENDPOINT")
+        or os.environ.get("MODEL_ENDPOINT")
+        or OLLAMA_DEFAULT_ENDPOINT
+    )
+    model = os.environ.get("AI_ECO_MODEL_NAME") or os.environ.get("MODEL_NAME") or ""
+    settings = OllamaSettings(endpoint=endpoint, model=model)
+    if not settings.model:
+        try:
+            available = list_ollama_models(settings.endpoint)
+        except Exception:
+            available = []
+        if available:
+            settings.model = available[0]
+
+    provider = OllamaModelProvider(settings)
     router = ModelRouter()
-    providers: list[ModelProvider] = []
-
-    provider = _explicit_provider()
-    if provider is None:
-        provider = discover_local_provider()
-    if provider is not None:
-        is_local = provider.provider_id.startswith("local-")
-        router.register(
-            provider,
-            ProviderProfile(
-                provider_id=provider.provider_id,
-                local=is_local,
-                trusted=not is_local,
-                data_classes={DataClass.PUBLIC, DataClass.INTERNAL},
-                latency_class="standard",
-                retains_data=not is_local,
-                trains_on_data=not is_local,
-            ),
-        )
-        providers.append(provider)
-        return router, providers, True
-
-    from ai_ecosystem.core.errors.exceptions import ModelUnavailableError
-
-    def missing(_: Any) -> ModelResponse:
-        raise ModelUnavailableError(
-            "no model available: configure AI_ECO_MODEL_ENDPOINT/AI_ECO_MODEL_NAME or start "
-            "Ollama, LM Studio, or llama.cpp on the local machine"
-        )
-
-    stub = MockModelProvider("unconfigured", handler=missing)
-    router.register(stub, ProviderProfile(provider_id="unconfigured", local=True, data_classes=set(DataClass)))
-    return router, providers, False
-
+    router.register(
+        provider,
+        ProviderProfile(
+            provider_id=provider.provider_id,
+            local=True,
+            trusted=False,
+            data_classes=set(DataClass),
+            latency_class="standard",
+            retains_data=False,
+            trains_on_data=False,
+        ),
+    )
+    return router, [provider], bool(settings.model)
 
 def build_stack(
     config: AppConfig | None = None,
@@ -264,6 +248,44 @@ def build_stack(
     execution_ledger.recover_unknowns()
     runner = ToolRunner(registry, authorizer, bus, execution_ledger=execution_ledger)
     router, providers, model_configured = build_router()
+    model_state = {"configured": model_configured}
+    active_model_settings = (
+        providers[0].settings.model_dump()
+        if providers and isinstance(providers[0], OllamaModelProvider)
+        else OllamaSettings().model_dump()
+    )
+
+    def get_model_settings() -> dict[str, Any]:
+        return dict(active_model_settings)
+
+    def set_model_settings(raw_settings: dict[str, Any]) -> dict[str, Any]:
+        settings = OllamaSettings.model_validate(raw_settings)
+        if not settings.model:
+            try:
+                available = list_ollama_models(settings.endpoint)
+            except Exception:
+                available = []
+            if available:
+                settings.model = available[0]
+        provider = OllamaModelProvider(settings)
+        router.clear()
+        router.register(
+            provider,
+            ProviderProfile(
+                provider_id=provider.provider_id,
+                local=True,
+                trusted=False,
+                data_classes=set(DataClass),
+                latency_class="standard",
+                retains_data=False,
+                trains_on_data=False,
+            ),
+        )
+        providers[:] = [provider]
+        active_model_settings.clear()
+        active_model_settings.update(settings.model_dump())
+        model_state["configured"] = bool(settings.model)
+        return dict(active_model_settings)
     verifier = Verifier(repository=SqliteVerificationRepository(runtime.db), bus=bus).with_test_command(
         runner, registry
     )
@@ -385,15 +407,18 @@ def build_stack(
         event_store=events,
         on_cancel=on_cancel,
         approvals=approval_store,
+        model_settings_getter=get_model_settings,
+        model_settings_setter=set_model_settings,
+        ollama_checker=check_ollama,
     )
     token = None if no_auth else auth_token
     server = LocalHttpServer(api, host=config.api_host, port=config.api_port, auth_token=token)
-    agent = agent_factory() if model_configured else None
+    agent = agent_factory() if model_state["configured"] else None
     for task in runtime.manager._tasks.list():  # noqa: SLF001
         if task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
             continue
         ctx = runtime.manager.get_context(task.id)
-        if ctx is not None and ctx.plan is not None and model_configured:
+        if ctx is not None and ctx.plan is not None and model_state["configured"]:
 
             def resume(task_id: str = task.id) -> None:
                 try:
@@ -430,7 +455,7 @@ def build_stack(
         server=server,
         agent=agent,
         providers=providers,
-        model_configured=model_configured,
+        model_configured=model_state["configured"],
         workspace=workspace,
         auth_token=token,
         dispatcher=dispatcher,
