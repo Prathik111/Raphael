@@ -200,9 +200,14 @@ fn process_alive(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
-/// One WMIC process field (ParentProcessId / CommandLine) for a PID.
+/// Read a process field using WMIC when available, then fall back to
+/// PowerShell/CIM. WMIC is optional on newer Windows installations.
 fn wmic_field(pid: u32, field: &str) -> Option<String> {
-    let output = Command::new("wmic")
+    if !matches!(field, "ParentProcessId" | "CommandLine") {
+        return None;
+    }
+
+    if let Ok(output) = Command::new("wmic")
         .args([
             "process",
             "where",
@@ -212,16 +217,47 @@ fn wmic_field(pid: u32, field: &str) -> Option<String> {
             "/value",
         ])
         .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        if key.trim().eq_ignore_ascii_case(field) {
-            Some(value.trim().to_string())
-        } else {
-            None
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        if let Some(value) = text.lines().find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            if key.trim().eq_ignore_ascii_case(field) {
+                Some(value.trim().to_string())
+            } else {
+                None
+            }
+        }) {
+            if !value.is_empty() {
+                return Some(value);
+            }
         }
-    })
+    }
+
+    #[cfg(windows)]
+    {
+        // The field is allowlisted above and PID is numeric, so the command
+        // cannot be influenced by arbitrary process data or user input.
+        let query = format!(
+            "$p = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = {}'; if ($null -ne $p) {{ $p.{} }}",
+            pid, field
+        );
+        for program in ["powershell.exe", "pwsh.exe"] {
+            let mut command = Command::new(program);
+            command
+                .args(["-NoProfile", "-NonInteractive", "-Command", &query])
+                .creation_flags(0x08000000); // CREATE_NO_WINDOW
+            if let Ok(output) = command.output() {
+                if output.status.success() {
+                    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn parent_pid(pid: u32) -> Option<u32> {
