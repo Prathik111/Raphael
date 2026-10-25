@@ -113,7 +113,7 @@ export function App() {
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const goal = prompt.trim();
-    if (!goal || busy || !providerReady) return;
+    if (!goal || busy || !providerReady || !modelSettings.model.trim()) return;
     setError(""); setReply(""); setBusy(true); setActive(null);
     try {
       const task = await api.submitGoal(goal);
@@ -189,7 +189,7 @@ export function App() {
         <div className="sidebar-bottom"><button className="side-action" onClick={() => setSettingsOpen(true)}>⚙&nbsp; Settings</button></div>
       </aside>
       <main className="raphael-main"><div className="top-fade" /><section className={`response-shell ${active || busy || reply || error ? "visible" : ""}`}><div className="response-card"><div className="response-avatar"><span>R</span></div><div className="response-content"><div className="response-head"><span>Raphael</span>{busy && <i className="thinking-dot" aria-label="Thinking" />}</div>{busy && !reply && !error && <div className="response-loading"><span /><span /><span /></div>}{error && <div className="response-error">{error}</div>}{!busy && !error && reply && <div className="response-text">{reply}</div>}</div></div></section>
-        <form className="floating-composer" onSubmit={submit}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Raphael anything…" rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); } }} /><button className="send-button" type="submit" disabled={!prompt.trim() || busy || !providerReady} aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4.8 16-3.3-6.7L4 12Zm7.9 1.3 3.2 6.5L20 4l-8.1 9.3Z" /></svg></button></form>
+        <form className="floating-composer" onSubmit={submit}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Raphael anything…" rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); } }} /><button className="send-button" type="submit" disabled={!prompt.trim() || busy || !providerReady || !modelSettings.model.trim()} aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4.8 16-3.3-6.7L4 12Zm7.9 1.3 3.2 6.5L20 4l-8.1 9.3Z" /></svg></button></form>
       </main>
       {settingsOpen && (
         <div className="settings-backdrop" onMouseDown={(e) => e.currentTarget === e.target && setSettingsOpen(false)}>
