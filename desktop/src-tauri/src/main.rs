@@ -98,35 +98,40 @@ fn port_open() -> bool {
     TcpStream::connect_timeout(&backend_addr(), Duration::from_millis(400)).is_ok()
 }
 
-/// True only when the listener responds to the model-settings route used by
-/// the current desktop UI. This prevents an older, still-running backend from
-/// being mistaken for a compatible Raphael runtime after an upgrade.
+/// Make one authenticated loopback GET and return its HTTP status.
+fn backend_get_status(path: &str, token: &str) -> Option<String> {
+    let mut stream = TcpStream::connect_timeout(&backend_addr(), Duration::from_secs(1)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let request = format!(
+        "GET {} HTTP/1.0\r\nHost: {}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+        path, BACKEND_HOST, token
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .map(str::to_string)
+}
+
+/// Verify both routes required by the current desktop UI. Checking only
+/// /settings/model incorrectly accepted intermediate backends that did not yet
+/// implement automatic Ollama model discovery.
 fn backend_supports_model_settings() -> bool {
     let token = match std::fs::read_to_string(data_dir().join("api_credential")) {
         Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
         _ => return false,
     };
-    let mut stream = match TcpStream::connect_timeout(&backend_addr(), Duration::from_secs(1)) {
-        Ok(value) => value,
-        Err(_) => return false,
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let request = format!(
-        "GET /settings/model HTTP/1.0\r\nHost: {}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
-        BACKEND_HOST, token
-    );
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
-    let mut response = String::new();
-    if stream.read_to_string(&mut response).is_err() {
-        return false;
-    }
-    response
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1)) == Some("200")
+    backend_get_status("/settings/model", &token).as_deref() == Some("200")
+        && backend_get_status(
+            "/settings/ollama/models?endpoint=http%3A%2F%2F127.0.0.1%3A11434",
+            &token,
+        )
+        .as_deref()
+            == Some("200")
 }
 
 fn wait_for_port(deadline: Instant) -> bool {
@@ -350,10 +355,20 @@ fn reap_own_orphan(dir: &std::path::Path) -> bool {
     !port_open()
 }
 
+/// Resolve the checked-out repository when running from source. Setting
+/// cwd and PYTHONPATH prevents Python from importing an older globally
+/// installed ai_ecosystem package instead of the source tree being developed.
+fn repository_root() -> Option<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = root.canonicalize().ok()?;
+    root.join("src/ai_ecosystem/interface/serve.py").is_file().then_some(root)
+}
+
 fn launch_candidate(
     program: &str,
     extra_args: &[String],
     log_path: &std::path::Path,
+    repo_root: Option<&std::path::Path>,
 ) -> Option<Child> {
     let out_log = OpenOptions::new()
         .create(true)
@@ -362,6 +377,17 @@ fn launch_candidate(
         .ok()?;
     let err_log = out_log.try_clone().ok()?;
     let mut cmd = Command::new(program);
+    if let Some(root) = repo_root {
+        cmd.current_dir(root);
+        let source = root.join("src");
+        let mut python_paths = vec![source];
+        if let Some(existing) = std::env::var_os("PYTHONPATH") {
+            python_paths.extend(std::env::split_paths(&existing));
+        }
+        if let Ok(joined) = std::env::join_paths(python_paths) {
+            cmd.env("PYTHONPATH", joined);
+        }
+    }
     #[cfg(windows)]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW: no console popup
     cmd.args(extra_args)
@@ -468,6 +494,11 @@ fn ensure_backend() -> Backend {
         ("ai-ecosystem-serve".to_string(), fixed_args.clone()),
     ];
 
+    let repo_root = repository_root();
+    if repo_root.is_some() {
+        log::info!("starting backend from checked-out repository source");
+    }
+
     let started = Instant::now();
     let mut tried: Vec<String> = Vec::new();
     for (program, args) in &candidates {
@@ -479,7 +510,7 @@ fn ensure_backend() -> Backend {
             started + STARTUP_BUDGET,
             Instant::now() + CANDIDATE_TIMEOUT,
         );
-        match launch_candidate(program, args, &log_path) {
+        match launch_candidate(program, args, &log_path, repo_root.as_deref()) {
             Some(child) => {
                 if wait_for_port(deadline) {
                     let pid = child.id();
