@@ -38,7 +38,9 @@ export function App() {
       if (credential) {
         setAuthError("");
       } else {
-        setAuthError("Raphael could not load its backend credential. Restart the desktop app and make sure its managed backend is running.");
+        const message = "Raphael could not load its backend credential. Restart the desktop app and make sure its managed backend is running.";
+        setAuthError(message);
+        setError(message);
       }
       setAuthReady(true);
     }).catch((err: unknown) => {
