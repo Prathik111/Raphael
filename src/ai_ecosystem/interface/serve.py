@@ -385,13 +385,29 @@ def build_stack(
         if not model_state["configured"]:
             try:
                 runtime.manager.transition(task_id, TaskState.FAILED)
+                message = (
+                    "Ollama is not configured: start Ollama, install a model, and select it in Raphael Settings"
+                )
+                ctx = runtime.manager.get_context(task_id)
+                if ctx is not None:
+                    ctx.metadata["agent_result"] = {
+                        "task_id": task_id,
+                        "status": "FAILED",
+                        "summary": message,
+                        "reply": "",
+                        "step_states": {},
+                        "verification_status": "NOT_RUN",
+                        "memory_ids": [],
+                        "evidence": [],
+                        "timings": {},
+                        "error": message,
+                    }
+                    runtime.contexts_repo.save(ctx)
                 bus.publish(
                     Event(
                         event_type=EventType.TASK_FAILED,
                         task_id=task_id,
-                        payload={
-                            "error": "Ollama is not configured: start Ollama, install a model, and select it in Raphael Settings"
-                        },
+                        payload={"error": message},
                     )
                 )
             except Exception:
