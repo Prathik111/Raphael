@@ -11,6 +11,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::fs::OpenOptions;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -97,6 +98,48 @@ fn port_open() -> bool {
     TcpStream::connect_timeout(&backend_addr(), Duration::from_millis(400)).is_ok()
 }
 
+/// Make one authenticated loopback GET and return its HTTP status.
+fn backend_get_status(path: &str, token: &str) -> Option<String> {
+    let mut stream = TcpStream::connect_timeout(&backend_addr(), Duration::from_secs(1)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let request = format!(
+        "GET {} HTTP/1.0\r\nHost: {}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+        path, BACKEND_HOST, token
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .map(str::to_string)
+}
+
+/// Verify both routes required by the current desktop UI. Checking only
+/// /settings/model incorrectly accepted intermediate backends that did not yet
+/// implement automatic Ollama model discovery.
+fn backend_supports_model_settings() -> bool {
+    let token = match std::fs::read_to_string(data_dir().join("api_credential")) {
+        Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
+        _ => return false,
+    };
+    if backend_get_status("/settings/model", &token).as_deref() != Some("200") {
+        return false;
+    }
+    // The endpoint can return 500 when Ollama is offline, but that still proves
+    // the route exists. Only a 404 indicates the backend lacks this route.
+    !matches!(
+        backend_get_status(
+            "/settings/ollama/models?endpoint=http%3A%2F%2F127.0.0.1%3A11434",
+            &token,
+        )
+        .as_deref(),
+        None | Some("404")
+    )
+}
+
 fn wait_for_port(deadline: Instant) -> bool {
     while Instant::now() < deadline {
         if port_open() {
@@ -168,9 +211,14 @@ fn process_alive(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
-/// One WMIC process field (ParentProcessId / CommandLine) for a PID.
+/// Read a process field using WMIC when available, then fall back to
+/// PowerShell/CIM. WMIC is optional on newer Windows installations.
 fn wmic_field(pid: u32, field: &str) -> Option<String> {
-    let output = Command::new("wmic")
+    if !matches!(field, "ParentProcessId" | "CommandLine") {
+        return None;
+    }
+
+    if let Ok(output) = Command::new("wmic")
         .args([
             "process",
             "where",
@@ -180,16 +228,47 @@ fn wmic_field(pid: u32, field: &str) -> Option<String> {
             "/value",
         ])
         .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        if key.trim().eq_ignore_ascii_case(field) {
-            Some(value.trim().to_string())
-        } else {
-            None
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        if let Some(value) = text.lines().find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            if key.trim().eq_ignore_ascii_case(field) {
+                Some(value.trim().to_string())
+            } else {
+                None
+            }
+        }) {
+            if !value.is_empty() {
+                return Some(value);
+            }
         }
-    })
+    }
+
+    #[cfg(windows)]
+    {
+        // The field is allowlisted above and PID is numeric, so the command
+        // cannot be influenced by arbitrary process data or user input.
+        let query = format!(
+            "$p = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId = {}'; if ($null -ne $p) {{ $p.{} }}",
+            pid, field
+        );
+        for program in ["powershell.exe", "pwsh.exe"] {
+            let mut command = Command::new(program);
+            command
+                .args(["-NoProfile", "-NonInteractive", "-Command", &query])
+                .creation_flags(0x08000000); // CREATE_NO_WINDOW
+            if let Ok(output) = command.output() {
+                if output.status.success() {
+                    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn parent_pid(pid: u32) -> Option<u32> {
@@ -282,10 +361,20 @@ fn reap_own_orphan(dir: &std::path::Path) -> bool {
     !port_open()
 }
 
+/// Resolve the checked-out repository when running from source. Setting
+/// cwd and PYTHONPATH prevents Python from importing an older globally
+/// installed ai_ecosystem package instead of the source tree being developed.
+fn repository_root() -> Option<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = root.canonicalize().ok()?;
+    root.join("src/ai_ecosystem/interface/serve.py").is_file().then_some(root)
+}
+
 fn launch_candidate(
     program: &str,
     extra_args: &[String],
     log_path: &std::path::Path,
+    repo_root: Option<&std::path::Path>,
 ) -> Option<Child> {
     let out_log = OpenOptions::new()
         .create(true)
@@ -294,6 +383,17 @@ fn launch_candidate(
         .ok()?;
     let err_log = out_log.try_clone().ok()?;
     let mut cmd = Command::new(program);
+    if let Some(root) = repo_root {
+        cmd.current_dir(root);
+        let source = root.join("src");
+        let mut python_paths = vec![source];
+        if let Some(existing) = std::env::var_os("PYTHONPATH") {
+            python_paths.extend(std::env::split_paths(&existing));
+        }
+        if let Ok(joined) = std::env::join_paths(python_paths) {
+            cmd.env("PYTHONPATH", joined);
+        }
+    }
     #[cfg(windows)]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW: no console popup
     cmd.args(extra_args)
@@ -309,14 +409,53 @@ fn ensure_backend() -> Backend {
     // killing its child; reclaim the port only from our own orphan.
     reap_own_orphan(&dir);
     if port_open() {
-        return Backend {
-            child: None,
-            status: BackendStatus {
-                state: "external",
-                url: BACKEND_URL,
-                detail: format!("reusing backend already listening on {}", BACKEND_URL),
-            },
-        };
+        if backend_supports_model_settings() {
+            return Backend {
+                child: None,
+                status: BackendStatus {
+                    state: "external",
+                    url: BACKEND_URL,
+                    detail: format!("reusing compatible backend already listening on {}", BACKEND_URL),
+                },
+            };
+        }
+
+        // If the listener is another Raphael Python runtime, restart that
+        // known-owned process so the updated routes are loaded from this branch.
+        // Never terminate an unrelated process that happens to use port 8765.
+        if let Some(pid) = listener_pid() {
+            if is_own_backend_command(pid) {
+                eprintln!("Restarting an older Raphael backend on {}", BACKEND_URL);
+                let _ = kill_tree(pid);
+                wait_port_closed();
+                clear_pid(&pid_file(&dir));
+            } else {
+                return Backend {
+                    child: None,
+                    status: BackendStatus {
+                        state: "failed",
+                        url: BACKEND_URL,
+                        detail: format!(
+                            "A process is already listening on {} but does not support the current Raphael settings API. Close the older/manual backend on port {} and restart Raphael.",
+                            BACKEND_URL, BACKEND_PORT
+                        ),
+                    },
+                };
+            }
+        }
+        if port_open() {
+            return Backend {
+                child: None,
+                status: BackendStatus {
+                    state: "failed",
+                    url: BACKEND_URL,
+                    detail: format!(
+                        "The older backend on {} could not be stopped. Close it and restart Raphael.",
+                        BACKEND_URL
+                    ),
+                },
+            };
+        }
     }
 
     let db_path = dir.join("runtime.db");
@@ -361,6 +500,11 @@ fn ensure_backend() -> Backend {
         ("ai-ecosystem-serve".to_string(), fixed_args.clone()),
     ];
 
+    let repo_root = repository_root();
+    if repo_root.is_some() {
+        eprintln!("Starting backend from checked-out repository source.");
+    }
+
     let started = Instant::now();
     let mut tried: Vec<String> = Vec::new();
     for (program, args) in &candidates {
@@ -372,7 +516,7 @@ fn ensure_backend() -> Backend {
             started + STARTUP_BUDGET,
             Instant::now() + CANDIDATE_TIMEOUT,
         );
-        match launch_candidate(program, args, &log_path) {
+        match launch_candidate(program, args, &log_path, repo_root.as_deref()) {
             Some(child) => {
                 if wait_for_port(deadline) {
                     let pid = child.id();

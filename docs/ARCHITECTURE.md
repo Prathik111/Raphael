@@ -76,6 +76,8 @@ The security choke points: capability/trust envelope, risk/policy/authorization,
 ### `intelligence`
 Model-provider abstraction/router and research pipeline. Model selection must respect capability and privacy/data-classification constraints.
 
+The desktop currently exposes Ollama as its only selectable model provider. Settings flow through the authenticated RuntimeAPI to the active provider/router; installed model tags are discovered from the configured Ollama server, and generation controls are sent as native Ollama chat options. The endpoint validator restricts non-TLS endpoints to loopback/private addresses. Additional providers and automatic fallback are intentionally not selectable until their settings and privacy behavior are implemented.
+
 ### `personalization`
 Structured personality/preferences plus scoped persistent memory. These are context and behavior inputs, never authorization inputs.
 

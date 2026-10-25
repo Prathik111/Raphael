@@ -1,3 +1,11 @@
+## Update — 2026-10-25: Ollama provider configuration
+
+The `feat/ollama-provider-settings` branch adds a single Ollama provider path to the desktop Settings page and runtime API. The desktop can check a local/private Ollama endpoint, list installed model tags, select a model, and save temperature, top-p, top-k, repeat penalty, context length, and output-token limit. The runtime applies these settings to Ollama's native `/api/chat` request and no longer automatically selects LM Studio or llama.cpp as fallback providers. Ollama settings are validated server-side; plain HTTP endpoints must use loopback/private IP addresses.
+
+A regression test module was added at `tests/unit/test_ollama_provider.py`. CI for commit `a0ac923dc0f5fe7b3e9ea8e86c2ce90f261411fb` reports Ruff, mypy, desktop production build, and Windows sandbox regression checks passing. Python tests report 701 passed, 3 skipped, and 2 failures in unchanged planner/orchestration tests: `tests/integration/test_single_agent.py::test_18_respond_step_becomes_task_reply` and `tests/unit/test_agent_runtime_regressions.py::test_conversational_goal_uses_direct_response_without_planner_json`. The suite is not fully green.
+
+---
+
 # Current Status — 2026-09-11
 
 ## Snapshot

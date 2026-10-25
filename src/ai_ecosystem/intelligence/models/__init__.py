@@ -7,6 +7,14 @@ from ai_ecosystem.intelligence.models.http import (
     HttpChatModelProvider,
     normalize_endpoint,
 )
+from ai_ecosystem.intelligence.models.ollama import (
+    DEFAULT_ENDPOINT as OLLAMA_DEFAULT_ENDPOINT,
+    OllamaModelProvider,
+    OllamaSettings,
+    check_ollama,
+    list_ollama_models,
+    normalize_ollama_endpoint,
+)
 from ai_ecosystem.intelligence.models.providers import (
     MockModelProvider,
     ModelCapabilities,
@@ -24,6 +32,12 @@ __all__ = [
     "ENDPOINT_ENV",
     "MODEL_ENV",
     "HttpChatModelProvider",
+    "OllamaModelProvider",
+    "OllamaSettings",
+    "OLLAMA_DEFAULT_ENDPOINT",
+    "check_ollama",
+    "list_ollama_models",
+    "normalize_ollama_endpoint",
     "MockModelProvider",
     "ModelCapabilities",
     "ModelProvider",
