@@ -29,11 +29,13 @@ from ai_ecosystem.core.persistence import (
 )
 from ai_ecosystem.core.runtime import AgentRuntime
 from ai_ecosystem.intelligence import (
+    MockModelProvider,
     ModelProvider,
     ModelRouter,
     ProviderProfile,
     RoutingRequirements,
 )
+from ai_ecosystem.intelligence.models.providers import ModelResponse
 from ai_ecosystem.intelligence.models.ollama import (
     DEFAULT_ENDPOINT as OLLAMA_DEFAULT_ENDPOINT,
     OllamaModelProvider,
@@ -182,21 +184,42 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
         if available:
             settings.model = available[0]
 
-    provider = OllamaModelProvider(settings)
     router = ModelRouter()
+    if settings.model:
+        provider = OllamaModelProvider(settings)
+        router.register(
+            provider,
+            ProviderProfile(
+                provider_id=provider.provider_id,
+                local=True,
+                trusted=False,
+                data_classes=set(DataClass),
+                latency_class="standard",
+                retains_data=False,
+                trains_on_data=False,
+            ),
+        )
+        return router, [provider], True
+
+    # Keep the runtime/agent shell constructible before the user selects a model.
+    # This stub is deliberately not returned as a configured/selectable provider.
+    from ai_ecosystem.core.errors.exceptions import ModelUnavailableError
+
+    def unavailable(_request: Any) -> ModelResponse:
+        raise ModelUnavailableError(
+            "Ollama is not configured: start Ollama, install a model, and select it in Raphael Settings"
+        )
+
+    stub = MockModelProvider("unconfigured", handler=unavailable)
     router.register(
-        provider,
+        stub,
         ProviderProfile(
-            provider_id=provider.provider_id,
+            provider_id=stub.provider_id,
             local=True,
-            trusted=False,
             data_classes=set(DataClass),
-            latency_class="standard",
-            retains_data=False,
-            trains_on_data=False,
         ),
     )
-    return router, [provider], bool(settings.model)
+    return router, [], False
 
 
 def build_stack(
@@ -367,7 +390,7 @@ def build_stack(
                         event_type=EventType.TASK_FAILED,
                         task_id=task_id,
                         payload={
-                            "error": "no model is configured or available; start a local model or configure AI_ECO_MODEL_ENDPOINT"
+                            "error": "Ollama is not configured: start Ollama, install a model, and select it in Raphael Settings"
                         },
                     )
                 )
@@ -414,7 +437,7 @@ def build_stack(
     )
     token = None if no_auth else auth_token
     server = LocalHttpServer(api, host=config.api_host, port=config.api_port, auth_token=token)
-    agent = agent_factory() if model_state["configured"] else None
+    agent = agent_factory()
     for task in runtime.manager._tasks.list():  # noqa: SLF001
         if task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
             continue
@@ -439,11 +462,7 @@ def build_stack(
                         event_type=EventType.TASK_FAILED,
                         task_id=task.id,
                         payload={
-                            "error": (
-                                "no model is configured or available; configure a model and retry"
-                                if not model_configured
-                                else "interrupted before a resumable plan was persisted"
-                            )
+                            "error": "interrupted before a resumable plan was persisted"
                         },
                     )
                 )
