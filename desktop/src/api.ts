@@ -238,6 +238,12 @@ async function request<T>(base: string, path: string, init?: RequestInit): Promi
   }
   if (!response.ok) {
     const detail = await response.text();
+    if (response.status === 404 && detail.includes('"unknown route"')) {
+      throw new BackendError(
+        404,
+        "The backend at " + safeBase + " does not support " + path + ". It is likely an older Raphael process. Close the old backend and restart Raphael so the updated settings routes can load.",
+      );
+    }
     throw new BackendError(response.status, `${response.status}: ${detail}`);
   }
   return (await response.json()) as T;
