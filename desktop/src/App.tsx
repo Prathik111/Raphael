@@ -113,7 +113,7 @@ export function App() {
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const goal = prompt.trim();
-    if (!goal || busy) return;
+    if (!goal || busy || !providerReady) return;
     setError(""); setReply(""); setBusy(true); setActive(null);
     try {
       const task = await api.submitGoal(goal);
