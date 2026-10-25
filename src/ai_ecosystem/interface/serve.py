@@ -198,6 +198,7 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
     )
     return router, [provider], bool(settings.model)
 
+
 def build_stack(
     config: AppConfig | None = None,
     workspace: str = "workspace",
