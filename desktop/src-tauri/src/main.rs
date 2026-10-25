@@ -496,7 +496,7 @@ fn ensure_backend() -> Backend {
 
     let repo_root = repository_root();
     if repo_root.is_some() {
-        log::info!("starting backend from checked-out repository source");
+        eprintln!("Starting backend from checked-out repository source.");
     }
 
     let started = Instant::now();
