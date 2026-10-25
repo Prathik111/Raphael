@@ -265,11 +265,14 @@ class RuntimeAPI:
 
     def check_ollama(self, endpoint: str = "http://127.0.0.1:11434") -> dict[str, Any]:
         """Probe a local Ollama endpoint and return its installed model tags."""
+        checker: Callable[[str], dict[str, Any]]
         if self._ollama_checker is None:
             from ai_ecosystem.intelligence.models.ollama import check_ollama
 
-            def checker(value: str) -> dict[str, Any]:
+            def default_checker(value: str) -> dict[str, Any]:
                 return check_ollama(value)
+
+            checker = default_checker
         else:
             checker = self._ollama_checker
         try:
