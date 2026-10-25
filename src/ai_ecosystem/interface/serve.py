@@ -358,7 +358,7 @@ def build_stack(
         )
 
     def dispatch(task_id: str) -> None:
-        if not model_configured:
+        if not model_state["configured"]:
             try:
                 runtime.manager.transition(task_id, TaskState.FAILED)
                 bus.publish(
