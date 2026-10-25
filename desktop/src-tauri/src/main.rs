@@ -11,6 +11,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::fs::OpenOptions;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -95,6 +96,37 @@ fn backend_addr() -> SocketAddr {
 
 fn port_open() -> bool {
     TcpStream::connect_timeout(&backend_addr(), Duration::from_millis(400)).is_ok()
+}
+
+/// True only when the listener responds to the model-settings route used by
+/// the current desktop UI. This prevents an older, still-running backend from
+/// being mistaken for a compatible Raphael runtime after an upgrade.
+fn backend_supports_model_settings() -> bool {
+    let token = match std::fs::read_to_string(data_dir().join("api_credential")) {
+        Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
+        _ => return false,
+    };
+    let mut stream = match TcpStream::connect_timeout(&backend_addr(), Duration::from_secs(1)) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let request = format!(
+        "GET /settings/model HTTP/1.0\\r\\nHost: {}\\r\\nAuthorization: Bearer {}\\r\\nConnection: close\\r\\n\\r\\n",
+        BACKEND_HOST, token
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut response = String::new();
+    if stream.read_to_string(&mut response).is_err() {
+        return false;
+    }
+    response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1)) == Some("200")
 }
 
 fn wait_for_port(deadline: Instant) -> bool {
@@ -309,14 +341,53 @@ fn ensure_backend() -> Backend {
     // killing its child; reclaim the port only from our own orphan.
     reap_own_orphan(&dir);
     if port_open() {
-        return Backend {
-            child: None,
-            status: BackendStatus {
-                state: "external",
-                url: BACKEND_URL,
-                detail: format!("reusing backend already listening on {}", BACKEND_URL),
-            },
-        };
+        if backend_supports_model_settings() {
+            return Backend {
+                child: None,
+                status: BackendStatus {
+                    state: "external",
+                    url: BACKEND_URL,
+                    detail: format!("reusing compatible backend already listening on {}", BACKEND_URL),
+                },
+            };
+        }
+
+        // If the listener is another Raphael Python runtime, restart that
+        // known-owned process so the updated routes are loaded from this branch.
+        // Never terminate an unrelated process that happens to use port 8765.
+        if let Some(pid) = listener_pid() {
+            if is_own_backend_command(pid) {
+                eprintln!("Restarting an older Raphael backend on {}", BACKEND_URL);
+                let _ = kill_tree(pid);
+                wait_port_closed();
+                clear_pid(&pid_file(&dir));
+            } else {
+                return Backend {
+                    child: None,
+                    status: BackendStatus {
+                        state: "failed",
+                        url: BACKEND_URL,
+                        detail: format!(
+                            "A process is already listening on {} but does not support the current Raphael settings API. Close the older/manual backend on port {} and restart Raphael.",
+                            BACKEND_URL, BACKEND_PORT
+                        ),
+                    },
+                };
+            }
+        }
+        if port_open() {
+            return Backend {
+                child: None,
+                status: BackendStatus {
+                    state: "failed",
+                    url: BACKEND_URL,
+                    detail: format!(
+                        "The older backend on {} could not be stopped. Close it and restart Raphael.",
+                        BACKEND_URL
+                    ),
+                },
+            };
+        }
     }
 
     let db_path = dir.join("runtime.db");
