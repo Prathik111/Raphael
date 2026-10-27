@@ -1,5 +1,28 @@
 # Current Status — 2026-09-11
 
+## Ollama inference reliability patch (2026-10-27)
+
+Branch: `fix/ollama-inference-reliability` (not merged into `main`).
+
+- Explicitly configured Ollama URL `http://127.0.0.1:11434` is normalized to `/v1/chat/completions`; `/v1` and full endpoint forms remain supported.
+- Explicitly configured local/LAN provider locality is inferred from the endpoint host, rather than the provider ID.
+- HTTP model calls now populate response latency and reject non-tool responses terminated by `finish_reason=length`.
+- Conversational requests no longer consume an unnecessary structured-planning generation; common explanatory requests avoid accidental action routing.
+- Planner repair requests retain the original bounded memory context.
+- Regression tests added at `tests/unit/test_ollama_inference_regression.py`.
+
+**Verification:** source changes committed to the patch branch. Regression tests and live Ollama integration **not run** in this environment (GitHub checkout/network access unavailable); no claim of passing tests. HTTP SSE streaming remains unimplemented and intent classification is still heuristic, not a complete semantic classifier.
+
+**Quick local check (PowerShell):**
+```powershell
+git fetch origin
+git switch fix/ollama-inference-reliability
+.\.venv\Scripts\python.exe -m pytest tests/unit/test_ollama_inference_regression.py -q
+$env:AI_ECO_MODEL_ENDPOINT = "http://127.0.0.1:11434"
+$env:AI_ECO_MODEL_NAME = "qwen3.5:4b"
+.\.venv\Scripts\python.exe -m ai_ecosystem.interface.serve --workspace workspace
+```
+
 ## Snapshot
 
 This status describes commit `e7d2c9480dea19f7e3e6cac381cfee48ecd3af9f` on `fix/hardened-security-v2`, PR #3 into `main`.
