@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from typing import Any
 
 from ai_ecosystem.core.errors.exceptions import (
@@ -91,6 +92,7 @@ class HttpChatModelProvider(ModelProvider):
                 structured_output=True,
                 reasoning=False,
                 parallel_tool_calls=False,
+                streaming=True,
             ),
         )
         if not endpoint:
@@ -174,6 +176,120 @@ class HttpChatModelProvider(ModelProvider):
         parsed = _parse_response(decoded, self.provider_id, self._model)
         parsed.latency_s = time.monotonic() - started
         return parsed
+
+
+    def stream(self, request: ModelRequest) -> Iterator[str]:
+        """Yield OpenAI-compatible SSE content deltas as the provider emits them.
+
+        Streaming exposes only display text; streamed tool calls are rejected,
+        never executed or silently discarded. The agent's existing structured
+        planner continues using complete() and its validation boundary.
+        """
+        if not self.capabilities.streaming:
+            raise ModelUnavailableError(
+                f"provider {self.provider_id!r} does not support streaming"
+            )
+        messages = []
+        if request.system:
+            messages.append({"role": "system", "content": request.system})
+        messages.append({"role": "user", "content": request.prompt})
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "max_tokens": max(1, request.max_tokens),
+            "stream": True,
+        }
+        if request.tools:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                }
+                for tool in request.tools
+            ]
+            payload["tool_choice"] = request.tool_choice
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "User-Agent": "ai-ecosystem/0.1",
+        }
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        http_request = urllib.request.Request(
+            self._endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers=headers,
+        )
+        timeout = min(self._timeout, max(1.0, request.timeout_s))
+        try:
+            with urllib.request.urlopen(http_request, timeout=timeout) as response:
+                received = 0
+                data_lines: list[str] = []
+                finished = False
+                saw_end = False
+                while True:
+                    raw_line = response.readline(MAX_BODY_BYTES + 1)
+                    if not raw_line:
+                        break
+                    received += len(raw_line)
+                    if received > MAX_BODY_BYTES or len(raw_line) > MAX_BODY_BYTES:
+                        raise ModelMalformedError("model stream exceeded size limit")
+                    try:
+                        line = raw_line.decode("utf-8").rstrip("\r\n")
+                    except UnicodeDecodeError as exc:
+                        raise ModelMalformedError("invalid UTF-8 in model stream") from exc
+                    if line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip(" "))
+                    elif line == "":
+                        if not data_lines:
+                            continue
+                        event_data = "\n".join(data_lines)
+                        data_lines = []
+                        if event_data == "[DONE]":
+                            saw_end = True
+                            break
+                        try:
+                            event = json.loads(event_data)
+                        except ValueError as exc:
+                            raise ModelMalformedError("invalid JSON SSE event") from exc
+                        if not isinstance(event, dict):
+                            raise ModelMalformedError("malformed SSE event")
+                        if "error" in event:
+                            raise ModelUnavailableError("model stream returned an error")
+                        choices = event.get("choices")
+                        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                            raise ModelMalformedError("model stream event has no valid choice")
+                        choice = choices[0]
+                        delta = choice.get("delta") or {}
+                        if not isinstance(delta, dict):
+                            raise ModelMalformedError("invalid streaming delta")
+                        if delta.get("tool_calls") or delta.get("function_call"):
+                            raise ModelMalformedError(
+                                "streamed tool calls require structured execution; use complete()"
+                            )
+                        piece = delta.get("content")
+                        if piece is not None:
+                            if not isinstance(piece, str):
+                                raise ModelMalformedError("invalid streamed content")
+                            if piece:
+                                yield piece
+                        reason = choice.get("finish_reason")
+                        if reason == "length":
+                            raise ModelMalformedError("model stream truncated at output token limit")
+                        if reason:
+                            finished = True
+                if not (saw_end or finished):
+                    raise ModelMalformedError("model stream ended without completion")
+        except (TimeoutError, urllib.error.URLError) as exc:
+            raise ModelTimeoutError("model stream timed out or connection failed") from exc
+        except OSError as exc:
+            raise ModelUnavailableError("model streaming connection failed") from exc
+
 
 
 def _parse_response(decoded: object, provider_id: str, default_model: str) -> ModelResponse:
