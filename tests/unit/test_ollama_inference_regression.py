@@ -88,3 +88,84 @@ def test_http_provider_sends_ollama_compatible_request() -> None:
     assert json.loads(requests[0].data)["model"] == "qwen3.5:4b"
     assert reply.text == "hello"
     assert reply.latency_s >= 0
+
+
+def test_ollama_sse_delivers_incremental_deltas() -> None:
+    import io
+    from ai_ecosystem.intelligence.models.providers import ModelRequest
+
+    chunks = [
+        {"choices": [{"delta": {"role": "assistant"}, "finish_reason": None}]},
+        {"choices": [{"delta": {"content": "Hel"}, "finish_reason": None}]},
+        {"choices": [{"delta": {"content": "lo"}, "finish_reason": None}]},
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+    ]
+    wire = "".join("data: " + json.dumps(chunk) + "\\n\\n" for chunk in chunks)
+    wire += "data: [DONE]\\n\\n"
+    # Real SSE event separators use newlines, not the escaped representation.
+    wire = wire.replace("\\n", "\n")
+
+    class StreamResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+            return False
+
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        return StreamResponse(wire.encode())
+
+    provider = HttpChatModelProvider(endpoint="http://127.0.0.1:11434", model="qwen3.5:4b")
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        assert list(provider.stream(ModelRequest(prompt="greet"))) == ["Hel", "lo"]
+    assert provider.capabilities.streaming
+    assert json.loads(requests[0].data)["stream"] is True
+    assert requests[0].get_header("Accept") == "text/event-stream"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"choices": [{"delta": {"content": "partial"}, "finish_reason": "length"}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0}]}, "finish_reason": None}]},
+    ],
+)
+def test_stream_does_not_silently_accept_truncation_or_tool_calls(event) -> None:
+    import io
+    from ai_ecosystem.intelligence.models.providers import ModelRequest
+
+    class StreamResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+            return False
+
+    data = ("data: " + json.dumps(event) + "\n\n").encode()
+    provider = HttpChatModelProvider(endpoint="http://127.0.0.1:11434", model="qwen3.5:4b")
+    with patch("urllib.request.urlopen", return_value=StreamResponse(data)):
+        with pytest.raises(ModelMalformedError):
+            list(provider.stream(ModelRequest(prompt="hello")))
+
+
+def test_stream_rejects_interrupted_sse() -> None:
+    import io
+    from ai_ecosystem.intelligence.models.providers import ModelRequest
+
+    class StreamResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.close()
+            return False
+
+    provider = HttpChatModelProvider(endpoint="http://127.0.0.1:11434", model="qwen3.5:4b")
+    with patch("urllib.request.urlopen", return_value=StreamResponse(b'data: {"choices": [')):
+        with pytest.raises(ModelMalformedError):
+            list(provider.stream(ModelRequest(prompt="hello")))
