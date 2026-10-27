@@ -285,9 +285,13 @@ class HttpChatModelProvider(ModelProvider):
                             finished = True
                 if not (saw_end or finished):
                     raise ModelMalformedError("model stream ended without completion")
-        except (TimeoutError, urllib.error.URLError) as exc:
-            raise ModelTimeoutError("model stream timed out or connection failed") from exc
-        except OSError as exc:
+        except TimeoutError as exc:
+            raise ModelTimeoutError("model stream timed out") from exc
+        except urllib.error.HTTPError as exc:
+            raise ModelUnavailableError(
+                f"model stream refused the request (HTTP {exc.code})"
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
             raise ModelUnavailableError("model streaming connection failed") from exc
 
 
