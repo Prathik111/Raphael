@@ -113,6 +113,13 @@ class ModelReasoningBackend(ReasoningBackend):
         text = goal.strip().lower()
         if not text:
             return False
+        # Questions asking for explanation are not instructions to execute actions.
+        if text.startswith((
+            "what ", "why ", "how ", "when ", "where ", "who ",
+            "explain ", "describe ", "define ", "tell me about ",
+            "can i ", "is it ", "does ", "do i ",
+        )):
+            return False
         action_terms = (
             "create", "make", "build", "write", "edit", "modify", "change", "delete", "remove",
             "move", "copy", "rename", "run", "execute", "install", "uninstall", "open",
@@ -121,7 +128,9 @@ class ModelReasoningBackend(ReasoningBackend):
             "scan", "analyze", "analyse", "check", "inspect", "generate", "send", "email",
             "folder", "file", "repository", "repo", "terminal", "command",
         )
-        return any(term in text for term in action_terms)
+        import re
+
+        return any(re.search(r'(?<![a-z])' + re.escape(term) + r'(?![a-z])', text) for term in action_terms)
 
     def _structured(self, request: ModelRequest, model_cls: type[BaseModel]) -> Plan:
         if self._structured_requester is not None:
@@ -165,26 +174,24 @@ class ModelReasoningBackend(ReasoningBackend):
         from ai_ecosystem.core.errors.exceptions import AiEcosystemError, ModelError
 
         validator = PlanValidator(set(available_tools), *self._contracts())
+        # A conversational request should not first spend an inference on a plan
+        # which would then be discarded.
+        if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
+            return validator.validate(self._direct_response_plan(goal))
         try:
             candidate = validator.validate(self.draft(goal, available_tools, context=context))
-            if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
-                return validator.validate(self._direct_response_plan(goal))
             return candidate
         except (ModelError, AiEcosystemError, ValueError) as first_error:
             last_error = first_error
         for _ in range(self._max_repairs):
             try:
-                repaired = self._repair(goal, available_tools, last_error)
+                repaired = self._repair(goal, available_tools, last_error, context=context)
                 candidate = validator.validate(repaired)
-                if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
-                    return validator.validate(self._direct_response_plan(goal))
                 return candidate
             except (ModelError, AiEcosystemError, ValueError) as error:
                 last_error = error
-        if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
-            return validator.validate(self._direct_response_plan(goal))
         raise last_error
 
-    def _repair(self, goal: str, available_tools: list[str], error: Exception) -> Plan:
-        prompt = json.dumps(self._prompt_body(goal, available_tools, error=str(error)))
+    def _repair(self, goal: str, available_tools: list[str], error: Exception, context: str = "") -> Plan:
+        prompt = json.dumps(self._prompt_body(goal, available_tools, error=str(error), context=context))
         return self._structured(ModelRequest(prompt=prompt, system=self.SYSTEM), Plan)
