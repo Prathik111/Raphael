@@ -185,7 +185,14 @@ def build_router() -> tuple[ModelRouter, list[ModelProvider], bool]:
     if provider is None:
         provider = discover_local_provider()
     if provider is not None:
-        is_local = provider.provider_id.startswith("local-")
+        # Configuration source must not change a provider's locality/privacy profile.
+        # Private HTTP endpoints may be local/LAN; hosted HTTPS endpoints remain remote.
+        from ai_ecosystem.intelligence.models.http import _is_local_or_private
+        from urllib.parse import urlparse
+
+        endpoint = getattr(provider, "_endpoint", "")
+        host = urlparse(endpoint).hostname or ""
+        is_local = _is_local_or_private(host)
         router.register(
             provider,
             ProviderProfile(
