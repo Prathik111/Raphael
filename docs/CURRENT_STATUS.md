@@ -10,8 +10,9 @@ Branch: `fix/ollama-inference-reliability` (not merged into `main`).
 - Conversational requests no longer consume an unnecessary structured-planning generation; common explanatory requests avoid accidental action routing.
 - Planner repair requests retain the original bounded memory context.
 - Regression tests added at `tests/unit/test_ollama_inference_regression.py`.
+- OpenAI-compatible HTTP providers now support real SSE incremental text streaming through `provider.stream(request)`, with `stream: true`, deltas, finish-reason checks, payload bounds and closed connections when iteration ends. Streaming tool-call deltas deliberately fail closed; structured tool operations continue using `complete()` and the existing validator/authorization path.
 
-**Verification:** source changes committed to the patch branch. Regression tests and live Ollama integration **not run** in this environment (GitHub checkout/network access unavailable); no claim of passing tests. HTTP SSE streaming remains unimplemented and intent classification is still heuristic, not a complete semantic classifier.
+**Verification:** source changes committed to the patch branch. Regression tests and live Ollama integration **not run** in this environment (GitHub checkout/network access unavailable); no claim of passing tests. HTTP SSE text streaming was implemented and tests added, but the test suite and live Ollama test remain **not run**. The desktop task/event transport has **not** been wired to forward these streamed deltas, and agent planning still uses blocking `complete()` by design. Intent classification is still heuristic.
 
 **Quick local check (PowerShell):**
 ```powershell
