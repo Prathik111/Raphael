@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -58,8 +59,15 @@ def normalize_endpoint(raw: str, *, api_key: str = "") -> str:
             "HTTP model endpoints are only allowed on loopback/private LAN addresses "
             "without an API key; use HTTPS for remote authenticated providers"
         )
-    if cleaned.endswith("/chat/completions"):
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("model endpoint must not contain credentials, query or fragment")
+    if parsed.path.endswith("/chat/completions"):
         return cleaned
+    # Ollama, LM Studio and llama.cpp expose the OpenAI compatibility API at /v1.
+    if not parsed.path or parsed.path == "/":
+        return f"{cleaned}/v1/chat/completions"
+    if parsed.path in {"/v1", "/api/v1"}:
+        return f"{cleaned}/chat/completions"
     return f"{cleaned}/chat/completions"
 
 
@@ -145,6 +153,7 @@ class HttpChatModelProvider(ModelProvider):
             headers["Authorization"] = f"Bearer {self._api_key}"
         http_request = urllib.request.Request(self._endpoint, data=body, method="POST", headers=headers)
         timeout = min(self._timeout, max(1.0, request.timeout_s))
+        started = time.monotonic()
         try:
             with urllib.request.urlopen(http_request, timeout=timeout) as response:
                 raw = response.read(MAX_BODY_BYTES + 1)
@@ -162,7 +171,9 @@ class HttpChatModelProvider(ModelProvider):
             decoded = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exc:
             raise ModelMalformedError(f"provider {self.provider_id!r} returned invalid JSON") from exc
-        return _parse_response(decoded, self.provider_id, self._model)
+        parsed = _parse_response(decoded, self.provider_id, self._model)
+        parsed.latency_s = time.monotonic() - started
+        return parsed
 
 
 def _parse_response(decoded: object, provider_id: str, default_model: str) -> ModelResponse:
@@ -224,6 +235,10 @@ def _parse_response(decoded: object, provider_id: str, default_model: str) -> Mo
     if isinstance(usage_raw, dict):
         usage = {str(key): value for key, value in usage_raw.items()}
     finish_reason = first.get("finish_reason") or ""
+    if finish_reason == "length" and not tool_calls:
+        raise ModelMalformedError(
+            f"provider {provider_id!r} truncated the response at the output token limit"
+        )
     if not text.strip() and not tool_calls:
         raise ModelMalformedError(
             f"provider {provider_id!r} returned empty content and no tool calls"
