@@ -76,6 +76,8 @@ The security choke points: capability/trust envelope, risk/policy/authorization,
 ### `intelligence`
 Model-provider abstraction/router and research pipeline. Model selection must respect capability and privacy/data-classification constraints.
 
+The desktop currently exposes Ollama as its only selectable model provider. Settings flow through the authenticated RuntimeAPI to the active provider/router; installed model tags are discovered from the configured Ollama server, and generation controls are sent as native Ollama chat options. The endpoint validator restricts all endpoints to localhost or loopback IP addresses; provider requests disable environment proxies and redirects. Additional providers and automatic fallback are intentionally not selectable until their settings and privacy behavior are implemented.
+
 ### `personalization`
 Structured personality/preferences plus scoped persistent memory. These are context and behavior inputs, never authorization inputs.
 
@@ -135,3 +137,26 @@ NEW MEMORY -> scoped store -> trust/verification rules
 NEW REMOTE NODE -> authenticated transport -> policy -> job -> verification
 NEW UI ACTION -> RuntimeAPI/gateway -> same security boundary
 ```
+
+## Source desktop backend startup
+
+When the source checkout exists, the Tauri launcher prefers its `.venv` interpreter and sets the repository working directory and source import path. System Python commands remain fallback candidates. Model connection tests use the existing authenticated discovery route and do not send a prompt; desktop Save checks connectivity before applying settings. This is a source-development launch improvement, not a bundled Python installer.
+
+## Local inference budgets
+
+Ollama's provider settings supply a default 180-second socket timeout when ModelRequest has no explicitly supplied timeout. An explicit caller timeout can shorten that budget. The native payload includes the selected thinking mode and caps output by both the saved limit and the per-request token budget. These are inference controls, not authorization or termination guarantees. Desktop polling has a separate 15-minute limit and does not cancel backend work on expiry.
+
+## Runtime MCP host
+
+`tools/mcp` now includes operator configuration discovery, persistent SDK sessions
+(stdio/Streamable HTTP), and a lifecycle manager. Configurations live in the runtime
+metadata table; discovered files are inert suggestions. Explicit enablement connects
+a server and registers namespaced tools with mandatory action approval. New tasks
+see the current registry. ToolRunner still owns execution and durable identity;
+trusted `Tool.action_identity` separates semantic replay identity from reconnect
+names that invalidate stale approvals. HTTP uses a DNS-pinning network backend.
+See [MCP.md](MCP.md) for contracts, limits, and unimplemented authentication features.
+
+The desktop uses a single centered conversation column inside the area beside the
+sidebar. Response and composer widths/offsets share CSS variables at each breakpoint.
+Pending approvals are polled independently of local submission state.

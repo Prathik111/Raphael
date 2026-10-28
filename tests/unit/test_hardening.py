@@ -181,7 +181,9 @@ def test_no_secrets_in_source_tree():
         + list((root / "desktop").rglob("*.ts"))
         + list((root / "desktop").rglob("*.tsx"))
     ):
-        if ".venv" in path.parts or "node_modules" in path.parts:
+        # Downloaded package sources are dependencies, just like the installed
+        # environment; their upstream fixtures are not Raphael credentials.
+        if {".venv", ".uv-cache", "node_modules"}.intersection(path.parts):
             continue
         # Skip test files - they contain test fixtures with hardcoded values
         if "tests" in path.parts:

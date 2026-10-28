@@ -485,6 +485,19 @@ class SingleAgent:
     def _collect_reply(self, plan: Plan, execution: ExecutionResult) -> str:
         parts: list[str] = []
         for step in plan.steps:
+            mcp_tools = [name for name in step.tools if name.startswith("mcp.")]
+            if mcp_tools:
+                # Show observed external data as plain text, not as a model claim
+                # of verified success or a new instruction/authorization source.
+                for result in execution.results.get(step.id, []):
+                    if not result.success or not isinstance(result.output, dict):
+                        continue
+                    content = result.output.get("content", [])
+                    text = "\n".join(str(block.get("text", "")) for block in content
+                                     if isinstance(block, dict) and block.get("type") == "text")
+                    if text.strip():
+                        server = mcp_tools[0].split(".")[1]
+                        parts.append(f"External tool response from {server}:\n{text[:32000]}")
             if "agent.respond" not in step.tools:
                 continue
             for result in execution.results.get(step.id, []):

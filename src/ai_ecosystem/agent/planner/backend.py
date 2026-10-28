@@ -167,7 +167,7 @@ class ModelReasoningBackend(ReasoningBackend):
         validator = PlanValidator(set(available_tools), *self._contracts())
         try:
             candidate = validator.validate(self.draft(goal, available_tools, context=context))
-            if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
+            if not self._looks_action_oriented(goal) and "agent.respond" in available_tools and not self._uses_mcp(candidate):
                 return validator.validate(self._direct_response_plan(goal))
             return candidate
         except (ModelError, AiEcosystemError, ValueError) as first_error:
@@ -176,7 +176,7 @@ class ModelReasoningBackend(ReasoningBackend):
             try:
                 repaired = self._repair(goal, available_tools, last_error)
                 candidate = validator.validate(repaired)
-                if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
+                if not self._looks_action_oriented(goal) and "agent.respond" in available_tools and not self._uses_mcp(candidate):
                     return validator.validate(self._direct_response_plan(goal))
                 return candidate
             except (ModelError, AiEcosystemError, ValueError) as error:
@@ -184,6 +184,11 @@ class ModelReasoningBackend(ReasoningBackend):
         if not self._looks_action_oriented(goal) and "agent.respond" in available_tools:
             return validator.validate(self._direct_response_plan(goal))
         raise last_error
+
+    @staticmethod
+    def _uses_mcp(plan: Plan) -> bool:
+        """A validated external-tool plan must not be discarded as idle chat."""
+        return any(name.startswith("mcp.") for step in plan.steps for name in step.tools)
 
     def _repair(self, goal: str, available_tools: list[str], error: Exception) -> Plan:
         prompt = json.dumps(self._prompt_body(goal, available_tools, error=str(error)))

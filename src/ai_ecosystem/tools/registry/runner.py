@@ -202,9 +202,10 @@ class ToolRunner:
                 permission.reason = "approval does not match this exact action"
         return permission
 
-    def _reserve_action(self, call: ToolCall) -> tuple[bool, str]:
+    def _reserve_action(self, call: ToolCall, tool: Tool) -> tuple[bool, str]:
         """Reserve exact semantic action; model-generated call IDs are not identity."""
-        digest = action_hash(call.task_id, call.tool, dict(call.arguments))
+        semantic_tool = tool.action_identity or call.tool
+        digest = action_hash(call.task_id, semantic_tool, dict(call.arguments))
         if self._ledger is not None:
             record = self._ledger.get(digest)
             if record is not None:
@@ -212,7 +213,7 @@ class ToolRunner:
                     False,
                     f"action already has durable state {record.state.value}; reconcile before replay",
                 )
-            self._ledger.begin(call.task_id, call.tool, dict(call.arguments))
+            self._ledger.begin(call.task_id, semantic_tool, dict(call.arguments))
         with self._seen_lock:
             if call.id in self._seen_ids:
                 return False, f"duplicate call id {call.id!r}: already executed"
@@ -230,7 +231,21 @@ class ToolRunner:
             )
         tool = self._registry.get(call.tool)
         if tool is None:
+            call.arguments = {"redacted": True}
             return self._fail(call, EventType.TOOL_FAILED, f"unknown tool {call.tool!r}")
+        guard = self._registry.argument_guard(call.tool)
+        if "mcp-external" in tool.capabilities and guard is None:
+            call.arguments = {"redacted": True}
+            return self._fail(call, EventType.TOOL_FAILED, "MCP tool privacy guard is unavailable or revoked", tool)
+        if guard is not None:
+            try:
+                blocked = guard(dict(call.arguments))
+            except Exception:
+                blocked = "tool argument privacy check failed"
+            if blocked:
+                # Do not persist rejected credentials in request/approval/audit payloads.
+                call.arguments = {"redacted": True}
+                return self._fail(call, EventType.TOOL_FAILED, blocked, tool)
         self._emit(
             EventType.TOOL_REQUESTED,
             call.task_id,
@@ -265,7 +280,7 @@ class ToolRunner:
                 success=False,
                 error="cancelled before execution",
             )
-        ok, identity = self._reserve_action(call)
+        ok, identity = self._reserve_action(call, tool)
         if not ok:
             return self._deny(call, tool, identity)
         self._emit(
@@ -285,7 +300,8 @@ class ToolRunner:
             {"tool": call.tool, "call_id": call.id, "action_hash": identity},
         )
         handler = self._registry.handler(call.tool)
-        assert handler is not None
+        if handler is None:
+            return self._fail(call, EventType.TOOL_FAILED, "tool was revoked before execution", tool, permission)
         if tool.requires_sandbox:
             return self._run_sandboxed(call, tool, handler, permission, cancel_token, identity)
         try:

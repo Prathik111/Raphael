@@ -29,6 +29,29 @@ def check_arguments(tool: Any, arguments: dict) -> list[str]:
     """
     problems: list[str] = []
     schema = getattr(tool, "input_schema", {}) or {}
+    if "mcp-external" in getattr(tool, "capabilities", []):
+        from jsonschema import Draft202012Validator
+        try:
+            import json
+            if len(json.dumps(arguments)) > 65536:
+                return ["MCP arguments exceed size limit"]
+            nodes = 0
+            def bounded(value: Any, depth: int = 0) -> bool:
+                nonlocal nodes
+                nodes += 1
+                if depth > 16 or nodes > 2048:
+                    return False
+                if isinstance(value, list):
+                    return len(value) <= 256 and all(bounded(item, depth + 1) for item in value)
+                if isinstance(value, dict):
+                    return all(bounded(item, depth + 1) for item in value.values())
+                return True
+            if not bounded(arguments):
+                return ["MCP arguments exceed structural limits"]
+            errors = list(Draft202012Validator(schema).iter_errors(arguments))
+            return [f"MCP arguments fail schema rule: {error.validator}" for error in errors[:10]]
+        except Exception:
+            return ["MCP argument schema could not be validated"]
     required = schema.get("required", [])
     missing = [name for name in required if name not in arguments]
     if missing:
@@ -39,7 +62,8 @@ def check_arguments(tool: Any, arguments: dict) -> list[str]:
     for param, want in properties.items():
         if param not in arguments:
             continue
-        want_type = _TYPES.get(want)
+        type_name = want.get("type") if isinstance(want, dict) else want
+        want_type = _TYPES.get(type_name) if isinstance(type_name, str) else None
         if want_type is not None and not isinstance(arguments[param], want_type):
             problems.append(
                 f"argument {param!r} must be {want}, got " f"{type(arguments[param]).__name__}"

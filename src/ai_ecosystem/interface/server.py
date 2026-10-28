@@ -123,6 +123,21 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, self.api.get_system_awareness())
             elif method == "GET" and parts == ["models"]:
                 self._send(200, self.api.get_models())
+            elif method == "GET" and parts == ["mcp", "servers"]:
+                self._send(200, self.api.mcp_action("list"))
+            elif method == "GET" and parts == ["mcp", "discover"]:
+                self._send(200, self.api.mcp_action("discover"))
+            elif method == "POST" and parts == ["mcp", "servers"]:
+                self._send(200, self.api.mcp_action("save", self._read_json()))
+            elif method == "POST" and len(parts) == 2 and parts[0] == "mcp" and parts[1] in {"enable", "disable"}:
+                self._send(200, self.api.mcp_action(parts[1], self._read_json()))
+            elif method == "GET" and parts == ["settings", "model"]:
+                self._send(200, self.api.get_model_settings())
+            elif method == "POST" and parts == ["settings", "model"]:
+                self._send(200, self.api.update_model_settings(self._read_json()))
+            elif method == "GET" and parts == ["settings", "ollama", "models"]:
+                endpoint = query.get("endpoint", ["http://127.0.0.1:11434"])[0]
+                self._send(200, self.api.check_ollama(endpoint))
             elif method == "GET" and parts == ["skills"]:
                 self._send(200, self.api.get_skills())
             elif method == "GET" and parts == ["approvals"]:

@@ -77,6 +77,9 @@ class Tool(Entity):
     timeout_s: float = 60.0
     capabilities: list[str] = Field(default_factory=list)
     execution_policy: str = "default"
+    # Trusted registry metadata, never supplied by model tool-call arguments.
+    # Dynamic adapters keep semantic replay identity stable across reconnects.
+    action_identity: str = ""
     requires_sandbox: bool = False
     sandbox_profile: str = "default"
     # Capability metadata (review: policy reasons about capabilities,

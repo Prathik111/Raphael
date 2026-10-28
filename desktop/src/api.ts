@@ -1,5 +1,71 @@
+import type { McpConfig, ServerView, Suggestion, Community } from "./McpSettings";
 const DEFAULT_BASE = "http://127.0.0.1:8765";
 const STORAGE_KEY = "ai-eco-backend-url";
+const MODEL_SETTINGS_KEY = "raphael-model-settings";
+
+export interface ModelSettings {
+  provider: "ollama";
+  endpoint: string;
+  model: string;
+  temperature: number;
+  top_p: number;
+  top_k: number;
+  repeat_penalty: number;
+  num_ctx: number;
+  num_predict: number;
+  timeout_s: number;
+  think: boolean;
+}
+
+export interface OllamaModelList {
+  provider: "ollama";
+  endpoint: string;
+  connected: boolean;
+  models: string[];
+}
+
+export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
+  provider: "ollama",
+  endpoint: "http://127.0.0.1:11434",
+  model: "",
+  temperature: 0.7,
+  top_p: 0.9,
+  top_k: 40,
+  repeat_penalty: 1.1,
+  num_ctx: 8192,
+  num_predict: 1024,
+  timeout_s: 180,
+  think: false,
+};
+
+export function readStoredModelSettings(): ModelSettings | null {
+  try {
+    const raw = window.localStorage.getItem(MODEL_SETTINGS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ModelSettings>;
+    return {
+      ...DEFAULT_MODEL_SETTINGS,
+      ...parsed,
+      provider: "ollama",
+      endpoint: typeof parsed.endpoint === "string" ? parsed.endpoint : DEFAULT_MODEL_SETTINGS.endpoint,
+      model: typeof parsed.model === "string" ? parsed.model : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function loadModelSettings(): ModelSettings {
+  return readStoredModelSettings() ?? { ...DEFAULT_MODEL_SETTINGS };
+}
+
+export function storeModelSettings(settings: ModelSettings): void {
+  try {
+    window.localStorage.setItem(MODEL_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // The running app still uses settings when local persistence is unavailable.
+  }
+}
 
 function sanitizeBase(raw: string): string {
   const value = raw.trim().replace(/\/$/, "");
@@ -177,6 +243,12 @@ async function request<T>(base: string, path: string, init?: RequestInit): Promi
   }
   if (!response.ok) {
     const detail = await response.text();
+    if (response.status === 404 && detail.includes('"unknown route"')) {
+      throw new BackendError(
+        404,
+        "The backend at " + safeBase + " does not support " + path + ". It is likely an older Raphael process. Close the old backend and restart Raphael so the updated settings routes can load.",
+      );
+    }
     throw new BackendError(response.status, `${response.status}: ${detail}`);
   }
   return (await response.json()) as T;
@@ -186,7 +258,18 @@ export function makeApi(base: string) {
   const safeBase = sanitizeBase(base);
   return {
     base: safeBase,
+    mcpServers: () => request<{ servers: ServerView[] }>(safeBase, "/mcp/servers"),
+    discoverMcp: () => request<{ discovered: Suggestion[]; warnings: string[]; community: Community[] }>(safeBase, "/mcp/discover"),
+    saveMcp: (config: McpConfig) => request<{ servers: ServerView[] }>(safeBase, "/mcp/servers", { method: "POST", body: JSON.stringify(config) }),
+    enableMcp: (id: string) => request<{ servers: ServerView[] }>(safeBase, "/mcp/enable", { method: "POST", body: JSON.stringify({ id, approved: true }) }),
+    disableMcp: (id: string) => request<{ servers: ServerView[] }>(safeBase, "/mcp/disable", { method: "POST", body: JSON.stringify({ id }) }),
     health: () => request<{ status: string }>(safeBase, "/health"),
+    getModelSettings: () => request<ModelSettings>(safeBase, "/settings/model"),
+    saveModelSettings: (settings: ModelSettings) => request<ModelSettings>(safeBase, "/settings/model", {
+      method: "POST", body: JSON.stringify(settings),
+    }),
+    ollamaModels: (endpoint: string) =>
+      request<OllamaModelList>(safeBase, `/settings/ollama/models?endpoint=${encodeURIComponent(endpoint)}`),
     submitGoal: (goal: string) => request<TaskView>(safeBase, "/tasks", {
       method: "POST", body: JSON.stringify({ goal }),
     }),

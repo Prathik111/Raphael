@@ -23,6 +23,7 @@ Permission → Authorization → ToolRunner.**
 | 13 | Audit tampering | Hash-chained append-only log; linkage-walk verification | Gate 31 tamper test |
 | 14 | Sandbox escape | Timeouts/cwd/env/serialization enforced; residual risk documented, policy still applies | Gate 30 escape-composition test |
 | 15 | Infinite loops (retry/comms/scheduler) | Bounded retries, hop/TTL limits, idempotency keys, circuit breaker | Gates 8/10/19/39/43 tests |
+| 16 | Malicious MCP configuration/schema/server | Inert discovery; explicit server enablement; per-call approval; bounded non-regex schemas; secret checks; pinned HTTP destinations; stable reconnect replay identity | `test_mcp_manager.py`, `test_mcp_transport.py`, `test_mcp_live.py` |
 
 Trust tiers: UNTRUSTED (external content, new devices) → LIMITED
 (approved skills, paired devices, spawned agents) → TRUSTED (operator

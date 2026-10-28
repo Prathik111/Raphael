@@ -45,6 +45,10 @@ class RuntimeAPI:
         event_store: Any | None = None,
         on_cancel: Callable[[str], None] | None = None,
         approvals: Any | None = None,
+        model_settings_getter: Callable[[], dict[str, Any]] | None = None,
+        model_settings_setter: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        ollama_checker: Callable[[str], dict[str, Any]] | None = None,
+        mcp: Any = None,
     ) -> None:
         self._runtime = runtime
         self._dispatch = dispatch
@@ -54,6 +58,38 @@ class RuntimeAPI:
         self._event_store = event_store
         self._on_cancel = on_cancel
         self._approvals = approvals
+        self._model_settings_getter = model_settings_getter
+        self._model_settings_setter = model_settings_setter
+        self._ollama_checker = ollama_checker
+        self._mcp = mcp
+
+    def mcp_action(self, action: str, payload: Any = None) -> dict:
+        """Operator configuration only; there is deliberately no direct tool-call route."""
+        if self._mcp is None:
+            raise ApiError("unsupported", "MCP is not available in this runtime")
+        try:
+            if action == "list":
+                return self._mcp.list()
+            if action == "discover":
+                return self._mcp.discover()
+            if action == "save":
+                if not isinstance(payload, dict):
+                    raise ValueError("MCP configuration must be an object")
+                return self._mcp.save(payload)
+            if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):
+                raise ValueError("MCP server id is required")
+            if action == "enable":
+                if payload.get("approved") is not True:
+                    raise ApiError("forbidden", "Review and approve the server before enabling it")
+                return self._mcp.enable(payload["id"])
+            if action == "disable":
+                return self._mcp.disable(payload["id"])
+            raise ValueError("Unknown MCP action")
+        except ApiError:
+            raise
+        except (ValueError, TypeError):
+            # Pydantic errors include the original input, which may contain a credential.
+            raise ApiError("malformed_request", "Invalid MCP configuration or action. Use a unique id, direct executable or secure URL, and environment variable names only.") from None
 
     # -- tasks -----------------------------------------------------------
 
@@ -235,6 +271,48 @@ class RuntimeAPI:
             "pressure": snapshot.pressure.value,
             "capabilities": {n: v for n, v in snapshot.capabilities.model_dump().items() if v},
         }
+
+    def get_model_settings(self) -> dict[str, Any]:
+        """Return non-secret model-provider settings for the desktop UI."""
+        if self._model_settings_getter is None:
+            from ai_ecosystem.intelligence.models.ollama import OllamaSettings
+
+            return OllamaSettings().model_dump()
+        return self._model_settings_getter()
+
+    def update_model_settings(self, settings: Any) -> dict[str, Any]:
+        """Validate and apply provider settings to the active model router."""
+        if not isinstance(settings, dict):
+            raise ApiError("malformed_request", "model settings must be a JSON object")
+        if self._model_settings_setter is None:
+            raise ApiError("unsupported", "runtime model settings are not configurable")
+        try:
+            return self._model_settings_setter(settings)
+        except ApiError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise ApiError("malformed_request", str(exc)) from exc
+
+    def check_ollama(self, endpoint: str = "http://127.0.0.1:11434") -> dict[str, Any]:
+        """Probe a local Ollama endpoint and return its installed model tags."""
+        checker: Callable[[str], dict[str, Any]]
+        if self._ollama_checker is None:
+            from ai_ecosystem.intelligence.models.ollama import check_ollama
+
+            def default_checker(value: str) -> dict[str, Any]:
+                return check_ollama(value)
+
+            checker = default_checker
+        else:
+            checker = self._ollama_checker
+        try:
+            return checker(endpoint)
+        except ApiError:
+            raise
+        except ValueError as exc:
+            raise ApiError("malformed_request", str(exc)) from exc
+        except Exception as exc:
+            raise ApiError("unavailable", str(exc)) from exc
 
     def get_models(self) -> list[dict[str, Any]]:
         """Provider ids + capabilities only (never credentials)."""

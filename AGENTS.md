@@ -36,6 +36,7 @@ The immediate engineering priority is the **agent core and trustworthy execution
 - Authorization and sandboxing are separate boundaries.
 - Cancellation must not be represented as successful termination when work may still be running.
 - Replay protection must survive process restarts and must not rely only on model-controlled IDs.
+- MCP configuration discovery never authorizes server startup. Dynamic tool names must preserve a stable, registry-owned semantic action identity across reconnects.
 - Security failures fail closed.
 - Secrets must not enter prompts, memory, skills, logs, events, or model context.
 - Data egress is classification/policy controlled.

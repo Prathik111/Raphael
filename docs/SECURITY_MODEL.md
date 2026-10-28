@@ -39,11 +39,23 @@ Assume model output is attacker-controlled. Prompt instructions do not constitut
 ### Tool/MCP boundary
 FastMCP or another tool protocol cannot bypass Raphael's registry, policy, authorization, runner, audit and verification layers.
 
+MCP discovery is inert. Explicit operator enablement permits a server process or
+connection; it is not model-generated authorization. Every discovered tool requires
+per-action approval, ignores server risk hints, and passes bounded schema validation
+and ToolRunner. Dynamic reconnect names retain stable registry-owned replay identity.
+HTTP sockets use the validated literal IP while preserving TLS identity, and reject
+redirects, proxy inheritance, and origin changes. Secret/environment-value checks
+apply to metadata, argument egress and returned output. See `MCP.md`; local MCP
+servers run with account access and are not a completed OS sandbox boundary.
+
 ### Memory boundary
 Memory can be poisoned. A `verified` field supplied by the memory producer is not an authoritative verification receipt. Promotion requires independent verification/receipt semantics.
 
 ### Data boundary
 Data classes are centralized. Sensitive/secret information must not be sent to a model/provider or remote worker unless the applicable egress policy explicitly permits it.
+
+### Desktop model configuration
+Provider settings and installed-model discovery use the authenticated runtime API. The currently selectable Ollama provider is local-only: endpoint validation accepts localhost/loopback addresses, and native provider requests disable redirects and environment proxies. LAN or hosted endpoints need an explicit egress/profile design before being exposed as selectable providers. Provider settings and model output do not change tool authorization.
 
 ### Remote boundary
 Remote APIs and nodes must use authenticated, appropriately secure transport. A remote bind must not silently fall back to plaintext HTTP.
