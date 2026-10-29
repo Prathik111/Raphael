@@ -2,9 +2,11 @@
 
 from ai_ecosystem.tools.local import (
     filesystem_tools,
+    clock_tools,
     git_tools,
     respond_tools,
     terminal_tools,
+    web_search_tools,
 )
 from ai_ecosystem.tools.mcp import adapt_tool, connect_server, is_available
 from ai_ecosystem.tools.registry import (
@@ -28,8 +30,10 @@ __all__ = [
     "check_arguments",
     "connect_server",
     "filesystem_tools",
+    "clock_tools",
     "git_tools",
     "is_available",
     "respond_tools",
     "terminal_tools",
+    "web_search_tools",
 ]

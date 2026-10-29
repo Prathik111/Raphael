@@ -31,6 +31,15 @@ Risk is derived from what an operation can do, its arguments/target/scope and po
 
 Critical actions must be approval-gated according to policy. A policy that both requires approval and unconditionally denies the same class is contradictory; implementation must make the intended decision explicit.
 
+In the local production composition, network capabilities raise a tool to HIGH
+risk. HIGH and CRITICAL actions enter the durable human approval queue for the
+exact tool and arguments. Delegated agents use their own tool scopes and the
+same approval store; approving delegation does not approve the child's tools.
+Plain `agent.respond` text is output data, so path traversal and shell token
+scans do not apply to its `text` field. This exception is tied to the registered
+reply-only tool contract; it does not exempt terminal, filesystem, or network
+tool arguments from risk assessment.
+
 ## Trust boundaries
 
 ### Model boundary

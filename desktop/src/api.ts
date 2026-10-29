@@ -143,6 +143,7 @@ export interface TaskResult {
   evidence: string[];
   timings: Record<string, number>;
   error: string;
+  sources?: { title: string; origin: string; url: string }[];
 }
 
 export interface ModelInfo {
@@ -279,7 +280,7 @@ export function makeApi(base: string) {
     taskResult: (id: string) => request<TaskResult>(safeBase, `/tasks/${id}/result`),
     cancelTask: (id: string) => request<TaskView>(safeBase, `/tasks/${id}/cancel`, { method: "POST" }),
     taskEvents: (id: string, since = 0) => request<TaskEvent[]>(safeBase, `/tasks/${id}/events?since=${since}`),
-    agentStatus: () => request<{ tasks: Record<string, number> }>(safeBase, "/agents/status"),
+    agentStatus: () => request<{ tasks: Record<string, number>; subagents: { id: string; name: string; status: string }[]; subagent_count: number }>(safeBase, "/agents/status"),
     awareness: () => request<Record<string, unknown>>(safeBase, "/awareness"),
     models: () => request<ModelInfo[]>(safeBase, "/models"),
     skills: () => request<SkillInfo[]>(safeBase, "/skills"),

@@ -61,6 +61,9 @@ def _scripted_provider(spec, plan):
     def handle(req: ModelRequest):
         if req.prompt.startswith("UNDERSTAND:"):
             return ModelResponse(structured=dict(spec))
+        if req.system.startswith("SEARCH_QUERY:"):
+            data = json.loads(req.prompt)
+            return ModelResponse(structured={"query": spec.get("research_query") or data["original_task"]})
         return ModelResponse(structured=json.loads(json.dumps(plan)))
 
     return MockModelProvider("mock", handler=handle)
@@ -146,6 +149,80 @@ def _ordered_kinds(events):
 
 def test_awareness_can_skip_research_legally():
     assert is_valid_transition(TaskState.AWARENESS, TaskState.PLANNING)
+
+
+def test_failed_search_exposes_tool_reason_in_result(tmp_path):
+    spec = {"title": "search", "constraints": [], "desired_outcome": "search", "needs_research": False}
+    plan = {"goal": "search", "steps": [_step("s1", [], ["web.search"])], "final_verification": "v"}
+    tool = Tool(name="web.search", input_schema={"required": []}, risk_level=RiskLevel.LOW)
+    agent, runtime, _, _ = _kit(tmp_path, [(tool, lambda args: ToolResult(success=False, error="search provider unavailable"))], _scripted_provider(spec, plan))
+    task, _ = runtime.manager.create_task("search the web", "search the web")
+    result = agent.run_task(task.id, AgentConfig(workspace=str(tmp_path)))
+    assert result.status == "FAILED"
+    assert "search provider unavailable" in result.error
+    assert "search provider unavailable" in runtime.manager.get_context(result.task_id).metadata["agent_result"]["error"]
+
+
+def test_model_identifies_research_gap_without_search_words(tmp_path):
+    queries = []
+    spec = {"title": "valuation", "constraints": [], "desired_outcome": "answer", "needs_research": True,
+            "research_gap": "current valuation is unknown", "research_query": "Anthropic IPO valuation"}
+    plan = {"goal": "valuation", "steps": [_step("s1", [], ["agent.respond"])], "final_verification": "v"}
+    plan["steps"][0]["arguments"] = {"text": "I found current sources."}
+    search = Tool(name="web.search", input_schema={"required": ["query"]}, risk_level=RiskLevel.LOW)
+    response = Tool(name="agent.respond", input_schema={"required": ["text"]}, risk_level=RiskLevel.LOW)
+
+    def search_handler(args):
+        queries.append(args["query"])
+        return ToolResult(success=True, output={"sources": [{"title": "Report", "origin": "example.com", "url": "https://example.com/report", "content": "Current valuation report"}]})
+
+    agent, runtime, _, _ = _kit(tmp_path, [(search, search_handler), (response, lambda args: ToolResult(success=True, output=args["text"]))], _scripted_provider(spec, plan), with_research=True)
+    try:
+        result = agent.run_goal("Analyze its present valuation.")
+        assert queries == ["Anthropic IPO valuation"]
+        assert runtime.manager.get_context(result.task_id).metadata["agent_result"]["sources"][0]["origin"] == "example.com"
+    finally:
+        runtime.shutdown()
+
+
+def test_date_question_uses_clock_and_returns_observed_date(tmp_path):
+    from datetime import datetime
+    from ai_ecosystem.tools.local.clock import clock_tools
+
+    queries = []
+    spec = {"title": "date", "constraints": [], "desired_outcome": "today's date", "needs_research": True,
+            "research_query": "Extract the specific day of today's date from the provided context."}
+    search = Tool(name="web.search", input_schema={"required": ["query"]}, risk_level=RiskLevel.LOW)
+    agent, runtime, _, _ = _kit(tmp_path, clock_tools() + [(search, lambda args: queries.append(args) or ToolResult(success=True, output={"sources": []}))], _scripted_provider(spec, {"goal": "unused", "steps": [], "final_verification": "unused"}), with_research=True)
+    try:
+        result = agent.run_goal("what is todays date?")
+        assert result.status == "COMPLETED"
+        assert str(datetime.now().year) in result.reply
+        assert queries == []
+    finally:
+        runtime.shutdown()
+
+
+def test_planned_search_instruction_is_rewritten_before_tool_call(tmp_path):
+    queries = []
+    plan = {"goal": "valuation", "steps": [_step("s1", [], ["web.search"])], "final_verification": "v"}
+    plan["steps"][0]["arguments"] = {"query": "Extract the valuation from the provided context."}
+
+    def model(request):
+        if request.prompt.startswith("UNDERSTAND:"):
+            return ModelResponse(structured={"title": "valuation", "needs_research": False})
+        if request.system.startswith("SEARCH_QUERY:"):
+            return ModelResponse(structured={"query": "Anthropic Claude IPO valuation"})
+        return ModelResponse(structured=plan)
+
+    tool = Tool(name="web.search", input_schema={"required": ["query"]})
+    agent, runtime, _, _ = _kit(tmp_path, [(tool, lambda args: queries.append(args["query"]) or ToolResult(success=True, output={"sources": []}))], MockModelProvider("mock", handler=model))
+    try:
+        result = agent.run_goal("Search the web about Claude IPO valuation")
+        assert result.status == "COMPLETED"
+        assert queries == ["Anthropic Claude IPO valuation"]
+    finally:
+        runtime.shutdown()
 
 
 def test_1_simple_read_task(tmp_path):

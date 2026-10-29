@@ -49,6 +49,7 @@ class RuntimeAPI:
         model_settings_setter: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         ollama_checker: Callable[[str], dict[str, Any]] | None = None,
         mcp: Any = None,
+        subagents: Any = None,
     ) -> None:
         self._runtime = runtime
         self._dispatch = dispatch
@@ -62,6 +63,7 @@ class RuntimeAPI:
         self._model_settings_setter = model_settings_setter
         self._ollama_checker = ollama_checker
         self._mcp = mcp
+        self._subagents = subagents
 
     def mcp_action(self, action: str, payload: Any = None) -> dict:
         """Operator configuration only; there is deliberately no direct tool-call route."""
@@ -242,7 +244,16 @@ class RuntimeAPI:
         counts: dict[str, int] = {}
         for task in self._runtime.manager._tasks.list():
             counts[task.state.value] = counts.get(task.state.value, 0) + 1
-        return {"tasks": counts}
+        agents = []
+        if self._subagents is not None:
+            agents = [
+                {"id": item.id, "name": item.name, "status": item.status.value}
+                for item in self._subagents._agents.list()  # noqa: SLF001 - redacted read-only view
+            ]
+        result = {"tasks": counts}
+        if self._subagents is not None:
+            result.update({"subagents": agents, "subagent_count": len(agents)})
+        return result
 
     def recent_permission_events(self, limit: int = 20) -> list[dict[str, Any]]:
         """Latest permission decisions across tasks (phone approval view)."""

@@ -95,6 +95,20 @@ def test_models_endpoint_empty_without_provider(tmp_path):
         stack.runtime.shutdown()
 
 
+def test_high_risk_search_creates_visible_approval(tmp_path):
+    from ai_ecosystem.core.models.enums import PermissionDecision
+
+    stack = build_stack(AppConfig(db_path=str(tmp_path / "serve.db"), api_port=0), workspace=str(tmp_path / "ws"))
+    try:
+        tool = stack.agent._registry.get("web.search")
+        call = stack.agent._registry.build_call("approval-probe", "web.search", {"query": "public topic", "max_results": 3})
+        permission = stack.agent._runner._authorizer.authorize(call.task_id, tool, call)
+        assert permission.decision is PermissionDecision.PENDING
+        assert any(item["tool"] == "web.search" for item in stack.api.list_approvals())
+    finally:
+        stack.runtime.shutdown()
+
+
 def test_result_endpoint_serves_persisted_summary(tmp_path):
     config = AppConfig(db_path=str(tmp_path / "serve.db"), api_port=0)
     stack = build_stack(config, workspace=str(tmp_path / "ws"))

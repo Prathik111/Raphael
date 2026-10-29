@@ -338,6 +338,17 @@ def test_respond_returns_text_unchanged():
     assert result.output == "Hello there!"
 
 
+def test_respond_punctuation_does_not_request_shell_approval():
+    from ai_ecosystem.security.policy.engines import RiskEngine, RiskContext
+    from ai_ecosystem.tools import respond_tools
+
+    tool, _ = respond_tools()[0]
+    from ai_ecosystem.core.models.domain import ToolCall
+
+    assessment = RiskEngine().assess("t", tool, ToolCall(task_id="t", tool=tool.name, arguments={"text": "Today is October 29, 2026. **Hello!**"}), RiskContext())
+    assert assessment.level is RiskLevel.LOW
+
+
 def test_respond_rejects_missing_or_huge_text():
     from ai_ecosystem.tools import respond_tools
 

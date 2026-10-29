@@ -206,6 +206,10 @@ class RiskEngine:
         note,
         literal_argv: bool = False,
     ) -> None:
+        # This contract only returns model text to the same user. It neither
+        # interprets the text as a path nor passes it to a shell.
+        if tool.name == "agent.respond" and key == "text":
+            return
         if ".." in value.replace("\\", "/").split("/"):
             escalate(RiskLevel.CRITICAL, f"path traversal in {key!r}")
             return

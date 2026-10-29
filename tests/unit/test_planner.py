@@ -47,6 +47,39 @@ def _backend(payload):
     )
 
 
+def test_truncated_plan_for_explicit_search_uses_validated_query():
+    backend = ModelReasoningBackend(MockModelProvider("m", handler=lambda req: ModelResponse(text='{"goal": "unfinished"')), max_repair_attempts=1)
+    plan = backend.plan("search the web about claude ipo valuation", ["web.search"])
+    assert plan.steps[0].tools == ["web.search"]
+    assert plan.steps[0].arguments == {"query": "claude ipo valuation", "max_results": 5}
+
+
+def test_truncated_plan_for_unrelated_action_still_fails():
+    backend = ModelReasoningBackend(MockModelProvider("m", handler=lambda req: ModelResponse(text='{"goal": "unfinished"')), max_repair_attempts=1)
+    with pytest.raises(ModelMalformedError):
+        backend.plan("delete the archive", ["web.search"])
+
+
+def test_date_question_uses_trusted_clock_without_model_plan():
+    backend = ModelReasoningBackend(MockModelProvider("m", handler=lambda req: ModelResponse(text="not JSON")))
+    plan = backend.plan("what date is it today", ["system.date", "agent.respond"])
+    assert plan.steps[0].tools == ["system.date"]
+
+
+@pytest.mark.parametrize("question", ["todays date", "today's date", "What is today's date?", "what date is it today", "Please tell me today's date.", "Can you tell me what day is it today?"])
+def test_date_question_variants_share_clock_routing(question):
+    from ai_ecosystem.tools.local.clock import is_date_question
+
+    assert is_date_question(question)
+
+
+@pytest.mark.parametrize("question", ["Search today's news", "Schedule a meeting on today's date", "What happened on this date in 1980?"])
+def test_date_routing_preserves_other_tasks(question):
+    from ai_ecosystem.tools.local.clock import is_date_question
+
+    assert not is_date_question(question)
+
+
 def _step(sid, deps=(), tools=("filesystem.read",), **kw):
     args = {
         "id": sid,

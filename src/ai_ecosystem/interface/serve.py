@@ -14,6 +14,8 @@ from typing import Any
 from ai_ecosystem.agent.executor import ParallelExecutor
 from ai_ecosystem.agent.executor.cancellation import CancellationToken
 from ai_ecosystem.agent.orchestrator import AgentConfig, SingleAgent
+from ai_ecosystem.agent.multi.definitions import AgentDefinition, AgentStatus
+from ai_ecosystem.agent.multi.manager import AgentManager, AgentRegistry
 from ai_ecosystem.agent.planner.backend import ModelReasoningBackend
 from ai_ecosystem.agent.verifier import Verifier
 from ai_ecosystem.core.config import AppConfig
@@ -66,13 +68,16 @@ from ai_ecosystem.tools import (
     ToolRegistry,
     ToolRunner,
     filesystem_tools,
+    clock_tools,
     git_tools,
     respond_tools,
     terminal_tools,
+    web_search_tools,
 )
 from ai_ecosystem.tools.registry import ToolHandler
 from ai_ecosystem.tools.registry.execution_ledger import ExecutionLedger
 from ai_ecosystem.tools.mcp.manager import MCPManager
+from ai_ecosystem.tools.local.delegate import delegate_tools
 
 log = logging.getLogger("ai_ecosystem.serve")
 
@@ -245,10 +250,27 @@ def build_stack(
         list(filesystem_tools(workspace))
         + list(git_tools(workspace))
         + list(respond_tools())
+        + list(clock_tools())
         + list(terminal_tools(workspace, env_allowlist or None))
+        + list(web_search_tools())
     )
     for tool, handler in bundles:
         registry.register(tool, handler)
+    subagents = AgentRegistry(runtime.db, bus)
+    researcher = subagents.lookup("researcher")
+    if researcher is None:
+        researcher = subagents.register(
+            AgentDefinition(
+                id="researcher",
+                name="Research specialist",
+                role="research",
+                description="Searches the public web and returns attributed source data.",
+                capabilities=["research", "web search"],
+                allowed_tools=["web.search"],
+            )
+        )
+    if researcher.status is AgentStatus.CREATED:
+        subagents.set_status(researcher.id, AgentStatus.READY)
     mcp = MCPManager(registry, runtime.db, workspace)
     floor = {
         "LOW": RiskLevel.LOW,
@@ -256,7 +278,14 @@ def build_stack(
         "HIGH": RiskLevel.HIGH,
         "CRITICAL": RiskLevel.CRITICAL,
     }.get(config.require_approval.strip().upper())
+    # The local policy grants only through MEDIUM. HIGH actions must enter
+    # the approval queue, including network tools and delegated actions.
+    if floor is None or floor is RiskLevel.CRITICAL:
+        floor = RiskLevel.HIGH
     approval_store = ApprovalStore(SqliteApprovalRepository(runtime.db))
+    subagent_manager = AgentManager(subagents, runtime, registry, bus=bus, approval_store=approval_store)
+    for tool, handler in delegate_tools(subagent_manager, registry):
+        registry.register(tool, handler)
     authorizer = AuthorizationManager(
         registry,
         policy_engine=PolicyEngine(
@@ -454,6 +483,7 @@ def build_stack(
         model_settings_setter=set_model_settings,
         ollama_checker=check_ollama,
         mcp=mcp,
+        subagents=subagents,
     )
     token = None if no_auth else auth_token
     server = LocalHttpServer(api, host=config.api_host, port=config.api_port, auth_token=token)

@@ -30,7 +30,7 @@ from ai_ecosystem.core.errors.exceptions import (
     ResourceNotFoundError,
 )
 from ai_ecosystem.core.events.bus import Event, EventBus
-from ai_ecosystem.core.models.enums import EventType
+from ai_ecosystem.core.models.enums import EventType, RiskLevel
 from ai_ecosystem.core.persistence.sqlite import Database, _SnapshotTable
 from ai_ecosystem.core.runtime.task_manager import AgentRuntime
 from ai_ecosystem.security.policy.engines import (
@@ -137,6 +137,7 @@ class AgentManager:
         tools: ToolRegistry,
         max_workers: int = 4,
         bus: EventBus | None = None,
+        approval_store: Any = None,
     ) -> None:
         if max_workers < 1:
             raise DomainValidationError("max_workers must be >= 1")
@@ -146,6 +147,7 @@ class AgentManager:
         self._tasks = AgentTaskRepository(runtime.db)
         self._max_workers = max_workers
         self._bus = bus or runtime.bus
+        self._approval_store = approval_store
 
     @property
     def task_repository(self) -> AgentTaskRepository:
@@ -200,9 +202,11 @@ class AgentManager:
             auto_grant_up_to=definition.risk_profile,
             agent_scopes={agent_id: set(definition.allowed_tools)},
             strict_agent_scopes=True,
+            approval_required_from=RiskLevel.HIGH if self._approval_store is not None else None,
         )
         authorizer = AuthorizationManager(
-            self._tools, policy_engine=PolicyEngine(policy), context=RiskContext(agent_id=agent_id)
+            self._tools, policy_engine=PolicyEngine(policy), context=RiskContext(agent_id=agent_id),
+            approval_store=self._approval_store,
         )
         return ToolRunner(self._tools, authorizer, self._bus), authorizer
 

@@ -160,3 +160,34 @@ See [MCP.md](MCP.md) for contracts, limits, and unimplemented authentication fea
 The desktop uses a single centered conversation column inside the area beside the
 sidebar. Response and composer widths/offsets share CSS variables at each breakpoint.
 Pending approvals are polled independently of local submission state.
+
+The runtime composition root registers `web.search` as a bounded public search
+adapter. Search requests remain ordinary registered tool calls, so policy,
+authorization, audit, timeout, and egress classification apply before any
+network request. Search results are untrusted source data and are fed into the
+existing research pipeline rather than treated as instructions.
+For a completed search step, the single-agent reply path requests a separate
+model synthesis over bounded snippets and appends observed source links. The
+result API includes bounded source metadata for the desktop's selected-chat
+publisher list. This synthesis does not authorize further tools.
+The understanding phase can identify a task-specific knowledge gap and focused
+query. The research phase runs the proposed search through ToolRunner and
+passes attributed snippets to the planner so it can continue the original
+task, with normal policy and approval applied to the search action.
+After exhausted planner repair on an explicit search request, a fixed search
+plan is validated against registered tools. This recovers from truncated local
+model JSON without granting tool authority or falling back for other actions.
+Standalone local-date requests use one shared recognizer in understanding and
+planning. Primary-agent research and planned `web.search` steps use a separate
+bounded query-formulation model call over the original task and information gap.
+Intermediate model instructions are not used as the search query. Formulated
+queries are checked for known meta-instructions, dropped task acronyms, and
+unsupported years, with one correction attempt. The resulting query enters
+normal tool authorization and approval. Failure to formulate a valid query
+stops the task before search. These checks do not prove semantic relevance.
+
+The same composition root registers `agent.delegate` and a scoped research
+specialist. Delegation is approval-gated and creates a child task with a
+bounded plan; the child uses a separate allow-list-scoped runner and its result
+is returned as untrusted data. The parent cannot delegate arbitrary executable
+text or expand the child's authority.

@@ -12,8 +12,6 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from ai_ecosystem.agent.recovery.classification import FailureClassifier
-from ai_ecosystem.agent.recovery.policy import RetryPolicy
 from ai_ecosystem.intelligence.research.models import DuplicateRef, ResearchQuery, Source
 from ai_ecosystem.tools.registry.registry import ToolRegistry
 from ai_ecosystem.tools.registry.runner import ToolRunner
@@ -53,17 +51,21 @@ class SourceCollector:
         runner: ToolRunner,
         registry: ToolRegistry,
         search_tool: str = "web.search",
-        retry_policy: RetryPolicy | None = None,
+        retry_policy: Any = None,
         max_attempts: int = 2,
     ) -> None:
         self._runner = runner
         self._registry = registry
         self._search_tool = search_tool
+        from ai_ecosystem.agent.recovery.policy import RetryPolicy
+
         self._retry_policy = retry_policy or RetryPolicy(max_attempts=1)
         self._max_attempts = max(1, max_attempts)
 
     def collect(self, query: ResearchQuery, task_id: str = "") -> Collected:
         """Run the search tool; validate, dedup, and return sources."""
+        from ai_ecosystem.agent.recovery.classification import FailureClassifier
+
         last_error = ""
         attempts = 0
         for attempt in range(1, self._max_attempts + 1):

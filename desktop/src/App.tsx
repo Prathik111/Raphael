@@ -17,6 +17,7 @@ export function App() {
   const [active, setActive] = useState<Chat | null>(null);
   const [prompt, setPrompt] = useState("");
   const [reply, setReply] = useState("");
+  const [retrievedSites, setRetrievedSites] = useState<string[]>([]);
   const [approvals, setApprovals] = useState<ApprovalView[]>([]);
   const [decidingApproval, setDecidingApproval] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,6 +39,7 @@ export function App() {
   const [providerReady, setProviderReady] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [runtimeOverview, setRuntimeOverview] = useState<{ subagent_count: number }>({ subagent_count: 0 });
 
   // The Tauri shell exposes the backend credential over local IPC. Load it before
   // issuing any HTTP request; otherwise the authenticated API correctly returns 401.
@@ -124,6 +126,21 @@ export function App() {
     return () => { mounted = false; };
   }, [api, authReady, authError]);
 
+  useEffect(() => {
+    if (!authReady || authError) return;
+    let mounted = true;
+    const refreshOverview = async () => {
+      try {
+        const agents = await api.agentStatus();
+        if (!mounted) return;
+        setRuntimeOverview({ subagent_count: agents.subagent_count ?? 0 });
+      } catch { /* status widgets are best effort */ }
+    };
+    void refreshOverview();
+    const timer = window.setInterval(() => void refreshOverview(), 5000);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, [api, authReady, authError]);
+
   // Discover installed models automatically on startup and whenever the Ollama endpoint changes.
   useEffect(() => {
     if (!providerReady || !authReady || authError) return;
@@ -195,9 +212,10 @@ export function App() {
   }, [api]);
 
   const openChat = useCallback(async (chat: Chat) => {
-    setActive(chat); setError(""); setReply(chat.reply ?? "");
+    setActive(chat); setError(""); setReply(chat.reply ?? ""); setRetrievedSites([]);
     try {
       const result = await api.taskResult(chat.task_id);
+      setRetrievedSites([...new Set((result.sources ?? []).map((source) => source.origin).filter(Boolean))]);
       if (result.status === "FAILED") {
         setError(result.error || result.summary || "Raphael failed to complete this task.");
         setReply("");
@@ -218,6 +236,7 @@ export function App() {
         const current = await api.getTask(task.task_id);
         if (!current.completed && current.state !== "FAILED" && current.state !== "CANCELLED") continue;
         const result = await api.taskResult(task.task_id);
+        setRetrievedSites([...new Set((result.sources ?? []).map((source) => source.origin).filter(Boolean))]);
         if (result.status === "FAILED" || current.state === "FAILED") {
           const message = result.error || result.summary || "Raphael failed to complete the task.";
           setReply(""); setError(message); setActive((prev) => ({ ...(prev ?? task), ...current }));
@@ -237,7 +256,7 @@ export function App() {
     event?.preventDefault();
     const goal = prompt.trim();
     if (!goal || busy || !authReady || authError || !providerReady || !appliedModel.trim()) return;
-    setError(""); setReply(""); setBusy(true); setActive(null);
+    setError(""); setReply(""); setRetrievedSites([]); setBusy(true); setActive(null);
     try {
       const task = await api.submitGoal(goal);
       setActive({ ...task, title: titleFor(goal) }); setPrompt(""); void waitForResult(task);
@@ -245,7 +264,7 @@ export function App() {
   };
 
   const newChat = () => {
-    setActive(null); setReply(""); setPrompt(""); setError(""); setBusy(false);
+    setActive(null); setReply(""); setRetrievedSites([]); setPrompt(""); setError(""); setBusy(false);
   };
 
   const checkOllama = async (testConnection = false) => {
@@ -332,9 +351,10 @@ export function App() {
         <div className="brand-lockup"><div className="brand-mark">R</div><div><strong>Raphael</strong><span>AI operating layer</span></div></div>
         <button className="new-chat" onClick={newChat}>＋&nbsp; New chat</button><div className="sidebar-label">Recent</div>
         <div className="recent-list">{chats.length === 0 && <div className="recent-empty">No recent conversations</div>}{chats.map((chat) => <button key={chat.task_id} className={`recent-item ${active?.task_id === chat.task_id ? "active" : ""}`} onClick={() => void openChat(chat)}><span className="recent-title">{chat.title || "Untitled conversation"}</span><span className="recent-date">{new Date(chat.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span></button>)}</div>
+        <div className="runtime-overview" aria-label="Agent capabilities"><div className="runtime-overview-head"><span>Live capabilities</span><span className="runtime-count">{runtimeOverview.subagent_count} subagent{runtimeOverview.subagent_count === 1 ? "" : "s"}</span></div><div className="runtime-overview-row"><span className="runtime-dot" /> Web search</div><div className="runtime-websites">{retrievedSites.length > 0 ? retrievedSites.map((site) => <span key={site} title={site}>{site}</span>) : <span>No sites retrieved in this chat</span>}</div></div>
         <div className="sidebar-bottom"><button className="side-action" onClick={() => { setBackendUrl(api.base); setModelSettings({ ...appliedSettings.current }); setSettingsOpen(true); }}>⚙&nbsp; Settings</button></div>
       </aside>
-      <main className="raphael-main"><div className="top-fade" /><section className={`response-shell ${active || busy || reply || error ? "visible" : ""}`}><div className="response-card"><div className="response-avatar"><span>R</span></div><div className="response-content"><div className="response-head"><span>Raphael</span>{busy && <i className="thinking-dot" aria-label="Thinking" />}</div>{busy && !reply && !error && <div className="response-loading"><span /><span /><span /></div>}{error && <div className="response-error">{error}</div>}{!busy && !error && reply && <div className="response-text">{reply}</div>}</div></div></section>
+        <main className="raphael-main"><div className="top-fade" /><section className={`conversation-thread ${active || busy || reply || error ? "visible" : ""}`} aria-label="Conversation">{active && <article className="message user-message"><div className="message-label">You</div><div className="message-body">{active.title}</div></article>}{(busy || reply || error) && <article className="message assistant-message"><div className="message-avatar">R</div><div className="message-body"><div className="message-label">Raphael{busy && <i className="thinking-dot" aria-label="Thinking" />}</div>{busy && !reply && !error && <div className="response-loading"><span /><span /><span /></div>}{error && <div className="response-error">{error}</div>}{!busy && !error && reply && <div className="response-text">{reply}</div>}</div></article>}</section>
         {!settingsOpen && connectionError && <div className="provider-connection-error" role="alert">{connectionError} Open Settings to test the connection.</div>}
         {approvals.length > 0 && <section className="approval-panel" aria-label="Tool approvals">{approvals.map((item) => <article key={item.id}><strong>Allow this tool call?</strong><p>{item.tool}</p><pre>{JSON.stringify(item.arguments, null, 2)}</pre><small>{item.reason}</small><div className="mcp-actions"><button type="button" className="ghost" disabled={!!decidingApproval} onClick={() => void decideApproval(item.id, false)}>Deny</button><button type="button" className="save" disabled={!!decidingApproval} onClick={() => void decideApproval(item.id, true)}>Approve once</button></div></article>)}</section>}
         <form className="floating-composer" onSubmit={submit}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask Raphael anything…" rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit(); } }} /><button className="send-button" type="submit" disabled={!prompt.trim() || busy || !authReady || !!authError || !providerReady || !appliedModel.trim()} aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4.8 16-3.3-6.7L4 12Zm7.9 1.3 3.2 6.5L20 4l-8.1 9.3Z" /></svg></button></form>

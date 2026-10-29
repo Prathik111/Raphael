@@ -40,10 +40,10 @@ class ResearchManager:
         self._extractor = EvidenceExtractor()
         self._bus = bus
 
-    def research(self, query: ResearchQuery) -> ResearchResult:
+    def research(self, query: ResearchQuery, task_id: str = "") -> ResearchResult:
         """Collect, extract, rank, and report -- conflicts preserved."""
         self._emit(EventType.RESEARCH_STARTED, "", {"query": query.query})
-        collected = self._collector.collect(query)
+        collected = self._collector.collect(query, task_id=task_id)
         for reason in collected.rejected:
             self._emit(EventType.SOURCE_REJECTED, "", {"reason": reason})
         sources = collected.sources[: max(0, query.max_sources)]
